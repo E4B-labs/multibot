@@ -170,7 +170,10 @@ function Shell() {
 }
 
 export default function App() {
-  const [gated, setGated] = useState(() => !emailGateDone());
+  // multibot: gate pokazujemy tylko przy pierwszym uruchomieniu (brak tokena
+  // w localStorage). Gdy token już jest — czyli po każdym deploy/reloadu —
+  // onboarding nie wraca, bo użytkownik serwer już skonfigurował.
+  const [gated, setGated] = useState(() => !emailGateDone() && !getAuthToken());
   // Sesja z logowania Google siedzi w ciasteczku HttpOnly, więc `getAuthToken`
   // jej nie widzi — `LoginScreen` sam sprawdza `/api/auth/status` i wpuszcza.
   const [authenticated, setAuthenticated] = useState(() => Boolean(getAuthToken()));
