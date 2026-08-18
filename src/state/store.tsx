@@ -261,12 +261,19 @@ function reducer(state: AppState, action: Action): AppState {
     case "configStatus":
       return { ...state, config: action.config };
     // multibot: selecting a bot leaves group conversation mode.
-    case "select":
-      return updateBot(
+    case "select": {
+      // Otwierany bot: czyść unread, ale ZOSTAW firstUnreadId — separator "NEW"
+      // ma być widoczny właśnie po otwarciu czatu (pokazuje granicę nowych).
+      const entered = updateBot(
         withMascotMotion({ ...state, selectedId: action.id, groupOpen: null, roomOpen: null }, action.id, "switch"),
         action.id,
-        (b) => ({ ...b, unread: false, firstUnreadId: null }),
+        (b) => ({ ...b, unread: false }),
       );
+      const leavingId = state.selectedId;
+      if (!leavingId || leavingId === action.id) return entered;
+      // Odchodzimy od innego bota → kasujemy jego marker (już go przejrzałeś).
+      return updateBot(entered, leavingId, (b) => ({ ...b, firstUnreadId: null }));
+    }
     case "selectComputer":
       return { ...state, selectedId: action.id };
     // optimistic card settle; the server's message.patch confirms it later
@@ -325,11 +332,20 @@ function reducer(state: AppState, action: Action): AppState {
         action.message.role === "user"
           ? (msgs: Message[]) => msgs.filter((m) => !(m.role === "user" && m.pending))
           : (msgs: Message[]) => msgs;
+      // multibot: jak czytasz bota na żywo (jest otwarty), granica "NEW" jest
+      // nieaktualna — kasujemy ją przy każdej nowej wiadomości na tym wątku.
+      // Gdy bot jest nieprzeczytany i nieotwarty, pierwsza taka wiadomość
+      // stawia granicę (odporne na kolejność SSE message vs bot.unread).
+      const viewing = bot.id === state.selectedId;
       const next = updateBot(state, bot.id, (b) => {
         const msgs = withoutPending(b.messages);
-        return msgs.some((m) => m.id === action.message.id)
-          ? { ...b, messages: msgs }
-          : { ...b, messages: [...msgs, action.message] };
+        const messages = msgs.some((m) => m.id === action.message.id)
+          ? msgs
+          : [...msgs, action.message];
+        const firstUnreadId = viewing
+          ? null
+          : (b.unread && !b.firstUnreadId ? action.message.id : b.firstUnreadId);
+        return { ...b, messages, firstUnreadId };
       });
       const motion =
         action.message.kind === "options"
