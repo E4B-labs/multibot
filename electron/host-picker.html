@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MultiBot — Host</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #070707;
+        color: #fcfcfc;
+        font: 15px -apple-system, system-ui, sans-serif;
+      }
+      .wrap {
+        max-width: 440px;
+        margin: 0 auto;
+        padding: 28px 20px 40px;
+      }
+      h1 {
+        font-size: 18px;
+        font-weight: 700;
+        margin: 0 0 4px;
+      }
+      p.sub {
+        color: #fcfcfc99;
+        margin: 0 0 18px;
+        font-size: 13px;
+      }
+      .card {
+        background: #111;
+        border: 1px solid #222;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 8px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+      .card .meta {
+        min-width: 0;
+      }
+      .card .name {
+        font-weight: 600;
+        font-size: 14px;
+      }
+      .card .url {
+        color: #fcfcfc99;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .actions {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      button {
+        background: #fcfcfc;
+        color: #070707;
+        border: none;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: transparent;
+        color: #fcfcfc;
+        border: 1px solid #333;
+      }
+      button.danger {
+        background: transparent;
+        color: #ff8080;
+        border: 1px solid #402020;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        background: #151515;
+        color: #fcfcfc;
+        border: 1px solid #262626;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 8px;
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        color: #fcfcfc99;
+        font-size: 12px;
+        margin: 10px 0 4px;
+      }
+      .err {
+        color: #ff8080;
+        font-size: 13px;
+        margin-top: 8px;
+        min-height: 16px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .row button {
+        flex: 1;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid #1c1c1c;
+        margin: 22px 0;
+      }
+      h2 {
+        font-size: 14px;
+        margin: 0 0 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Connect MultiBot</h1>
+      <p class="sub">Use this device, or switch to a remote host.</p>
+      <div id="list"></div>
+
+      <hr />
+      <h2>Add a remote host</h2>
+      <p class="sub">
+        Working path today: paste the access token from that host's Settings → Token. QR pairing and Google sign-in
+        arrive once the server side ships (see PLAN-COMPUTER.md A1, PLAN-CLIENTS.md C1).
+      </p>
+      <label for="name">Name</label>
+      <input id="name" placeholder="e.g. VPS" />
+      <label for="url">Host address</label>
+      <input id="url" placeholder="https://your-host.ts.net" autocapitalize="off" autocorrect="off" />
+      <label for="token">Access token</label>
+      <input id="token" type="password" placeholder="paste token" autocapitalize="off" autocorrect="off" />
+      <div class="row">
+        <button id="add">Add &amp; connect</button>
+        <button class="secondary" id="browserLogin" title="Seam — no Firebase project configured yet">
+          Sign in with browser (soon)
+        </button>
+      </div>
+      <div class="err" id="err"></div>
+    </div>
+    <script src="host-picker-renderer.js"></script>
+  </body>
+</html>

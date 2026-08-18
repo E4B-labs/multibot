@@ -1,0 +1,7 @@
+name: slafy
+version: 1.0.0
+description: "Per-bot Playwright persistent context. Local, headed, no API key."
+author: slafy-bot
+kind: backend
+provides_browser_providers:
+  - slafy

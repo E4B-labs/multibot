@@ -1,0 +1,16 @@
+# Wpis katalogu slafy-bota. Format MINIMALNY (nie manifest_version 1 Hermesa):
+# name / display_name / description / url|command / transport? / auth /
+# tools_count? / featured. Klucze poza białą listą `app._SPEC_KEYS` NIE lecą do
+# `mcp_servers` w config.yaml — obce klucze potrafią wywalić wpis jako
+# "suspicious" (`hermes_cli/mcp_security.py`, patrz docstring `server/plugins.py`).
+#
+# Jedyny wpis BEZ auth — remote MCP otwarty, więc `connected` od razu true
+# (nie ma czego autoryzować) i to on obsługuje ścieżkę install-bez-OAuth.
+name: context7
+display_name: Context7
+description: Aktualna dokumentacja dowolnej biblioteki, prosto ze źródła.
+url: https://mcp.context7.com/mcp
+transport: http
+tools_count: 2
+featured: true
+source: https://context7.com/

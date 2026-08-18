@@ -1,0 +1,101 @@
+appId: com.e4b-labs.multibot
+# Keep legacy appId so existing installs and macOS permissions upgrade in place.
+productName: MultiBot
+artifactName: MultiBot-${version}-${arch}.${ext}
+
+# In-app auto-update reads latest-mac.yml + the .zip from this PUBLIC releases
+# repo (separate from the source repo). Public → no token on users' machines.
+# Baked into app-update.yml; `latest-mac.yml` is emitted here even with
+# --publish never, and uploaded to the GitHub release alongside the artifacts.
+publish:
+  - provider: github
+    owner: E4B-labs
+    repo: multibot
+
+directories:
+  buildResources: build
+  output: release
+
+# The app is three self-contained pieces, none needing node_modules at
+# runtime: the Electron main/preload (plain .mjs/.cjs), the built UI
+# (Vite → ui/), and the compiled harness server (tsc → server/), both
+# shipped in Resources and run on Electron's own Node via
+# ELECTRON_RUN_AS_NODE (the agentcal-hq pattern).
+files:
+  - electron/**
+  - "!electron/resources/speech-helper"
+  - "!**/node_modules/**"
+  - package.json
+
+asar: true
+
+extraResources:
+  - from: dist
+    to: ui
+  - from: dist-server
+    to: server
+  # multibot: kod silnika jedzie w paczce, jego Python NIE — ten dociąga
+  # scripts/provision-engine.mjs do userData przy pierwszym starcie.
+  # Bez .venv (per-maszyna), bez testów, bez bytecodu.
+  - from: engine/server
+    to: engine/server
+    filter:
+      - "**/*"
+      - "!**/__pycache__/**"
+      - "!**/*.pyc"
+  - from: engine/requirements.txt
+    to: engine/requirements.txt
+  # multibot: provisioner runtime'u. Obok asara, nie w nim — main.mjs forkuje go
+  # przez utilityProcess tak samo jak `server/index.js`, a ta ścieżka jest tu
+  # sprawdzona.
+  - from: scripts/provision-engine.mjs
+    to: provision-engine.mjs
+  # multibot: platform-aware Claude Code installer used by Settings → CLI.
+  - from: scripts/install-claude.mjs
+    to: install-claude.mjs
+  - from: scripts/install-codex.mjs
+    to: install-codex.mjs
+
+mac:
+  # multibot: speech-helper to binarka ze Swifta (`pnpm build:speech`, swiftc
+  # tylko na macOS) — jako wpis globalny wywracała build --win, bo pliku na
+  # Windows nie ma. Sekcje `extraResources` łączą się z globalną.
+  extraResources:
+    - from: electron/resources/speech-helper
+      to: speech-helper
+  target:
+    - target: dmg
+      arch: arm64
+    - target: zip
+      arch: arm64
+  icon: build/icon.icns
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: MultiBot uses the microphone for voice dictation into the composer.
+    NSSpeechRecognitionUsageDescription: MultiBot transcribes your voice on-device to type messages for you.
+  # Notarization runs manually after the build (notarytool + staple),
+  # mirroring the BlueyLite ship_release.sh flow.
+  notarize: false
+
+dmg:
+  sign: true
+  artifactName: MultiBot-${version}.dmg
+
+# multibot: Windows. Bez podpisu (brak certyfikatu) — instalator pokaże
+# SmartScreen. icon.ico wygenerowana z build/icon-1024.png.
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false # instalacja per-user: bez UAC, apka pisze do %LOCALAPPDATA%
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: MultiBot-${version}-${arch}-setup.${ext}
