@@ -278,7 +278,7 @@ function NewSeparator() {
   return (
     <div className="flex items-center gap-3 py-1.5">
       <div className="h-px flex-1 bg-accent/30" />
-      <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-accent">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-accent">
         NEW
       </span>
       <div className="h-px flex-1 bg-accent/30" />
