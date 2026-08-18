@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowDown, Brain, CalendarClock, Check, Crosshair, Loader2, Monitor, Square, Wand2, X } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
@@ -273,6 +273,19 @@ function WorkingTimer({ since }: { since: number }) {
   return <span ref={ref} className="text-[12.5px] text-ink-secondary" />;
 }
 
+/** multibot: niebieski separator "NEW" nad pierwszą nieprzeczytaną wiadomością */
+function NewSeparator() {
+  return (
+    <div className="flex items-center gap-3 py-1.5">
+      <div className="h-px flex-1 bg-accent/30" />
+      <span className="rounded-full bg-accent/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-accent">
+        NEW
+      </span>
+      <div className="h-px flex-1 bg-accent/30" />
+    </div>
+  );
+}
+
 export function ChatView({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
@@ -418,22 +431,34 @@ export function ChatView({ bot }: { bot: Bot }) {
             </div>
           )}
           {bot.messages.map((m) => {
+            let child: ReactNode;
             switch (m.kind) {
               case "options":
-                return <OptionCard key={m.id} botId={bot.id} message={m} />;
+                child = <OptionCard key={m.id} botId={bot.id} message={m} />;
+                break;
               case "activity":
-                return <ActivityChip key={m.id} message={m} />;
+                child = <ActivityChip key={m.id} message={m} />;
+                break;
               case "event":
-                return <EventPill key={m.id} message={m} polish={polish} />;
+                child = <EventPill key={m.id} message={m} polish={polish} />;
+                break;
               case "room":
-                return <RoomChip key={m.id} message={m} />;
+                child = <RoomChip key={m.id} message={m} />;
+                break;
               case "screen":
-                return m.png ? <ScreenFrame key={m.id} png={m.png} mime={m.mime} /> : null;
+                child = m.png ? <ScreenFrame key={m.id} png={m.png} mime={m.mime} /> : null;
+                break;
               default:
                 // multibot: pigułka zdarzenia wygrywa z dymkiem, gdy treść
                 // wiadomości jest samym zdarzeniem (patrz userEventChip)
-                return userEventChip(m) ?? <Bubble key={m.id} botId={bot.id} message={m} />;
+                child = userEventChip(m) ?? <Bubble key={m.id} botId={bot.id} message={m} />;
             }
+            return (
+              <Fragment key={m.id}>
+                {bot.firstUnreadId === m.id && <NewSeparator />}
+                {child}
+              </Fragment>
+            );
           })}
           {provisioning && (
             <div className="flex justify-start">
