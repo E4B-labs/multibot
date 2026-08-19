@@ -79,6 +79,18 @@ export class RoomStore {
     return { ...message };
   }
 
+  /** multibot: strumień tury dokleja do JEDNEJ wiadomości zamiast mnożyć
+   * dymki — bufor spłukuje w losowym miejscu, nawet w połowie wyrazu. */
+  appendToMessage(id: string, messageId: string, extra: string): RoomMessage | null {
+    const room = this.rooms.get(id);
+    if (!room) return null;
+    const message = room.transcript.find((m) => m.id === messageId);
+    if (!message) return null;
+    message.text += extra;
+    room.expiresAt = Date.now() + ROOM_TTL_MS;
+    return { ...message };
+  }
+
   setStatus(id: string, status: RoomRecord["status"]): RoomRecord | null {
     const room = this.rooms.get(id);
     if (!room) return null;

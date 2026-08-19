@@ -169,15 +169,20 @@ function handle(msg: any) {
         // multibot: dowód dla testu, że wkładka kolegi dojechała W PROMPCIE —
         // drivery CLI nie czytają pola transcript, więc to jedyna droga.
         const sawPeer = JSON.stringify(msg.params?.prompt ?? "").includes("room work from fake");
-        out({
-          jsonrpc: "2.0",
-          method: "session/update",
-          params: { update: { sessionUpdate: "agent_message_chunk", content: { text: done ? `${sawPeer ? "peer seen — " : ""}room work from fake\n[TASK COMPLETE]` : "room work from fake" } } },
-        });
-        // multibot: pierwsza tura domyka się z opóźnieniem — test strumienia
-        // sprawdza, że wkładka jest w pokoju ZANIM tura się skończy.
-        if (done) complete();
-        else setTimeout(complete, 1_200);
+        const chunk = (text: string) =>
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text } } } });
+        if (done) {
+          chunk(`${sawPeer ? "peer seen — " : ""}room work from fake\n[TASK COMPLETE]`);
+          complete();
+        } else {
+          // multibot: pierwsza tura strumieniuje DWOMA kawałkami rozciętymi w
+          // połowie wyrazu i domyka się z opóźnieniem — test sprawdza, że
+          // wkładka jest w pokoju ZANIM tura się skończy ORAZ że kawałki
+          // skleiły się w jedną wiadomość ("room work from fake").
+          chunk("room work fr");
+          setTimeout(() => chunk("om fake"), 1_300);
+          setTimeout(complete, 3_200);
+        }
         return;
       }
       if (mode === "goal") {
