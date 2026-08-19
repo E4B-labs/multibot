@@ -15,6 +15,8 @@
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
 import readline from "node:readline";
 
+import { harnessRequest } from "./harness-request.ts";
+
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
@@ -84,13 +86,22 @@ const rpcErr = (id: unknown, code: number, message: string) => send({ jsonrpc: "
 const textResult = (id: unknown, text: string, isError = false) =>
   ok(id, { content: [{ type: "text", text }], isError });
 
-async function api(path: string, init?: RequestInit): Promise<Json> {
-  const res = await fetch(HARNESS + path, {
+// multibot: harnessRequest zamiast fetch — undici zrywa po 5 minutach
+// (headersTimeout), a ask-bot czeka na turę bota do 20 minut, ask_user zaś na
+// człowieka bez sufitu. Zerwane połączenie wracało do bota jako
+// `TypeError: fetch failed`, czyli "błąd sieciowy", i adresat nie odpowiadał.
+async function api(path: string, init?: { method?: string; body?: string; headers?: Record<string, string> }): Promise<Json> {
+  const res = await harnessRequest(HARNESS + path, {
     ...init,
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}`, ...(init?.headers ?? {}) },
   });
-  const body = (await res.json().catch(() => ({}))) as Json;
-  if (!res.ok) throw new Error(String(body.error ?? `HTTP ${res.status}`));
+  let body: Json = {};
+  try {
+    body = JSON.parse(res.body) as Json;
+  } catch {
+    /* niepusta odpowiedź bez JSON-a — zostaje pusty obiekt, jak przy fetch */
+  }
+  if (res.status < 200 || res.status >= 300) throw new Error(String(body.error ?? `HTTP ${res.status}`));
   return body;
 }
 
