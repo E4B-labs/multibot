@@ -15,6 +15,9 @@ ZAKAZ C: dane w `tmp_path`, `SLAFY_DATA_DIR`/`HERMES_HOME` przestawione per test
 import asyncio
 import json
 import os
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -83,6 +86,32 @@ def test_recorder_js_reports_through_binding_in_capture_phase():
     # capture: true — klik złapany na drodze W DÓŁ drzewa, więc `stopPropagation`
     # w handlerze strony nie zjada nagrania.
     assert js.count(", true)") >= 3
+
+
+def test_recorder_js_is_valid_javascript():
+    """Rekorder z błędem składni psuje teach CICHO: skrypt nie wykonuje się na
+    stronie, `Runtime.evaluate` nie zgłasza tego nikomu, nagranie kończy się
+    zerem kroków i wygląda jak „użytkownik nic nie pokazał".
+
+    Tak właśnie poszło raz: `\\n` w polskim komentarzu wewnątrz zwykłego (nie
+    surowego) stringa Pythona rozerwało linię `//` na dwie i cały skrypt
+    przestał się parsować. Testy na obecność tokenów tego nie łapią — string
+    zawierał wszystko, co miał zawierać, i mimo to był martwy.
+
+    Parser bierzemy z node'a; brak node'a pomija test zamiast go wywracać
+    (silnik jest samodzielny i jego CI nie stawia node'a, ale runnery GitHuba
+    mają go w obrazie)."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("brak node — nie ma czym sparsować JS")
+    path = Path(tempfile.gettempdir()) / "teach-recorder-check.js"
+    path.write_text(teach._RECORDER_JS, encoding="utf-8")
+    try:
+        done = subprocess.run([node, "--check", str(path)], capture_output=True, text=True, timeout=60)
+    finally:
+        path.unlink(missing_ok=True)
+
+    assert done.returncode == 0, done.stderr
 
 
 def test_recorder_js_selector_preference_order():

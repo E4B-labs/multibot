@@ -202,15 +202,16 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     setRemoteCursorHidden(screenRef.current?.contentDocument, owner === "agent");
   }, [owner, computerState, fullscreen]);
 
-  // K5: faza nagrywania skilla leci z TeachCard (boczny) jako zdarzenie, żeby
-  // pilulka "Naucz z demonstracji" i pasek nagrywania mogły siedzieć NA ekranie
-  // komputera, a nie tylko w panelu bocznym.
+  // K5: faza nagrywania skilla leci z TeachCard (karta pod ekranem) jako
+  // zdarzenie, żeby czerwona ramka i pasek nagrywania mogły siedzieć NA ekranie
+  // komputera, a nie tylko w karcie.
   const [teachPhase, setTeachPhase] = useState<string>("idle");
   useEffect(() => {
     const onPhase = (e: Event) => setTeachPhase(((e as CustomEvent).detail as { phase: string }).phase);
     window.addEventListener("mb:teach:phase", onPhase);
     return () => window.removeEventListener("mb:teach:phase", onPhase);
   }, []);
+  const teachRecording = teachPhase === "recording" || teachPhase === "stopping";
 
   const acquireControl = () => {
     setControlPending(true);
@@ -314,20 +315,15 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             className="absolute inset-0 cursor-zoom-in"
           />
         )}
-        {/* K5: pilulka "Naucz z demonstracji" NA ekranie komputera — start
-            nagrywania stąd, a nie z bocznego panelu. Znika, gdy nagrywanie
-            trwa (wtedy jest pasek u góry). */}
-        {teachPhase === "idle" && (
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent("mb:teach:start"))}
-            className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/65 px-4 py-2 text-[13px] font-medium text-white backdrop-blur hover:bg-black/80"
-          >
-            {polish ? "Naucz z demonstracji" : "Learn from demonstration"}
-          </button>
+        {/* multibot: czerwona ramka dookoła nagrywanego obszaru (UI-SPEC §8).
+            Osobna warstwa, nie obramowanie kontenera: `pointer-events-none`
+            przepuszcza kliknięcia do ekranu, a ramka nie zabiera iframe'owi
+            pikseli, więc obraz nie skacze przy starcie nagrywania. */}
+        {teachRecording && (
+          <div className="pointer-events-none absolute inset-0 z-20 border-2 border-danger" />
         )}
-        {(teachPhase === "recording" || teachPhase === "stopping") && (
-          <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-center gap-2 bg-danger/90 px-3 py-1.5 text-[12px] font-medium text-white">
+        {teachRecording && (
+          <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-center gap-2 bg-danger/90 px-3 py-1.5 text-[12px] font-medium text-white">
             <span className="size-2 animate-pulse rounded-full bg-white" />
             {polish
               ? "Nagrywanie — pokaż zadanie na komputerze bota"

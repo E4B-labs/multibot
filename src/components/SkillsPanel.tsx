@@ -214,25 +214,25 @@ export function TeachCard({
       });
   };
 
-  // K5: pilnuj przycisk z pulpitem (ComputerPanel) może wystartować/przerwać
-  // nagrywanie, mimo że stan trzymamy tu. Jedno źródło prawdy o fazie leci w
-  // drugą stronę jako zdarzenie, żeby pasek nagrywania mógł się narysować
-  // na ekranie bota, a nie tylko w bocznym TeachCard.
+  // K5: krzyżyk na pasku nagrywania (ComputerPanel) przerywa nagranie, mimo że
+  // stan trzymamy tu. Faza leci w drugą stronę jako zdarzenie, żeby ramka i
+  // pasek mogły się narysować na ekranie bota, a nie tylko w tej karcie.
+  // Start idzie już wyłącznie stąd — pigułka „Naucz z demonstracji" na ekranie
+  // dublowała przycisk leżący dwa centymetry niżej.
   const teachRef = useRef(teach);
   teachRef.current = teach;
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+  // Puste zależności, bo `stop` powstaje na nowo w każdym renderze — z nim na
+  // liście efekt przepinał nasłuch po każdym przerysowaniu karty.
   useEffect(() => {
-    const onStart = () => start();
     const onStop = () => {
       const t = teachRef.current;
-      if (t.phase === "recording" || t.phase === "stopping") stop(t.recordingId);
+      if (t.phase === "recording" || t.phase === "stopping") stopRef.current(t.recordingId);
     };
-    window.addEventListener("mb:teach:start", onStart);
     window.addEventListener("mb:teach:stop", onStop);
-    return () => {
-      window.removeEventListener("mb:teach:start", onStart);
-      window.removeEventListener("mb:teach:stop", onStop);
-    };
-  }, [start, stop]);
+    return () => window.removeEventListener("mb:teach:stop", onStop);
+  }, []);
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("mb:teach:phase", { detail: teach }));
   }, [teach]);

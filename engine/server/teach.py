@@ -87,7 +87,16 @@ _RECORDER_JS = """(() => {
     }
     return "";
   };
-  const label = (el) => ((el && el.innerText) || "").trim().slice(0, 80);
+  const label = (el) => {
+    if (!el) return "";
+    const hit = el.closest && el.closest("button, a, [role=button], label, [aria-label]");
+    if (hit) return (hit.innerText || "").trim().slice(0, 80);
+    // Klik w kontener (albo w puste miejsce) zwracał CAŁY jego innerText —
+    // krok wyglądał wtedy jak `clicked "Sklep Kup teraz 249 zl ..."`, czyli
+    // 80 znaków cudzej treści zamiast nazwy celu. Bez elementu interaktywnego
+    // wolimy pustkę: `_label` po stronie Pythona pokaże wtedy selektor.
+    return el.children && el.children.length ? "" : (el.innerText || "").trim().slice(0, 80);
+  };
   const SENSITIVE = /password|passwd|token|secret|apikey|api-key|api_key|card|cardnumber|cvv|cvc|ssn|pin/;
   const value = (el) => {
     const type = ((el && el.type) || "").toLowerCase();
@@ -313,7 +322,16 @@ def synthesize(bot_id: str, recording_id: str, name: str | None = None, steps: l
         transcript=text,
         name=f" i nazwij go `{name}`" if name else "",
     )
-    gateway.chat(bot_id, prompt)
+    try:
+        gateway.chat(bot_id, prompt)
+    except RuntimeError as exc:
+        # Gateway rzuca `RuntimeError` na wszystkim, czego nie naprawimy po
+        # naszej stronie — w praktyce najczęściej na braku klucza providera.
+        # Bez tego mapowania leciał goły 500 BEZ TREŚCI, więc użytkownik po
+        # nagraniu całej demonstracji widział "500 Internal Server Error"
+        # zamiast zdania mówiącego, co ustawić. 501 jak przy braku STT
+        # (`app.py` mapuje `LookupError`), a treść gatewaya jedzie w `detail`.
+        raise LookupError(f"synteza nie ruszyła: {exc}") from exc
 
     after = {skill["name"] for skill in skills.list()}
     created = sorted(after - before)
