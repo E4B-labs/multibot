@@ -5,7 +5,7 @@
 // toggleAppSettings / togglePlugins. Fuzzy filter = plain case-insensitive
 // subsequence match, no libraries.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { FileText, Link2, ListTodo, MessageSquare, Monitor, Plus, Puzzle, Search, Settings, SlidersHorizontal, Users, Wrench } from "lucide-react";
+import { Eye, FileText, GraduationCap, Link2, ListTodo, MessageSquare, Monitor, Plus, Puzzle, Search, Settings, SlidersHorizontal, Users, Wand2, Wrench } from "lucide-react";
 import { useStore } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
@@ -32,6 +32,15 @@ interface Command {
   hint: string;
   icon: ReactNode;
   run: () => void;
+  /** Etykieta typu przy prawej krawędzi, jak w wierszach wyszukiwania. */
+  badge?: string;
+}
+
+/** Kształt z GET /api/engine/skills — ten sam, którego używa picker "/" w Composerze. */
+interface PaletteSkill {
+  name: string;
+  command: string;
+  description: string;
 }
 
 type SearchKind = "all" | "message" | "agent" | "group" | "file" | "link" | "routine" | "skill" | "action";
@@ -84,6 +93,11 @@ export function CmdK() {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // multibot: bot ukryty na pasku bocznym nie miał jak wrócić — filtr `!hidden`
+  // jest jedyną listą botów w aplikacji, więc „Ukryj" było jednokierunkowe.
+  // Paleta jest tu naturalnym miejscem: tryb zamiast osobnego panelu.
+  const [showHidden, setShowHidden] = useState(false);
+  const [skills, setSkills] = useState<PaletteSkill[] | null>(null);
 
   // Meta+K on macOS, Ctrl+K everywhere. preventDefault is mandatory —
   // Chrome otherwise steals Ctrl+K for the address bar.
@@ -96,8 +110,15 @@ export function CmdK() {
       // Esc closes even when focus wandered off the input (no-op when closed)
       if (e.key === "Escape") setOpen(false);
     };
+    // multibot: pole „Szukaj" na pasku bocznym otwiera tę samą paletę. Skrót
+    // Ctrl+K jest niewidoczny, a tamto pole i tak nic nie robiło.
+    const onOpen = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("mb:cmdk:open", onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mb:cmdk:open", onOpen);
+    };
   }, []);
 
   // fresh palette on every open
@@ -106,6 +127,7 @@ export function CmdK() {
       setQuery("");
       setHighlight(0);
       setTab("all");
+      setShowHidden(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
@@ -129,22 +151,54 @@ export function CmdK() {
 
   const current = state.bots.find((b) => b.id === state.selectedId);
 
+  // multibot: skille są własnością silnika, więc pokazujemy je tylko wtedy, gdy
+  // bieżący bot na nim jedzie — dokładnie ta sama bramka co przy pickerze "/" w
+  // Composerze. Otwarta grupa też je gasi: wstawiamy komendę do composera czatu
+  // bota, a przy grupie to nie jest ten sam composer.
+  const slafyBot =
+    !state.groupOpen &&
+    current != null &&
+    state.instances.find((i) => i.instanceId === current.modelSelection.instanceId)?.driverKind === "slafy";
+  useEffect(() => {
+    if (!open || !slafyBot || skills !== null) return;
+    let alive = true;
+    void authFetch("/api/engine/skills")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((rows: PaletteSkill[]) => alive && setSkills(rows))
+      .catch(() => alive && setSkills([]));
+    return () => {
+      alive = false;
+    };
+  }, [open, slafyBot, skills]);
+
   const commands = useMemo<Command[]>(() => {
     const close = (fn: () => void) => () => {
       fn();
       setOpen(false);
     };
+    // W trybie ukrytych lista botów odwraca filtr, a kliknięcie odkrywa i
+    // przełącza. `updateBot` jedzie PATCH-em na serwer, tak samo jak „Ukryj",
+    // więc bot nie wraca do ukrycia po przeładowaniu.
+    const hiddenMode = showHidden;
     const cmds: Command[] = state.bots
-      .filter((b) => !b.hidden)
+      .filter((b) => Boolean(b.hidden) === hiddenMode)
       .map((b) => ({
         id: `bot:${b.id}`,
         label: b.name,
-        hint: b.id === state.selectedId ? (polish ? "Bieżący" : "Current bot") : (polish ? "Przełącz" : "Switch to bot"),
+        hint: hiddenMode
+          ? (polish ? "Odkryj i otwórz" : "Unhide and open")
+          : b.id === state.selectedId
+            ? (polish ? "Bieżący" : "Current bot")
+            : (polish ? "Przełącz" : "Switch to bot"),
         icon: (
           <MausAvatar color={b.color} shape={b.mascotShape} state={normalizeState(b.mascotExpression) ?? "happy"} size={22} />
         ),
-        run: close(() => dispatch({ type: "select", id: b.id })),
+        run: close(() => {
+          if (hiddenMode) dispatch({ type: "updateBot", botId: b.id, patch: { hidden: false } });
+          dispatch({ type: "select", id: b.id });
+        }),
       }));
+    if (hiddenMode) return cmds;
     cmds.push({
       id: "new-bot",
       label: polish ? "Nowy bot" : "New bot",
@@ -184,8 +238,47 @@ export function CmdK() {
       icon: <Puzzle size={16} />,
       run: close(() => dispatch({ type: "togglePlugins", open: true })),
     });
+    if (current) {
+      // Odpowiednik pozycji `learn-from-demonstration` ze spisu: nagrywanie
+      // mieszka w karcie pod ekranem komputera, więc paleta tam prowadzi.
+      // Osobna akcja, nie skill — na świeżej instalacji żadnych skilli nie ma.
+      cmds.push({
+        id: "teach",
+        label: polish ? "Nagraj umiejętność z demonstracji" : "Learn from demonstration",
+        hint: polish ? "Komputer bota" : "Bot's computer",
+        icon: <GraduationCap size={16} />,
+        run: close(() => dispatch({ type: "toggleComputer", open: true })),
+      });
+    }
+    if (state.bots.some((b) => b.hidden)) {
+      cmds.push({
+        id: "hidden-bots",
+        label: polish ? "Pokaż ukryte boty" : "Open hidden bots",
+        hint: polish ? "Pasek boczny" : "Sidebar",
+        icon: <Eye size={16} />,
+        run: () => {
+          setShowHidden(true);
+          setQuery("");
+          setHighlight(0);
+        },
+      });
+    }
+    // Skille NIE uruchamiają się z palety — wstawiają komendę do composera, tak
+    // samo jak picker "/". Skill bywa akcją ze skutkami ubocznymi i nie może
+    // wystartować od jednego Entera w wyszukiwarce.
+    for (const skill of skills ?? []) {
+      const command = skill.command || `/${skill.name}`;
+      cmds.push({
+        id: `skill:${skill.name}`,
+        label: command,
+        hint: skill.description || skill.name,
+        badge: polish ? "Umiejętność" : "Skill",
+        icon: <Wand2 size={16} />,
+        run: close(() => window.dispatchEvent(new CustomEvent("mb:composer:insert", { detail: command }))),
+      });
+    }
     return cmds;
-  }, [state.bots, state.selectedId, current, dispatch, polish]);
+  }, [state.bots, state.selectedId, current, dispatch, polish, showHidden, skills]);
 
   const visible = useMemo(() => commands.filter((c) => fuzzyMatch(query, c.label)), [commands, query]);
 
@@ -206,7 +299,9 @@ export function CmdK() {
     setOpen(false);
   };
 
-  const rows = tab === "action" || (!query.trim() && tab === "all") ? visible : tab === "all" ? [...visible, ...results] : results;
+  const rows = showHidden
+    ? visible
+    : tab === "action" || (!query.trim() && tab === "all") ? visible : tab === "all" ? [...visible, ...results] : results;
 
   if (!open) return null;
 
@@ -248,6 +343,14 @@ export function CmdK() {
           placeholder={polish ? "Szukaj wiadomości, botów i działań…" : "Search messages, bots and actions…"}
           className="w-full border-b border-hairline/30 bg-transparent px-4 py-3 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none"
         />
+        {showHidden ? (
+          <div className="flex items-center justify-between border-b border-hairline/30 px-4 py-2 text-[12px] text-ink-secondary">
+            <span>{polish ? "Ukryte boty" : "Hidden bots"}</span>
+            <button type="button" onClick={() => setShowHidden(false)} className="rounded-md px-2 py-0.5 hover:bg-raised hover:text-ink">
+              {polish ? "Wróć" : "Back"}
+            </button>
+          </div>
+        ) : (
         <div className="flex gap-1 overflow-x-auto border-b border-hairline/30 px-3 py-2">
           {TABS.map((item) => (
             <button
@@ -263,6 +366,7 @@ export function CmdK() {
             </button>
           ))}
         </div>
+        )}
         <div className="max-h-[320px] overflow-y-auto py-1.5">
           {rows.length === 0 && (
             <div className="flex items-center gap-2 px-4 py-3 text-[13px] text-ink-secondary"><Search size={14} />{polish ? "Brak wyników" : "No results"}</div>
@@ -272,7 +376,10 @@ export function CmdK() {
               return <button key={row.id} onClick={row.run} onMouseEnter={() => setHighlight(i)} className={cn("flex w-full items-center gap-2.5 px-4 py-2 text-left", i === highlight ? "bg-raised-hover" : "")}>
                 <span className="flex size-6 shrink-0 items-center justify-center text-ink-secondary">{row.icon}</span>
                 <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{row.label}</span>
-                <span className="shrink-0 text-xs text-ink-secondary">{row.hint}</span>
+                <span className="min-w-0 shrink truncate text-xs text-ink-secondary">{row.hint}</span>
+                {row.badge && (
+                  <span className="shrink-0 rounded-full bg-raised px-2 py-0.5 text-[10px] text-ink-secondary">{row.badge}</span>
+                )}
               </button>;
             }
             const bot = row.botId ? state.bots.find((item) => item.id === row.botId) : undefined;

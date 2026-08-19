@@ -33,6 +33,17 @@ function slashQuery(text: string): string | null {
   return text.slice(1).toLowerCase();
 }
 
+/**
+ * Treść composera po wybraniu komendy w palecie poleceń. Gateway rozwiązuje
+ * `/nazwa reszta`, więc dotychczasowy tekst staje się argumentami skilla zamiast
+ * zniknąć. Wyjątek: gdy treść JEST już komendą, podmieniamy ją — inaczej wyszłoby
+ * `/model /szukaj`, czyli dwie komendy naraz i żadna z nich poprawna.
+ */
+export function withCommand(text: string, command: string): string {
+  const rest = text.trim();
+  return !rest || rest.startsWith("/") ? `${command} ` : `${command} ${rest}`;
+}
+
 /** Wiersze pickera: kształt z GET /api/engine/skills (engine/server/skills.py). */
 interface SlashSkill {
   name: string;
@@ -367,6 +378,32 @@ export function Composer({ bot }: { bot: Bot }) {
       inputRef.current?.setSelectionRange(next.length, next.length);
     });
   };
+
+  // multibot: paleta poleceń (CmdK) wstawia komendę skilla tutaj. Zdarzenie, nie
+  // stan w reduktorze — treść composera należy do composera, a paleta jest
+  // jedynym obcym nadawcą (ten sam wzorzec co `mb:teach:*`).
+  //
+  // WSTAWIA, NIE WYSYŁA: skill to zwykła wiadomość, którą gateway rozwiązuje z
+  // `/nazwa reszta`, więc dotychczasowa treść zostaje jako argumenty zamiast
+  // zniknąć. Nasłuch przez ref z pustymi zależnościami — `text` zmienia się przy
+  // każdym znaku i na liście zależności przepinałby nasłuch po każdym wciśnięciu
+  // klawisza.
+  const insertRef = useRef<(command: string) => void>(() => {});
+  insertRef.current = (command: string) => {
+    const next = withCommand(text, command);
+    setText(next);
+    setCaret(next.length);
+    setSlashDismissed(true);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(next.length, next.length);
+    });
+  };
+  useEffect(() => {
+    const onInsert = (e: Event) => insertRef.current((e as CustomEvent<string>).detail);
+    window.addEventListener("mb:composer:insert", onInsert);
+    return () => window.removeEventListener("mb:composer:insert", onInsert);
+  }, []);
 
   const pickMention = (peer: Bot) => {
     if (!mention) return;

@@ -3,7 +3,7 @@
 // ani rutyny nigdy się nie pokazują, więc ten test pilnuje właśnie tego.
 import { describe, expect, it } from "vitest";
 
-import { slashVisible, type SlashRow } from "./Composer";
+import { slashVisible, withCommand, type SlashRow } from "./Composer";
 
 const row = (kind: SlashRow["kind"], label: string): SlashRow => ({
   id: `${kind}-${label}`,
@@ -40,5 +40,21 @@ describe("slashVisible", () => {
 
   it("puste zapytanie nie filtruje niczego", () => {
     expect(slashVisible([row("agent", "Scout")], "")).toHaveLength(1);
+  });
+});
+
+// multibot: wstawianie komendy z palety poleceń. Nietrywialna jest jedna
+// decyzja — co zrobić z tekstem, który już jest w composerze.
+describe("withCommand", () => {
+  it("zachowuje niedokończoną treść jako argumenty komendy", () => {
+    expect(withCommand("raport za marzec", "/model")).toBe("/model raport za marzec");
+  });
+
+  it("podmienia komendę, gdy treść już nią jest", () => {
+    expect(withCommand("/szukaj", "/model")).toBe("/model ");
+  });
+
+  it("na pustym composerze zostawia spację na argumenty", () => {
+    expect(withCommand("   ", "/model")).toBe("/model ");
   });
 });

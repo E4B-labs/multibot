@@ -652,13 +652,21 @@ export function Sidebar() {
       {/* Search */}
       {!collapsed && (
       <div className="px-3 pt-2 pb-3">
-        <div className="flex items-center gap-2 rounded-lg bg-raised/70 px-3 py-2">
-          <Search size={16} className="text-ink-secondary" />
-          <input
-            placeholder={polish ? "Szukaj" : "Search"}
-            className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
-          />
-        </div>
+        {/* multibot: to było `input` bez `value` i bez `onChange` — dało się w
+            nie pisać i nic się nie działo. Wyszukiwanie ma paleta poleceń
+            (CmdK), więc jest teraz jej widocznym wejściem: Ctrl+K sam z siebie
+            nikomu się nie objawi. Przycisk, nie pole, żeby kursor nie lądował
+            tutaj zamiast w palecie; stąd też `preventDefault` na wciśnięciu. */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => window.dispatchEvent(new CustomEvent("mb:cmdk:open"))}
+          className="flex w-full items-center gap-2 rounded-lg bg-raised/70 px-3 py-2 text-left hover:bg-raised"
+        >
+          <Search size={16} className="shrink-0 text-ink-secondary" />
+          <span className="flex-1 truncate text-[14px] text-ink-secondary">{polish ? "Szukaj" : "Search"}</span>
+          <kbd className="shrink-0 rounded border border-hairline/60 px-1.5 py-0.5 text-[10px] text-ink-secondary">Ctrl K</kbd>
+        </button>
       </div>
       )}
 
