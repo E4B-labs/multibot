@@ -8,6 +8,8 @@ import {
   EyeOff,
   FolderPlus,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Pin,
   PinOff,
@@ -29,6 +31,13 @@ import { engineOnline } from "@/lib/engineStatus";
 import { getLanguage, useLanguage } from "@/lib/language";
 
 const isElectron = navigator.userAgent.includes("Electron");
+
+// multibot: przy wąskim oknie sidebar sam zwija się do szyny z samymi
+// awatarami. Dolna granica nie jest ozdobna: poniżej 700 px `styles.css` ma
+// układ telefonu, który kładzie sidebar na całą szerokość nad czatem — szyna
+// biłaby się z nim o tę samą właściwość. Górna to moment, w którym 320 px
+// listy plus 400 px panelu po prawej przestaje zostawiać czatowi miejsce.
+const RAIL_QUERY = "(min-width: 701px) and (max-width: 1100px)";
 
 /** Two name words → initials, first email character → initial, unset → "?". */
 function profileInitials(profile?: { name?: string; email?: string }): string {
@@ -162,7 +171,15 @@ function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
   );
 }
 
-function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => void }) {
+function BotListItem({
+  bot,
+  onMenu,
+  collapsed,
+}: {
+  bot: Bot;
+  onMenu: (menu: MenuState) => void;
+  collapsed?: boolean;
+}) {
   const { state, dispatch } = useStore();
   // U20: zaznaczenie ma być jedno — po otwarciu grupy bot przestaje być
   // podświetlony (inaczej świecą dwa: grupa i ostatni bot).
@@ -176,8 +193,12 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
         e.preventDefault();
         onMenu({ botId: bot.id, x: e.clientX, y: e.clientY });
       }}
+      // multibot: w szynie zostaje sam awatar, więc nazwa musi wrócić jako
+      // tooltip — inaczej bot bez własnego koloru jest nie do odróżnienia.
+      title={collapsed ? bot.name : undefined}
       className={cn(
-        "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left",
+        "flex w-full items-center rounded-xl text-left",
+        collapsed ? "relative justify-center px-0 py-1.5" : "gap-3 px-3 py-2.5",
         selected ? "bg-raised" : "hover:bg-raised/50",
       )}
     >
@@ -189,6 +210,21 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
         motion={mascotMotion?.kind ?? "none"}
         motionKey={mascotMotion?.nonce ?? 0}
       />
+      {/* multibot: nazwa i podgląd znikają w szynie, ale kropka zostaje —
+          to jedyny sygnał „coś się tu dzieje", jaki tam przeżył. Ta sama
+          zasada pierwszeństwa co niżej: uwaga bije nieprzeczytane. */}
+      {collapsed &&
+        (bot.needsAttention != null ? (
+          <span
+            title={bot.needsAttention}
+            className="absolute right-1.5 top-1.5 size-2.5 rounded-full bg-warning ring-2 ring-panel"
+          />
+        ) : (
+          bot.unread && (
+            <span className="absolute right-1.5 top-1.5 size-2.5 rounded-full bg-accent ring-2 ring-panel" />
+          )
+        ))}
+      {!collapsed && (
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
            <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
@@ -222,6 +258,7 @@ function BotListItem({ bot, onMenu }: { bot: Bot; onMenu: (menu: MenuState) => v
           )}
         </div>
       </div>
+      )}
     </button>
   );
 }
@@ -288,11 +325,13 @@ function GroupsSection({
   createOpen,
   onCreateOpenChange,
   onMenu,
+  collapsed,
 }: {
   bots: Bot[];
   createOpen: boolean;
   onCreateOpenChange: (open: boolean) => void;
   onMenu: (menu: GroupMenuState) => void;
+  collapsed?: boolean;
 }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
@@ -364,8 +403,12 @@ function GroupsSection({
             e.preventDefault();
             onMenu({ group: g, x: e.clientX, y: e.clientY });
           }}
+          // multibot: w szynie zostają same awatary składu, więc nazwa grupy
+          // musi wrócić jako tooltip.
+          title={collapsed ? g.name || g.id : undefined}
           className={cn(
-            "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left",
+            "flex w-full items-center rounded-xl py-2 text-left",
+            collapsed ? "justify-center px-0" : "gap-2.5 px-3",
             state.groupOpen?.id === g.id ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
@@ -375,12 +418,16 @@ function GroupsSection({
               return member ? <MausAvatar key={engineId} color={member.color} shape={member.mascotShape} state={stateForBot(member)} size={24} animated={false} /> : <Users key={engineId} size={18} className="text-ink-secondary" />;
             })}
           </span>
-          <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{g.name || g.id}</span>
-          <span className="shrink-0 text-[12px] text-ink-secondary">{g.bot_ids.length}</span>
+          {!collapsed && (
+            <>
+              <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{g.name || g.id}</span>
+              <span className="shrink-0 text-[12px] text-ink-secondary">{g.bot_ids.length}</span>
+            </>
+          )}
         </button>
       ))}
 
-      {createOpen && (
+      {createOpen && !collapsed && (
         <div className="mx-1 mt-1 flex flex-col gap-2 rounded-xl bg-card p-3">
           <input
             className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
@@ -440,6 +487,32 @@ export function Sidebar() {
   const [groupMenu, setGroupMenu] = useState<GroupMenuState | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
+  // multibot: `matchMedia` zamiast nasłuchu `resize` — budzi się na przejściu
+  // progu, nie na każdym pikselu ciągnięcia ramki okna.
+  const [autoRail, setAutoRail] = useState(() => window.matchMedia(RAIL_QUERY).matches);
+  // Ręczny wybór ma pierwszeństwo, ale tylko do najbliższej zmiany szerokości
+  // okna — inaczej jedno kliknięcie zabijałoby automat na zawsze.
+  const [override, setOverride] = useState<boolean | null>(null);
+  const collapsed = override ?? autoRail;
+
+  useEffect(() => {
+    const mq = window.matchMedia(RAIL_QUERY);
+    const onChange = () => {
+      setAutoRail(mq.matches);
+      setOverride(null);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // multibot: zwinięcie zamyka oba wysuwane menu, obojętne czy zwinął je
+  // użytkownik, czy zwężone okno. Szyna je i tak przestaje rysować, ale bez
+  // tego wracają otwarte przy rozwinięciu — jakby wyskoczyły same.
+  useEffect(() => {
+    if (!collapsed) return;
+    setAddMenuOpen(false);
+    setGroupCreateOpen(false);
+  }, [collapsed]);
 
   // multibot: F11 — wskaźnik TYLKO gdy silnik offline a jakiś bot jeździ na
   // slafy (dla reszty userów silnik nie istnieje — nic nie pokazujemy i nic
@@ -492,21 +565,49 @@ export function Sidebar() {
   }, [addMenuOpen]);
 
   return (
-    <aside className="flex h-full w-[320px] shrink-0 flex-col border-r border-hairline/40 bg-panel">
+    <aside
+      // multibot: ta sama krzywa i czas co `--animate-panel-in`, żeby szyna
+      // rozwijała się tak samo jak panele po prawej. `panel-in` to keyframe
+      // od zamontowania, więc szerokości nie da się nim animować.
+      className={cn(
+        "flex h-full shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel",
+        "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        collapsed ? "w-[80px]" : "w-[320px]",
+      )}
+    >
       {/* Titlebar: real traffic lights in Electron, faux ones in the browser */}
       <div
-        className="flex items-center justify-between px-4 pt-3.5 pb-1"
+        className={cn(
+          "flex items-center px-4 pt-3.5 pb-1",
+          collapsed ? "justify-center" : "justify-between",
+        )}
         style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       >
-        {isElectron ? (
-          <div className="w-14" />
-        ) : (
-          <div className="flex items-center gap-2">
-            <span className="size-3 rounded-full bg-[#ff5f57]" />
-            <span className="size-3 rounded-full bg-[#febc2e]" />
-            <span className="size-3 rounded-full bg-[#28c840]" />
-          </div>
+        {!collapsed && (
+          isElectron ? (
+            <div className="w-14" />
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="size-3 rounded-full bg-[#ff5f57]" />
+              <span className="size-3 rounded-full bg-[#febc2e]" />
+              <span className="size-3 rounded-full bg-[#28c840]" />
+            </div>
+          )
         )}
+        <div className="flex items-center gap-1">
+        {/* multibot: przełącznik szyny. `no-drag` obowiązkowo — bez tego pod
+            Electronem klik ląduje w obszarze przeciągania okna. */}
+        <button
+          onClick={() => setOverride(!collapsed)}
+          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          title={polish ? (collapsed ? "Rozwiń panel" : "Zwiń panel") : collapsed ? "Expand panel" : "Collapse panel"}
+          aria-label={polish ? (collapsed ? "Rozwiń panel" : "Zwiń panel") : collapsed ? "Expand panel" : "Collapse panel"}
+          aria-expanded={!collapsed}
+        >
+          {collapsed ? <PanelLeftOpen size={20} strokeWidth={2} /> : <PanelLeftClose size={20} strokeWidth={2} />}
+        </button>
+        {!collapsed && (
         <div className="relative" data-add-menu>
           <button
             onClick={() => setAddMenuOpen((v) => !v)}
@@ -544,9 +645,12 @@ export function Sidebar() {
             </div>
           )}
         </div>
+        )}
+        </div>
       </div>
 
       {/* Search */}
+      {!collapsed && (
       <div className="px-3 pt-2 pb-3">
         <div className="flex items-center gap-2 rounded-lg bg-raised/70 px-3 py-2">
           <Search size={16} className="text-ink-secondary" />
@@ -556,44 +660,65 @@ export function Sidebar() {
           />
         </div>
       </div>
+      )}
 
       {/* Unified conversation list: group rows sit with bots, above plugins. */}
-      <div className="flex-1 overflow-y-auto px-2">
+      <div className={cn("flex-1 overflow-y-auto", collapsed ? "px-1 pt-2" : "px-2")}>
         {groupBots.length > 0 && (
           <GroupsSection
             bots={groupBots}
             createOpen={groupCreateOpen}
             onCreateOpenChange={setGroupCreateOpen}
             onMenu={setGroupMenu}
+            collapsed={collapsed}
           />
         )}
         <div className="flex flex-col gap-0.5">
           {visibleBots.map((b) => (
-            <BotListItem key={b.id} bot={b} onMenu={setMenu} />
+            <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />
           ))}
         </div>
       </div>
 
       {/* Footer */}
-      <div className="px-3 pb-3 pt-2">
+      <div className={cn("pb-3 pt-2", collapsed ? "px-1" : "px-3")}>
         {/* multibot: F11 — subtelna kropka statusu silnika, tylko offline+slafy;
             szara bg-raised-hover = konwencja "Service offline" */}
         {engineOffline && (
           <div
             title={polish ? "Usługa lokalna offline — boty lokalnych modeli nie działają. Sprawdź ustawienia aplikacji." : "Local service offline — custom-model bots can't run. Check App Settings."}
-            className="flex items-center gap-2 px-3 py-1.5 text-[12px] text-ink-secondary"
+            className={cn(
+              "flex items-center py-1.5 text-[12px] text-ink-secondary",
+              collapsed ? "justify-center px-0" : "gap-2 px-3",
+            )}
           >
             <span className="size-1.5 shrink-0 rounded-full bg-raised-hover" />
-            {polish ? "Usługa offline" : "Service offline"}
+            {!collapsed && (polish ? "Usługa offline" : "Service offline")}
           </div>
         )}
         <button
           onClick={() => dispatch({ type: "togglePlugins", open: true })}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left hover:bg-raised/50"
+          title={collapsed ? (polish ? "Wtyczki" : "Plugins") : undefined}
+          className={cn(
+            "flex w-full items-center rounded-xl py-2 text-left hover:bg-raised/50",
+            collapsed ? "justify-center px-0" : "gap-3 px-3",
+          )}
         >
           <Puzzle size={20} className="text-ink-secondary" />
-            <span className="text-[14px] text-ink">{polish ? "Wtyczki" : "Plugins"}</span>
+            {!collapsed && <span className="text-[14px] text-ink">{polish ? "Wtyczki" : "Plugins"}</span>}
         </button>
+        {/* multibot: w szynie nazwa użytkownika znika, a ustawienia aplikacji
+            zostają — awatar profilu bez nazwy nic nie wnosi, a koło zębate
+            jest jedynym wejściem w ustawienia. */}
+        {collapsed ? (
+          <button
+            onClick={() => dispatch({ type: "toggleAppSettings" })}
+            className="flex w-full items-center justify-center rounded-xl py-2 text-ink-secondary hover:bg-raised/50 hover:text-ink"
+            title={polish ? "Ustawienia aplikacji" : "App settings"}
+          >
+            <Settings size={20} />
+          </button>
+        ) : (
         <div className="flex items-center">
           <div className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left">
             <InitialsAvatar initials={profileInitials(state.config?.profile)} size={28} />
@@ -609,6 +734,7 @@ export function Sidebar() {
             <Settings size={18} />
           </button>
         </div>
+        )}
       </div>
 
       {menu && <BotContextMenu menu={menu} onClose={() => setMenu(null)} />}
