@@ -3,6 +3,10 @@ import { Loader2 } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
 import { emailGateDone, initAnalytics } from "@/lib/analytics";
+// multibot: trzecia kopia tej samej linii (Onboarding.tsx, Sidebar.tsx) —
+// zostaje lokalnie, bo wspólny moduł na jedno wyrażenie to więcej pliku niż
+// treści. ponytail: wyciągnąć do `src/lib/`, gdyby doszła czwarta.
+const isElectron = navigator.userAgent.includes("Electron");
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { SettingsPanel } from "@/components/SettingsPanel";
@@ -170,10 +174,18 @@ function Shell() {
 }
 
 export default function App() {
-  // multibot: gate pokazujemy tylko przy pierwszym uruchomieniu (brak tokena
-  // w localStorage). Gdy token już jest — czyli po każdym deploy/reloadu —
-  // onboarding nie wraca, bo użytkownik serwer już skonfigurował.
-  const [gated, setGated] = useState(() => !emailGateDone() && !getAuthToken());
+  // multibot: onboarding pokazujemy, dopóki użytkownik go nie domknął. Token w
+  // localStorage traktujemy jak dowód konfiguracji TYLKO w przeglądarce: tam
+  // musiał go skądś wziąć, więc po deployu i reloadzie gate nie wraca.
+  //
+  // Pod Electronem token nie dowodzi niczego — spakowana apka wstawia własny
+  // przez fragment adresu przy PIERWSZYM starcie. Zliczanie go jako
+  // konfiguracji kasowało onboarding, zanim się pokazał, a razem z nim jedyne
+  // wejście do instalacji silnika (`POST /api/provision` woła wyłącznie
+  // Onboarding). Efekt: świeża instalacja desktopowa wchodziła od razu do
+  // aplikacji i pisała „Usługa offline", bo silnika nikt nigdy nie zainstalował.
+  const configured = emailGateDone() || (Boolean(getAuthToken()) && !isElectron);
+  const [gated, setGated] = useState(() => !configured);
   // Sesja z logowania Google siedzi w ciasteczku HttpOnly, więc `getAuthToken`
   // jej nie widzi — `LoginScreen` sam sprawdza `/api/auth/status` i wpuszcza.
   const [authenticated, setAuthenticated] = useState(() => Boolean(getAuthToken()));
