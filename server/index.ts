@@ -277,8 +277,12 @@ function postRoomChip(ownerBotId: string, room: RoomRecord) {
   broadcast({ kind: "message", threadId: owner.threadId, message });
 }
 
-/** Room turn prompt: task + collaboration rules + explicit done marker. */
-function collabPrompt(room: RoomRecord, bot: { id: string; name: string }): string {
+/** Room turn prompt: task + collaboration rules + explicit done marker.
+ * multibot: wiadomości innych botów jadą W TREŚCI promptu, nie w polu
+ * `transcript` tury — drivery CLI (claude, codex, ACP) tego pola nie czytają,
+ * więc boty pracowały na ślepo i "rozmowa" nigdy nie zbiegała. Sesja CLI
+ * pamięta własne poprzednie tury, więc kolejne rundy dostają sam przyrost. */
+function collabPrompt(room: RoomRecord, bot: { id: string; name: string }, freshFromPeers: string): string {
   const peers = room.bot_ids
     .filter((id) => id !== bot.id)
     .map((id) => store.bot(id)?.name ?? id);
@@ -288,8 +292,21 @@ function collabPrompt(room: RoomRecord, bot: { id: string; name: string }): stri
   return [
     header,
     `The user's task: ${room.task}`,
-    "Work on this task together with the other bots. You see the whole room transcript above — build on what the others wrote, answer their points, do your part.",
+    freshFromPeers
+      ? `Messages from the other bots so far:\n\n${freshFromPeers}`
+      : "No messages from the other bots yet — you go first.",
+    "Work on this task together with the other bots. Build on what the others wrote, answer their points, do your part.",
     `Write your contribution now. When the task is fully resolved, end your message with the exact line: ${ROOM_DONE_MARKER}`,
+  ].join("\n\n");
+}
+
+/** Follow-up round prompt: only what arrived since this bot's previous turn. */
+function collabRoundPrompt(freshFromPeers: string): string {
+  return [
+    freshFromPeers
+      ? `New messages from the other bots:\n\n${freshFromPeers}`
+      : "No new messages from the other bots.",
+    `Continue your part. When the task is fully resolved, end your message with the exact line: ${ROOM_DONE_MARKER}`,
   ].join("\n\n");
 }
 
@@ -302,6 +319,9 @@ async function runCollab(roomId: string): Promise<void> {
   // przeszukiwanie, długa rozmowa) nie mieściło się w dawnym suficie.
   const SAFETY_MS = 2 * 60 * 60_000;
   let idleRounds = 0;
+  // multibot: ile transkryptu każdy bot już dostał w prompcie — kolejne rundy
+  // wysyłają sam przyrost (sesja CLI pamięta swoje wcześniejsze tury).
+  const seen = new Map<string, number>();
   for (;;) {
     const room = rooms.get(roomId);
     if (!room || room.status !== "running") break;
@@ -313,12 +333,24 @@ async function runCollab(roomId: string): Promise<void> {
       const bot = store.bot(botId);
       if (!bot) continue;
       if (bot.busy) continue; // busy-safe: that bot is mid-turn elsewhere
+      // świeży zrzut TUŻ przed turą — snapshot z początku rundy nie widzi
+      // wkładek botów, które właśnie skończyły w tej samej rundzie
+      const live = rooms.get(roomId);
+      if (!live || live.status !== "running") break;
+      const since = seen.get(botId) ?? 0;
+      const fresh = live.transcript
+        .slice(since)
+        .filter((m) => m.from !== botId)
+        .map((m) => `@${store.bot(m.from)?.name ?? m.from}: ${m.text}`)
+        .join("\n\n");
+      seen.set(botId, live.transcript.length);
+      const prompt = since === 0 ? collabPrompt(live, bot, fresh) : collabRoundPrompt(fresh);
       // multibot: kawałki tury lecą do pokoju na bieżąco — bez tego transkrypt
       // stał pusty przez całą turę (do 20 min) i pokój wyglądał na zacięty.
       let streamed = false;
-      const reply = await askBotAndWait(botId, collabPrompt(room, bot), 1, {
+      const reply = await askBotAndWait(botId, prompt, 1, {
         threadId: roomThreadId(roomId, botId),
-        transcript: room.transcript.map((m) => ({ role: "assistant" as const, text: m.text })),
+        transcript: live.transcript.map((m) => ({ role: "assistant" as const, text: m.text })),
         // multibot: tura pokoju może być długą pracą z komputerem — 4 minuty
         // zwracały "(timed out…)" w trakcie rzeczywistej pracy bota.
         timeoutMs: 20 * 60_000,

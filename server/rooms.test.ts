@@ -152,6 +152,9 @@ describe("collaboration rooms", () => {
       expect(room.transcript[0].text).not.toContain("TASK COMPLETE");
       // the first contributor is the originator (A)
       expect(room.transcript[0].from).toBe(a.id);
+      // multibot: drugi bot dostał wkładkę pierwszego W PROMPCIE (drivery CLI
+      // nie czytają pola transcript) — atrapa potwierdza to prefiksem
+      expect(room.transcript.some((m: any) => m.from === b.id && m.text.startsWith("peer seen"))).toBe(true);
 
       // the originator's 1:1 chat carries the clickable chip
       const aBot = await getBot(a.id);

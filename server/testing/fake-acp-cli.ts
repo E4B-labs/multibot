@@ -166,10 +166,13 @@ function handle(msg: any) {
           writeFileSync(counterFile, String(n + 1));
         }
         const done = n >= 1;
+        // multibot: dowód dla testu, że wkładka kolegi dojechała W PROMPCIE —
+        // drivery CLI nie czytają pola transcript, więc to jedyna droga.
+        const sawPeer = JSON.stringify(msg.params?.prompt ?? "").includes("room work from fake");
         out({
           jsonrpc: "2.0",
           method: "session/update",
-          params: { update: { sessionUpdate: "agent_message_chunk", content: { text: done ? "room work from fake\n[TASK COMPLETE]" : "room work from fake" } } },
+          params: { update: { sessionUpdate: "agent_message_chunk", content: { text: done ? `${sawPeer ? "peer seen — " : ""}room work from fake\n[TASK COMPLETE]` : "room work from fake" } } },
         });
         // multibot: pierwsza tura domyka się z opóźnieniem — test strumienia
         // sprawdza, że wkładka jest w pokoju ZANIM tura się skończy.
