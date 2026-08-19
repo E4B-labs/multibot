@@ -61,6 +61,7 @@ import * as mcpConnectors from "./mcp-connectors.ts";
 import * as googleWorkspace from "./google-workspace.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { HarnessRoutines, routineTurnText, verifyWebhookSignature, type HarnessRoutine } from "./routines.ts";
+import { runGroupRound } from "./group-round.ts";
 import { GroupStore } from "./group-store.ts";
 import { RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
@@ -1851,25 +1852,26 @@ const server = createServer(async (req, res) => {
             const message = String(body.message ?? "").trim();
             if (!message) return json(res, 422, { error: "message required" });
             groupStore.append(group.id, { from: "you", text: message });
-            const turns: Array<{ bot_id: string; reply: string }> = [];
-            for (const engineId of group.bot_ids) {
-              const bot = store.botByThread(threadIdOfEngineBot(engineId) ?? "");
-              if (!bot) continue;
-              const transcript = (groupStore.get(group.id)?.messages ?? []).map((item) => ({
-                role: item.from === "you" ? ("user" as const) : ("assistant" as const),
-                text: item.text,
-              }));
-              // multibot: grupy wołają boty sekwencyjnie i trzymają odpowiedź
-              // HTTP przez cały czas — celowo zostają przy domyślnym suficie
-              // 4 min na turę, dłuższy wiszący zajeżdżałby czat (patrz
-              // komentarz nad maybeStartCollab).
-              const reply = await askBotAndWait(bot.id, message, 0, {
+            // multibot: boty odpowiadają RÓWNOLEGLE — sekwencja trzymała
+            // odpowiedź HTTP przez sumę tur wszystkich botów (N × do 4 min),
+            // równoległość przez czas najwolniejszego. Każdy bot dostaje
+            // transkrypt z chwili wysyłki (bez odpowiedzi kolegów z tej samej
+            // rundy — jak ludzie odpisujący jednocześnie na ten sam czat);
+            // dopisanie po ustaleniu, w stałej kolejności grupy.
+            const transcript = (groupStore.get(group.id)?.messages ?? []).map((item) => ({
+              role: item.from === "you" ? ("user" as const) : ("assistant" as const),
+              text: item.text,
+            }));
+            const groupBots = group.bot_ids
+              .map((engineId) => store.botByThread(threadIdOfEngineBot(engineId) ?? ""))
+              .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot));
+            const turns = await runGroupRound(groupBots, (bot) =>
+              askBotAndWait(bot.id, message, 0, {
                 threadId: groupThreadId(group.id, bot.id),
                 transcript,
-              });
-              turns.push({ bot_id: bot.id, reply });
-              groupStore.append(group.id, { from: bot.id, text: reply });
-            }
+              }),
+            );
+            for (const turn of turns) groupStore.append(group.id, { from: turn.bot_id, text: turn.reply });
             return json(res, 200, { turns, owner: turns[0]?.bot_id ?? null, messages: groupStore.get(group.id)?.messages ?? [] });
           }
           // multibot: bot opens a temporary collaboration room with another bot
