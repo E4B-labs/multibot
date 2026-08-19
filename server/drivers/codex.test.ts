@@ -86,6 +86,7 @@ describe("CodexDriver turns (fake app-server)", () => {
       "content.delta",
       "item.completed", // assistant_text
       "thread.token-usage.updated",
+      "thread.token-usage.updated",
       "turn.completed",
     ]);
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "codex")).toBe(true);
@@ -93,10 +94,12 @@ describe("CodexDriver turns (fake app-server)", () => {
       sessionId: "codex-thread-1",
       model: "fake-codex-model",
     });
-    expect(recorder.events.find((e) => e.type === "thread.token-usage.updated")).toMatchObject({
-      input: 7,
-      output: 3,
-    });
+    // multibot: Codex raportuje narastającą sumę — driver emituje DELTY
+    // (4/2, potem 3/1), żeby recordTokens nie liczył sumy sum
+    expect(recorder.events.filter((e) => e.type === "thread.token-usage.updated")).toMatchObject([
+      { input: 4, output: 2 },
+      { input: 3, output: 1 },
+    ]);
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));

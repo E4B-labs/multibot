@@ -216,6 +216,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       asks: Map<string, (behavior: string, message?: string) => void>;
     }
     const active = new Map<string, Turn>();
+    // multibot: Codex raportuje NARASTAJĄCĄ sumę tokenów wątku i robi to
+    // wielokrotnie w trakcie tury, a workspace.recordTokens DODAJE każdy
+    // raport — bez delty licznik zużycia rósł lawinowo (suma sum).
+    const reportedUsage = new Map<string, { input: number; output: number }>();
 
     const emit = (event: RuntimeEvent) => {
       for (const l of [...listeners]) l(event);
@@ -490,12 +494,22 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           case "thread/tokenUsage/updated": {
             const t = p.tokenUsage?.total;
             if (t) {
-              emit({
-                ...base(threadId, turnId),
-                type: "thread.token-usage.updated",
-                input: t.inputTokens ?? 0,
-                output: t.outputTokens ?? 0,
-              });
+              // suma → delta względem ostatniego raportu tego wątku; ujemna
+              // (nowa sesja po restarcie CLI zaczyna sumę od zera) = pełna suma
+              const prev = reportedUsage.get(threadId) ?? { input: 0, output: 0 };
+              const totalInput = t.inputTokens ?? 0;
+              const totalOutput = t.outputTokens ?? 0;
+              const input = totalInput >= prev.input ? totalInput - prev.input : totalInput;
+              const output = totalOutput >= prev.output ? totalOutput - prev.output : totalOutput;
+              reportedUsage.set(threadId, { input: totalInput, output: totalOutput });
+              if (input || output) {
+                emit({
+                  ...base(threadId, turnId),
+                  type: "thread.token-usage.updated",
+                  input,
+                  output,
+                });
+              }
             }
             break;
           }

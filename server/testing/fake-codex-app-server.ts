@@ -34,6 +34,9 @@ const finishTurn = () => {
     notify("item/agentMessage/delta", { itemId: "m1", delta: "fake codex" });
   }
   notify("item/completed", { item: { id: "m1", type: "agentMessage", text: "done from fake codex" } });
+  // multibot: dwa raporty z NARASTAJĄCĄ sumą, jak prawdziwy Codex w trakcie
+  // tury — driver ma z nich zrobić delty (4/2 i 3/1), nie sumę sum
+  notify("thread/tokenUsage/updated", { tokenUsage: { total: { inputTokens: 4, outputTokens: 2 } } });
   notify("thread/tokenUsage/updated", { tokenUsage: { total: { inputTokens: 7, outputTokens: 3 } } });
   dump();
   notify("turn/completed", { turn: { status: "completed" } });
