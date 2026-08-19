@@ -202,7 +202,7 @@ function askBotAndWait(
   targetBotId: string,
   message: string,
   depth: number,
-  options?: { threadId?: string; transcript?: Array<{ role: "user" | "assistant"; text: string }>; timeoutMs?: number },
+  options?: { threadId?: string; transcript?: Array<{ role: "user" | "assistant"; text: string }>; timeoutMs?: number; onText?: (text: string) => void },
 ): Promise<string> {
   const target = store.bot(targetBotId);
   if (!target) return Promise.resolve("(no such bot)");
@@ -210,15 +210,33 @@ function askBotAndWait(
   return new Promise((resolve) => {
     let text = "";
     let done = false;
+    // multibot: strumień do wołającego — pokój pokazuje tekst w trakcie tury,
+    // nie po 20 minutach, kiedy wygląda to na zacięcie. Delty buforujemy i
+    // spłukujemy co sekundę, żeby nie robić wiadomości z pojedynczych tokenów;
+    // item.completed zostaje wyłącznie źródłem zwracanej odpowiedzi.
+    let deltaBuf = "";
+    let deltaTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushDelta = () => {
+      if (deltaTimer) clearTimeout(deltaTimer);
+      deltaTimer = null;
+      const chunk = deltaBuf.trim();
+      deltaBuf = "";
+      if (chunk) options?.onText?.(chunk);
+    };
     const finish = (out: string) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      flushDelta();
       unsub();
       resolve(out);
     };
     const unsub = bus.subscribe((e: RuntimeEvent) => {
       if (e.threadId !== threadId) return;
+      if (options?.onText && e.type === "content.delta" && e.streamKind === "assistant_text") {
+        deltaBuf += e.delta;
+        if (!deltaTimer) deltaTimer = setTimeout(flushDelta, 1_000);
+      }
       if (e.type === "item.completed" && e.itemType === "assistant_text") {
         text += (text ? "\n" : "") + e.text;
       } else if (e.type === "turn.completed") {
@@ -295,12 +313,33 @@ async function runCollab(roomId: string): Promise<void> {
       const bot = store.bot(botId);
       if (!bot) continue;
       if (bot.busy) continue; // busy-safe: that bot is mid-turn elsewhere
+      // multibot: kawałki tury lecą do pokoju na bieżąco — bez tego transkrypt
+      // stał pusty przez całą turę (do 20 min) i pokój wyglądał na zacięty.
+      let streamed = false;
       const reply = await askBotAndWait(botId, collabPrompt(room, bot), 1, {
         threadId: roomThreadId(roomId, botId),
         transcript: room.transcript.map((m) => ({ role: "assistant" as const, text: m.text })),
         // multibot: tura pokoju może być długą pracą z komputerem — 4 minuty
         // zwracały "(timed out…)" w trakcie rzeczywistej pracy bota.
         timeoutMs: 20 * 60_000,
+        onText: (t) => {
+          const live = rooms.get(roomId);
+          if (!live || live.status !== "running") return;
+          const at = t.indexOf(ROOM_DONE_MARKER);
+          let chunk = at >= 0 ? t.slice(0, at) : t;
+          // bufor delt potrafi rozciąć marker — utnij jego ogonową połówkę
+          for (let k = Math.min(chunk.length, ROOM_DONE_MARKER.length - 1); k > 0; k--) {
+            if (chunk.endsWith(ROOM_DONE_MARKER.slice(0, k))) {
+              chunk = chunk.slice(0, -k);
+              break;
+            }
+          }
+          chunk = chunk.trim();
+          if (!chunk) return;
+          streamed = true;
+          rooms.append(roomId, botId, chunk);
+          broadcast({ kind: "room", room: rooms.get(roomId) });
+        },
       });
       const current = rooms.get(roomId);
       if (!current || current.status !== "running") {
@@ -309,7 +348,7 @@ async function runCollab(roomId: string): Promise<void> {
       }
       const markerAt = reply.indexOf(ROOM_DONE_MARKER);
       const visible = markerAt >= 0 ? reply.slice(0, markerAt).trim() : reply;
-      if (visible) {
+      if (visible && !streamed) {
         rooms.append(roomId, botId, visible);
         broadcast({ kind: "room", room: rooms.get(roomId) });
       }
@@ -1888,12 +1927,20 @@ const server = createServer(async (req, res) => {
         postRoomChip(fromBotId, room);
         broadcast({ kind: "room", room: rooms.get(room.id) });
         const prefixed = `[Message from @${from.name}, another bot in this MultiBot workspace. Reply to them.]\n\n${message}`;
+        // multibot: kawałki odpowiedzi lecą do pokoju w trakcie tury — bez
+        // tego pokój był pusty do 20 minut i wyglądał na zacięty.
+        let streamed = false;
         const reply = await askBotAndWait(toBotId, prefixed, depth, {
           // multibot: pytany bot może mieć komputer i pracować dłużej niż
           // dawne 4 minuty — sufit tury pokoju, jak w runCollab.
           timeoutMs: 20 * 60_000,
+          onText: (t) => {
+            streamed = true;
+            rooms.append(room.id, toBotId, t);
+            broadcast({ kind: "room", room: rooms.get(room.id) });
+          },
         });
-        rooms.append(room.id, toBotId, reply);
+        if (!streamed) rooms.append(room.id, toBotId, reply);
         rooms.setStatus(room.id, "done");
         broadcast({ kind: "room", room: rooms.get(room.id) });
         return json(res, 200, { botName: target.name, text: reply });

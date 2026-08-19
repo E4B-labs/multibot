@@ -171,7 +171,10 @@ function handle(msg: any) {
           method: "session/update",
           params: { update: { sessionUpdate: "agent_message_chunk", content: { text: done ? "room work from fake\n[TASK COMPLETE]" : "room work from fake" } } },
         });
-        complete();
+        // multibot: pierwsza tura domyka się z opóźnieniem — test strumienia
+        // sprawdza, że wkładka jest w pokoju ZANIM tura się skończy.
+        if (done) complete();
+        else setTimeout(complete, 1_200);
         return;
       }
       if (mode === "goal") {

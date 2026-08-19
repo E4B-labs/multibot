@@ -134,6 +134,13 @@ describe("collaboration rooms", () => {
       expect(created.status).toBe(201);
       const roomId = created.body.id;
 
+      // multibot: strumień do pokoju — wkładka pierwszej tury musi być widoczna
+      // ZANIM tura się domknie (fake celowo zwleka z końcem tury 1,2 s).
+      await waitFor(async () => {
+        const r = (await api("GET", `/api/rooms/${roomId}`)).body;
+        return r?.status === "running" && (r?.transcript ?? []).some((m: any) => String(m.text).includes("room work from fake"));
+      }, 10_000, "streamed contribution while the turn is still running");
+
       // runCollab settles quickly — the fake replies with the done marker
       await waitFor(async () => (await api("GET", `/api/rooms/${roomId}`)).body?.status === "done", 25_000, "room done");
 
