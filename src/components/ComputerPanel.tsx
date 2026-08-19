@@ -10,7 +10,7 @@
 // the agent owns input by default; the user can take it, see-through
 // continues either way (agent can always watch, never blocked from reading).
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Maximize2, Settings, X } from "lucide-react";
+import { AlertTriangle, GraduationCap, Hand, Loader2, Maximize2, MousePointer2, Settings, Square, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch, getAuthToken } from "@/lib/auth";
@@ -228,17 +228,68 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       .finally(() => setControlPending(false));
   };
 
+  // multibot: sterowanie i nagrywanie to dwie ikony obok siebie. Napisy poszły,
+  // bo rząd wchodzi też do nagłówka pełnego ekranu, gdzie dwa pełne przyciski
+  // zjadały miejsce nazwie. Stan czyta się z koloru: wypełniony = aktywne.
+  const controlLabel =
+    owner === "user"
+      ? polish ? "Oddaj sterowanie" : "Hand back"
+      : polish ? "Przejmij sterowanie" : "Take control";
   const controlButton = computerState === "ready" && (
     <button
       type="button"
       onClick={owner === "user" ? releaseControl : acquireControl}
       disabled={controlPending}
+      title={controlLabel}
+      aria-label={controlLabel}
+      aria-pressed={owner === "user"}
       className={cn(
-        "rounded-lg px-3 py-1.5 text-[13px] font-medium disabled:opacity-50",
-        owner === "user" ? "bg-accent text-white" : "bg-raised text-ink hover:bg-raised-hover",
+        "rounded-lg p-2 disabled:opacity-50",
+        owner === "user" ? "bg-accent text-white" : "bg-raised text-ink-secondary hover:bg-raised-hover hover:text-ink",
       )}
     >
-      {owner === "user" ? (polish ? "Oddaj sterowanie" : "Hand back") : polish ? "Przejmij sterowanie" : "Take control"}
+      {controlPending ? (
+        <Loader2 size={16} className="animate-spin" />
+      ) : owner === "user" ? (
+        <Hand size={16} />
+      ) : (
+        <MousePointer2 size={16} />
+      )}
+    </button>
+  );
+  // multibot: nagrywanie startuje z ikony przy „Przejmij sterowanie", a stan
+  // trzyma TeachCard pod ekranem — stąd zdarzenie zamiast wspólnego reduktora.
+  // Ta sama ikona zatrzymuje, więc jeden guzik zamiast dwóch obok siebie.
+  const teachButton = computerState === "ready" && (
+    <button
+      type="button"
+      onClick={() =>
+        window.dispatchEvent(new CustomEvent(teachRecording ? "mb:teach:stop" : "mb:teach:start"))
+      }
+      disabled={teachPhase === "starting" || teachPhase === "stopping"}
+      title={
+        teachRecording
+          ? polish ? "Zatrzymaj nagrywanie" : "Stop recording"
+          : polish ? "Naucz umiejętności — nagraj demonstrację" : "Teach a skill — record a demonstration"
+      }
+      aria-label={
+        teachRecording
+          ? polish ? "Zatrzymaj nagrywanie" : "Stop recording"
+          : polish ? "Naucz umiejętności" : "Teach a skill"
+      }
+      aria-pressed={teachRecording}
+      className={cn(
+        "rounded-lg p-2 disabled:opacity-50",
+        teachRecording ? "bg-danger text-white" : "bg-raised text-ink-secondary hover:bg-raised-hover hover:text-ink",
+      )}
+    >
+      {teachPhase === "starting" || teachPhase === "stopping" ? (
+        <Loader2 size={16} className="animate-spin" />
+      ) : teachRecording ? (
+        <Square size={16} />
+      ) : (
+        <GraduationCap size={16} />
+      )}
     </button>
   );
   const agentName = state.bots.find((item) => item.id === agentQueue.agentOwner)?.name ?? agentQueue.agentOwner;
@@ -315,28 +366,15 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             className="absolute inset-0 cursor-zoom-in"
           />
         )}
-        {/* multibot: czerwona ramka dookoła nagrywanego obszaru (UI-SPEC §8).
+        {/* multibot: czerwona ramka dookoła nagrywanego obszaru (UI-SPEC §8) —
+            i nic poza nią. Pasek z napisem „Nagrywanie…" zasłaniał górę ekranu
+            bota dokładnie wtedy, gdy użytkownik pokazuje tam zadanie; stop
+            siedzi w ikonie nad ekranem, więc pasek nie niósł nic własnego.
             Osobna warstwa, nie obramowanie kontenera: `pointer-events-none`
             przepuszcza kliknięcia do ekranu, a ramka nie zabiera iframe'owi
             pikseli, więc obraz nie skacze przy starcie nagrywania. */}
         {teachRecording && (
           <div className="pointer-events-none absolute inset-0 z-20 border-2 border-danger" />
-        )}
-        {teachRecording && (
-          <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-center gap-2 bg-danger/90 px-3 py-1.5 text-[12px] font-medium text-white">
-            <span className="size-2 animate-pulse rounded-full bg-white" />
-            {polish
-              ? "Nagrywanie — pokaż zadanie na komputerze bota"
-              : "Recording — demonstrate the task on the bot's computer"}
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent("mb:teach:stop"))}
-              className="ml-1 rounded p-0.5 hover:bg-white/20"
-              aria-label={polish ? "Zatrzymaj" : "Stop"}
-            >
-              <X size={14} />
-            </button>
-          </div>
         )}
       </div>
     ) : (
@@ -384,10 +422,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             <button
               type="button"
               onClick={() => setFullscreen(true)}
-              className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium hover:bg-raised hover:text-ink"
+              title={polish ? "Pełny ekran" : "Full screen"}
+              aria-label={polish ? "Pełny ekran" : "Full screen"}
+              className="rounded-md p-1 hover:bg-raised hover:text-ink"
             >
-              <Maximize2 size={12} />
-              {polish ? "Pełny ekran" : "Full screen"}
+              <Maximize2 size={14} />
             </button>
           </div>
           {(agentName || queuedCount > 0) && (
@@ -406,7 +445,12 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             {!fullscreen && screen(false)}
           </div>
 
-          {controlButton && <div className="mt-3 flex justify-end">{controlButton}</div>}
+          {controlButton && (
+            <div className="mt-3 flex items-center justify-end gap-2">
+              {teachButton}
+              {controlButton}
+            </div>
+          )}
 
           <TeachCard
             engineBotId={`mb-${bot.threadId}`}
@@ -424,9 +468,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         // K6: duży panel na środku, nie cały ekran — MultiBot pod spodem zostaje
         // widoczny (lekko przyciemnione tło), róg zaokrąglony jak w kartach.
         <div className="fixed inset-0 z-50 flex flex-col bg-black/50 p-[5%] backdrop-blur-[1px]">
-          <div className="flex items-center justify-between px-1 py-2">
-            <span className="text-[15px] font-semibold text-ink">{polish ? "Ekran bota" : "Bot screen"}</span>
+          {/* multibot: same ikony, bez tytułu — na pełnym ekranie liczy się
+              obraz, a nazwa panelu i tak stoi w nagłówku panelu obok. */}
+          <div className="flex items-center justify-end px-1 py-2">
             <div className="flex items-center gap-2">
+              {teachButton}
               {controlButton}
               <button
                 onClick={() => setFullscreen(false)}
