@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
 import { addRemoteHost, getActiveId, listRemoteHosts, removeHost, resolveLoadTarget, setActiveHost } from "./hosts.mjs";
 import { isLocalSender } from "./local-origin.mjs";
+import { startRemoteUiServer } from "./remote-ui.mjs";
 import { startSpeech, stopSpeech } from "./speech.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
 
@@ -154,15 +155,56 @@ function remoteFragment(token) {
   return token ? `#access_token=${encodeURIComponent(token)}` : "";
 }
 
+// multibot: katalog z ZAPAKOWANYM interfejsem — tym, który przychodzi razem z
+// aktualizacją. W paczce leży w Resources (ten sam, z którego korzysta lokalny
+// harness), w repo — w `dist` po `vite build`.
+const BUNDLED_UI_DIR = app.isPackaged ? path.join(process.resourcesPath, "ui") : path.join(__dirname, "..", "dist");
+
+// Lokalny origin obsługujący aktywnego hosta zdalnego; `null`, dopóki go nie ma.
+let remoteUi = null;
+
+async function closeRemoteUi() {
+  if (!remoteUi) return;
+  const closing = remoteUi;
+  remoteUi = null;
+  await closing.close().catch(() => {});
+}
+
+/**
+ * Podnosi (albo odzyskuje) lokalny origin dla tego hosta. `null` oznacza, że
+ * się nie udało — wtedy wracamy do ładowania interfejsu prosto z hosta, czyli
+ * do zachowania sprzed tej zmiany. Awaria tego serwera ma degradować apkę do
+ * poprzedniego trybu, nigdy do białego ekranu.
+ */
+async function remoteUiOriginFor(remoteUrl) {
+  if (remoteUi && remoteUi.remoteUrl === remoteUrl) return remoteUi.url;
+  await closeRemoteUi();
+  try {
+    remoteUi = await startRemoteUiServer({ staticDir: BUNDLED_UI_DIR, remoteUrl });
+  } catch (err) {
+    console.warn("[multibot] lokalny origin nie wstał:", err?.message ?? err);
+    remoteUi = null;
+  }
+  return remoteUi?.url ?? null;
+}
+
 /** Decides what `win` should load: a saved remote host, or the existing
  * local flow (packaged server / dev vite), completely unchanged when no
  * remote host is active. */
-function loadActiveTarget(win) {
+async function loadActiveTarget(win) {
   const target = resolveLoadTarget();
   if (target.mode === "remote") {
-    win.loadURL(`${target.url}/${remoteFragment(target.token)}`);
+    // multibot: interfejs bierzemy z PACZKI, a z hosta wyłącznie dane. Wcześniej
+    // `loadURL` szedł prosto na adres hosta, więc ekran przychodził z telefonu i
+    // żadna poprawka wyglądu nie docierała do użytkownika przez aktualizację —
+    // instalator wiózł interfejs, którego apka w tym trybie nigdy nie otwierała.
+    // Jak to działa i dlaczego bez CORS: electron/remote-ui.mjs.
+    const origin = await remoteUiOriginFor(target.url);
+    win.loadURL(`${origin ?? target.url}/${remoteFragment(target.token)}`);
     return;
   }
+  // Wracamy na lokalny harness — port zdalnego originu nie ma po co wisieć.
+  await closeRemoteUi();
   if (app.isPackaged) {
     // Fragment never reaches HTTP. Renderer stores it, then erases URL before
     // first paint, so fresh packaged installs do not deadlock on login.
@@ -197,7 +239,7 @@ function createWindow() {
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
-  loadActiveTarget(win);
+  void loadActiveTarget(win);
   return win;
 }
 
@@ -314,13 +356,13 @@ ipcMain.handle("speech:stop", () => stopSpeech());
 ipcMain.handle("hosts:list", () => ({ activeId: getActiveId(), hosts: listRemoteHosts() }));
 ipcMain.handle("hosts:add-remote", (_event, host) => addRemoteHost(host ?? {}));
 ipcMain.handle("hosts:remove", (_event, id) => removeHost(id));
-ipcMain.handle("hosts:use-local", () => {
+ipcMain.handle("hosts:use-local", async () => {
   setActiveHost("local");
-  if (mainWindow) loadActiveTarget(mainWindow);
+  if (mainWindow) await loadActiveTarget(mainWindow);
 });
-ipcMain.handle("hosts:use-host", (_event, id) => {
+ipcMain.handle("hosts:use-host", async (_event, id) => {
   setActiveHost(id);
-  if (mainWindow) loadActiveTarget(mainWindow);
+  if (mainWindow) await loadActiveTarget(mainWindow);
 });
 // Seam: server/firebase-auth.ts has no loopback-capable HTTP route yet (see
 // electron/oauth-loopback.mjs for the reusable receiver, unused until then).
