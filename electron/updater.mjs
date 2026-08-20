@@ -10,8 +10,6 @@
 import { app, ipcMain } from "electron";
 import { createRequire } from "node:module";
 
-import { isLocalSender } from "./local-origin.mjs";
-
 const require = createRequire(import.meta.url);
 
 let autoUpdater = null;
@@ -42,11 +40,13 @@ function check() {
 export function registerUpdaterIpc() {
   ipcMain.handle("update:get-state", () => state);
   ipcMain.handle("update:check", () => check());
-  // C2 remote mode: the window can show an arbitrary host's page — it must
-  // not be able to trigger a download or install of a binary update just by
-  // being loaded (see electron/local-origin.mjs).
-  ipcMain.handle("update:download", (event) => {
-    if (!isLocalSender(event)) return;
+  // No local-origin guard here (unlike screen/mic/speech in main.mjs): in C2
+  // remote mode the window shows the remote host's page, so the guard just
+  // swallowed the user's "Aktualizuj" click. Safe to drop — the update feed is
+  // pinned in the main process (GitHub E4B-labs/multibot, sha512 verified
+  // against latest.yml), so the renderer can at most trigger the one
+  // legitimate update; it never picks what gets installed.
+  ipcMain.handle("update:download", () => {
     try {
       installWhenDownloaded = true;
       autoUpdater?.downloadUpdate();
@@ -54,8 +54,7 @@ export function registerUpdaterIpc() {
       setState({ status: "error", message: String(e?.message ?? e) });
     }
   });
-  ipcMain.handle("update:install", (event) => {
-    if (!isLocalSender(event)) return;
+  ipcMain.handle("update:install", () => {
     // isSilent, isForceRunAfter — relaunch straight into the new version
     try {
       autoUpdater?.quitAndInstall(true, true);
