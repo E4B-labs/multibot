@@ -538,22 +538,19 @@ export function Sidebar() {
     };
   }, [hasLocalBot]);
 
-  // multibot: otwarty bot ma własne miejsce nad przyciskiem „+", więc z listy
-  // niżej wypada — inaczej byłby na ekranie dwa razy.
-  const activeBot = state.bots.find((b) => b.id === state.selectedId);
-  const activeSlot = activeBot && (
-    <div className={cn(collapsed ? "px-1 pt-2" : "px-2 pt-2")}>
-      <BotListItem bot={activeBot} onMenu={setMenu} collapsed={collapsed} />
-    </div>
-  );
-
+  // multibot: otwarty bot zostaje NA SWOIM MIEJSCU w liście pod wyszukiwarką.
+  // Wcześniej dostawał osobny wiersz nad paskiem wyszukiwania i wypadał z listy,
+  // więc samo wybranie bota wyrzucało go ponad wyszukiwarkę, a lista pod spodem
+  // przeskakiwała o jedną pozycję.
+  //
+  // Sortujemy WYŁĄCZNIE po przypięciu. Wcześniej kluczem był jeszcze `unread`,
+  // ale otwarcie bota gasi ten znacznik (src/state/store.tsx), więc wybranie
+  // nieprzeczytanego bota spychało go w dół — czyli dokładnie ten ruch, który
+  // miał zniknąć. Sort w JS jest stabilny, więc poza przypiętymi kolejność
+  // zostaje taka, jaka przyszła z serwera, i nie zmienia się przy klikaniu.
   const visibleBots = state.bots
-    .filter((b) => !b.hidden && b.id !== state.selectedId)
-    .sort((a, b) => {
-      const pin = Number(b.pinned ?? false) - Number(a.pinned ?? false);
-      if (pin !== 0) return pin;
-      return Number(b.unread) - Number(a.unread);
-    });
+    .filter((b) => !b.hidden)
+    .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
 
   // multibot: F9-FE — kandydaci do grup: cała flota, także ukryci. Kolejność
   // stabilna z listy botów; wybrany driver nie usuwa bota z grup.
@@ -584,11 +581,6 @@ export function Sidebar() {
         collapsed ? "w-[80px]" : "w-[320px]",
       )}
     >
-      {/* multibot: wiersz otwartego bota nad plusem. W Electronie natywne
-          światła są przyklejone przez system do lewego górnego rogu okna, więc
-          tam wiersz idzie dopiero pod paskiem tytułu — inaczej leżałby pod nimi. */}
-      {!isElectron && activeSlot}
-
       {/* Titlebar: real traffic lights in Electron, faux ones in the browser */}
       <div
         className={cn(
@@ -662,8 +654,6 @@ export function Sidebar() {
         )}
         </div>
       </div>
-
-      {isElectron && activeSlot}
 
       {/* Search */}
       {!collapsed && (
