@@ -18,7 +18,7 @@ const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 /** Atrapa telefonu: własny `index.html`, echo nagłówków i prawdziwy handshake WS. */
 function startFakeHost() {
-  const seen = { auth: null, wsProtocol: null, fromClient: null };
+  const seen = { auth: null, wsProtocol: null, wsUrl: null, fromClient: null };
   const server = createServer((req, res) => {
     if (req.url === "/") {
       res.writeHead(200, { "content-type": "text/html" });
@@ -36,6 +36,7 @@ function startFakeHost() {
   });
   server.on("upgrade", (req, socket) => {
     seen.wsProtocol = req.headers["sec-websocket-protocol"] ?? null;
+    seen.wsUrl = req.url ?? null;
     const accept = createHash("sha1")
       .update(String(req.headers["sec-websocket-key"]) + WS_GUID)
       .digest("base64");
@@ -174,6 +175,38 @@ test("WebSocket przechodzi przez proxy w obie strony razem z subprotokołem", as
   upgraded.socket.write("OD-KLIENTA");
   await new Promise((done) => setTimeout(done, 50));
   assert.equal(host.seen.fromClient, "OD-KLIENTA", "ramki klienta muszą dojść do hosta");
+  upgraded.socket.destroy();
+});
+
+// Ekran komputera (noVNC) wchodzi na hosta INNYM upgradem niż czat: token
+// jedzie w query (`?token=`), a nie w subprotokole, i noVNC prosi o subprotokół
+// `binary`. Obcięcie query albo podmiana subprotokołu po drodze kończy się
+// odrzuconym handshakiem i pustym ekranem komputera, więc oba są tu przybite.
+test("upgrade websockify idzie na hosta z query i subprotokołem `binary`", async () => {
+  const { port } = new URL(ui.url);
+  const path = "/api/bots/bot-1/computer/vnc/websockify?token=sekret%2F%3D";
+  const upgraded = await new Promise((done, fail) => {
+    const req = httpRequest({
+      hostname: "127.0.0.1",
+      port,
+      path,
+      headers: {
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-key": Buffer.from("fedcba9876543210").toString("base64"),
+        "sec-websocket-version": "13",
+        "sec-websocket-protocol": "binary",
+      },
+    });
+    req.on("upgrade", (res, socket) => done({ res, socket }));
+    req.on("response", (res) => fail(new Error(`zamiast 101 przyszło ${res.statusCode}`)));
+    req.on("error", fail);
+    req.end();
+  });
+
+  assert.equal(upgraded.res.statusCode, 101);
+  assert.equal(host.seen.wsUrl, path, "query z tokenem musi dojść do hosta nietknięte");
+  assert.equal(host.seen.wsProtocol, "binary", "subprotokół noVNC nie może być podmieniony");
   upgraded.socket.destroy();
 });
 

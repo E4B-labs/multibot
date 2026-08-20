@@ -82,10 +82,19 @@ export function computerVncSrc(botId: string, controlOwner: ControlOwner, token 
 }
 
 /** Lite zostawia u góry pasek stanu z „Send CtrlAltDel". Strona jedzie z naszego
- *  origin (proxy harnessu), więc po prostu go stąd usuwamy — zamiast utrzymywać
- *  własną kopię noVNC albo przepisywać HTML w proxy. */
+ *  origin (proxy harnessu), więc chowamy go stąd — zamiast utrzymywać własną
+ *  kopię noVNC albo przepisywać HTML w proxy.
+ *
+ *  CHOWAMY, nie usuwamy, i to nie jest kosmetyka. `load` ramki potrafi paść
+ *  PRZED wykonaniem modułu `vnc_lite.html` (zmierzone w Electronie: load 1189 ms,
+ *  pierwszy canvas 1223 ms), a pierwsza instrukcja tego modułu to
+ *  `document.getElementById('sendCtrlAltDelButton').onclick = …`. Po `remove()`
+ *  guzik już nie istnieje, moduł leci na
+ *  `TypeError: Cannot set properties of null` i RFB NIGDY nie powstaje: brak
+ *  canvasu, brak WebSocketa, ekran komputera zostaje czarny na zawsze. */
 export function stripVncChrome(doc: Document | null | undefined): void {
-  doc?.getElementById("top_bar")?.remove();
+  const bar = doc?.getElementById("top_bar");
+  if (bar) (bar as HTMLElement).style.display = "none";
   if (doc?.body) doc.body.style.backgroundColor = "#000";
 }
 
@@ -350,7 +359,11 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             }
           }}
           onError={() => setScreenNote("Przeglądarka nie wczytała adresu ekranu.")}
-          className="h-full w-full border-0"
+          // Do `load` ramka pokazuje niebieski pasek noVNC („Loading",
+          // „Send CtrlAltDel") — chowamy go dopiero w `onLoad`, więc bez tego
+          // mruga na starcie. `invisible` (visibility), nie `hidden`: noVNC
+          // liczy `scaleViewport` z realnych wymiarów ramki.
+          className={cn("h-full w-full border-0", !screenLoaded && "invisible")}
         />
         {(!screenLoaded || screenNote) && (
           <div className="pointer-events-none absolute inset-x-2 bottom-2 z-20 rounded-lg bg-danger px-3 py-2 text-[11px] leading-snug text-white">
