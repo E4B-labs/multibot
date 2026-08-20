@@ -1194,15 +1194,18 @@ function botSystemPrompt(
  * (potrafi stawiać kontener) i leasing agenta, a rozgrzewka nie ma prawa robić
  * ani jednego, ani drugiego. Bot z komputerem dostanie więc podpis inny niż
  * rozgrzany i zapłaci zimny start jak dotąd — nigdy nic gorszego.
+ *
+ * Zwraca `true`, gdy bot JUŻ był ciepły (albo rozgrzewka go nie dotyczy) — po
+ * tym pozna zamiatarka niżej, czy poprzednia próba się utrzymała.
  */
-async function warmBot(botId: string): Promise<void> {
+async function warmBot(botId: string): Promise<boolean> {
   const bot = store.bot(botId);
-  if (!bot || bot.busy) return;
+  if (!bot || bot.busy) return true;
   const instance = registry.get(bot.modelSelection.instanceId);
   // Tylko driver, który trzyma proces CLI między turami i rozumie `warmOnly`.
   // Dla pozostałych driverów pusta tura byłaby PRAWDZIWĄ turą do modelu.
-  if (!instance || instance.driverKind !== "claudeAgent") return;
-  if (instance.adapter.hasSession?.(bot.threadId)) return; // już ciepły
+  if (!instance || instance.driverKind !== "claudeAgent") return true;
+  if (instance.adapter.hasSession?.(bot.threadId)) return true; // już ciepły
   const integrations: TurnIntegrationsLike & Record<string, unknown> = {};
   if (cfg.composio?.key && canUseIntegration(bot.threadId, "integrations")) {
     integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
@@ -1230,25 +1233,39 @@ async function warmBot(botId: string): Promise<void> {
     integrations,
     warmOnly: true,
   } as Parameters<typeof instance.adapter.sendTurn>[0] & { warmOnly: boolean });
+  return false; // proces dopiero co wstał — czy się utrzymał, pokaże następne zamiatanie
 }
 
 /**
- * multibot (A2): rozgrzewka po starcie harnessu — boty w kolejności ostatniej
- * rozmowy, do limitu żywych workerów. Sekwencyjnie i bez pośpiechu: dwa zimne
- * starty CLI naraz biją się na telefonie o RAM i CPU, więc szeregowo wychodzi
- * szybciej niż równolegle.
+ * multibot (A2): rozgrzewka botów — w kolejności ostatniej rozmowy, do limitu
+ * żywych workerów. Sekwencyjnie i bez pośpiechu: dwa zimne starty CLI naraz
+ * biją się na telefonie o RAM i CPU, więc szeregowo wychodzi szybciej niż
+ * równolegle.
+ *
+ * MULTIBOT_WARM_WORKERS=0 znaczy „każdy bot to ciepły worker": rozgrzewamy
+ * WSZYSTKIE boty, a driver nikogo nie eksmituje ani nie ubija z bezczynności.
+ * Parsowanie musi się zgadzać z maxWarmWorkers() w drivers/claude.ts — inaczej
+ * jedna strona zrozumiałaby 0 jako „dwa".
  */
-async function warmBotsOnBoot(): Promise<void> {
-  const limit = Number(process.env.MULTIBOT_WARM_WORKERS) || 2;
+const warmWorkerLimit = () =>
+  process.env.MULTIBOT_WARM_WORKERS ? Number(process.env.MULTIBOT_WARM_WORKERS) || 0 : 2;
+const warmColdStreak = new Map<string, number>();
+async function warmBots(): Promise<void> {
+  const limit = warmWorkerLimit();
   const lastAt = (b: BotRecord) => store.messagesFor(b.threadId).at(-1)?.at ?? b.createdAt;
   const recent = store.bots
     .filter((b) => !b.hidden && !b.temporary)
-    .sort((a, b) => lastAt(b) - lastAt(a))
-    .slice(0, limit);
-  for (const bot of recent) {
-    await warmBot(bot.id).catch((e) =>
-      console.warn(`[multibot] warmup failed for ${bot.id}:`, e instanceof Error ? e.message : e),
-    );
+    .sort((a, b) => lastAt(b) - lastAt(a));
+  for (const bot of limit > 0 ? recent.slice(0, limit) : recent) {
+    // Bot, który pięć zamiatań z rzędu nie utrzymał procesu, jest odpuszczany:
+    // to znaczy, że CLI jest u niego trwale zepsute, a nie że zabrakło pamięci
+    // na chwilę — mielenie telefonu w kółko nic tu nie naprawi.
+    if ((warmColdStreak.get(bot.id) ?? 0) >= 5) continue;
+    const wasWarm = await warmBot(bot.id).catch((e) => {
+      console.warn(`[multibot] warmup failed for ${bot.id}:`, e instanceof Error ? e.message : e);
+      return false;
+    });
+    warmColdStreak.set(bot.id, wasWarm ? 0 : (warmColdStreak.get(bot.id) ?? 0) + 1);
   }
 }
 
@@ -2270,6 +2287,18 @@ const server = createServer(async (req, res) => {
       if (bootSelection.instanceId === "local" && !process.env.VITEST) {
         void configureEngineComputer(bot.threadId, "own").catch((error) =>
           console.warn(`[multibot] engine prewarm failed for ${bot.id}:`, error instanceof Error ? error.message : error),
+        );
+      }
+      // multibot: w trybie „każdy bot to ciepły worker" nowy bot dostaje proces
+      // od razu, w tle — inaczej pierwsza wiadomość do świeżo utworzonego bota
+      // płaci pełny zimny start CLI (na telefonie kilkanaście sekund), czyli
+      // dokładnie w tym momencie, w którym użytkownik patrzy na pusty ekran.
+      // Przy limicie > 0 tego nie robimy: świeży bot wyeksmitowałby z LRU tego,
+      // z którym ktoś właśnie rozmawia, a rozgrzewkę i tak dostanie przy
+      // otwarciu (POST /api/bots/:id/warm).
+      if (warmWorkerLimit() <= 0) {
+        void warmBot(bot.id).catch((error) =>
+          console.warn(`[multibot] warmup failed for ${bot.id}:`, error instanceof Error ? error.message : error),
         );
       }
       return json(res, 201, { bot: { ...store.bot(bot.id)!, messages: store.messagesFor(bot.threadId) } });
@@ -3294,7 +3323,15 @@ server.listen(PORT, HOST, () => {
   void reconcileComputers().catch((e) => console.warn("[multibot] computer reconcile failed:", e));
   // multibot (A2): rozgrzewka rusza PO podniesieniu HTTP i nie czeka na nic —
   // serwer odpowiada od pierwszej sekundy, a workery wstają w tle.
-  void warmBotsOnBoot().catch((e) => console.warn("[multibot] warmup failed:", e));
+  void warmBots().catch((e) => console.warn("[multibot] warmup failed:", e));
+  // multibot: w trybie „każdy bot zawsze active" worker potrafi zniknąć bez
+  // naszego udziału — Android przy braku pamięci ubija bezczynne procesy (LMK),
+  // a wtedy bot cicho wraca do zimnego startu. Co minutę sprawdzamy więc, kto
+  // stracił proces, i stawiamy go z powrotem; warmBot jest idempotentny, więc
+  // ciepłe boty zamiatanie nic nie kosztuje. Przy limicie > 0 nie zamiatamy
+  // wcale — tam bezczynny worker MA prawo zejść i wskrzeszanie go co minutę
+  // wywróciłoby WORKER_IDLE_MS na każdej domyślnej instalacji.
+  if (warmWorkerLimit() <= 0) setInterval(() => void warmBots().catch(() => {}), 60_000).unref?.();
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

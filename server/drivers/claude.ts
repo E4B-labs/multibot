@@ -75,7 +75,17 @@ const cliModel = (model: string | undefined) => {
 // tylko czekają na rozmowę dłużej. Zmierzone na s10e: tura po ciszy 70–72 s do
 // pierwszego tokena (dwa boty), ta sama tura na ciepłym workerze 4 s.
 const WORKER_IDLE_MS = Number(process.env.MULTIBOT_WORKER_IDLE_MS) || 12 * 60 * 60_000;
-const MAX_WARM_WORKERS = Number(process.env.MULTIBOT_WARM_WORKERS) || 2;
+// multibot: MULTIBOT_WARM_WORKERS=0 włącza tryb „każdy bot to ciepły worker" —
+// nie eksmitujemy nikogo i nie ubijamy nikogo z bezczynności, bo każdy bot ma
+// odpowiadać w kilka sekund także po dobie ciszy. Gdy zmiennej nie ma, zostaje
+// dawne 2: instalacje, które o nic nie prosiły, nie mają nagle trzymać
+// dziesięciu procesów CLI naraz. Czytane przy każdej turze, nie przy imporcie —
+// test podkręca wartość bez przeładowywania modułu.
+// UWAGA: server/index.ts parsuje tę samą zmienną tak samo (warmBots) — obie
+// strony muszą rozumieć 0 identycznie, inaczej rozgrzewamy dwa boty, a limitu
+// nie ma.
+const maxWarmWorkers = () =>
+  process.env.MULTIBOT_WARM_WORKERS ? Number(process.env.MULTIBOT_WARM_WORKERS) || 0 : 2;
 
 // multibot (B): budżet na PIERWSZY znak życia procesu po wysłaniu tury — nie na
 // całą turę (długie tury są legalne i nie wolno ich ucinać). Ciepły worker
@@ -326,12 +336,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     // `protect` to wątek, dla którego właśnie stawiamy proces — jego `current`
     // jeszcze nie istnieje, więc bez tego wyjątku mógłby paść własną ofiarą.
     const reapWarmWorkers = (protect: string) => {
-      if (workers.size <= MAX_WARM_WORKERS) return;
+      const limit = maxWarmWorkers();
+      if (limit <= 0 || workers.size <= limit) return;
       const idle = [...workers.entries()]
         .filter(([key, w]) => !w.current && key !== protect)
         .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
       for (const [key, victim] of idle) {
-        if (workers.size <= MAX_WARM_WORKERS) break;
+        if (workers.size <= limit) break;
         workers.delete(key);
         if (victim.idleTimer) clearTimeout(victim.idleTimer);
         victim.broker?.close();
@@ -490,6 +501,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // multibot: zegar bezczynności zbrojony w jednym miejscu — po turze i po
       // rozgrzewce, żeby proces postawiony „na zapas" też kiedyś zszedł.
       const armIdle = () => {
+        // W trybie bez limitu bezczynność nie ubija procesu: cały sens „każdy
+        // bot zawsze active" polega na tym, że bot po tygodniu ciszy odpowiada
+        // tak samo szybko jak w środku rozmowy. Pamięci pilnuje wtedy liczba
+        // botów, a nie zegar.
+        if (maxWarmWorkers() <= 0) return;
         const w = worker!;
         if (w.idleTimer) clearTimeout(w.idleTimer);
         w.idleTimer = setTimeout(() => {

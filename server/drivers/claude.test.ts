@@ -69,6 +69,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.MULTIBOT_FIRST_EVENT_MS;
     delete process.env.MULTIBOT_FIRST_EVENT_COLD_MS;
+    delete process.env.MULTIBOT_WARM_WORKERS;
     recorder?.stop();
     await instance?.dispose();
     rmSync(scratch, { recursive: true, force: true });
@@ -341,6 +342,24 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(instance.adapter.hasSession("t-lru-3")).toBe(true);
   });
 
+  // multibot: „każdy bot to ciepły worker" — przy MULTIBOT_WARM_WORKERS=0 nikt
+  // nie wylatuje z LRU, bo każdy bot ma odpowiadać w kilka sekund, a nie tylko
+  // ten, z którym rozmawiało się ostatnio.
+  it("keeps every worker warm when the limit is 0", async () => {
+    process.env.MULTIBOT_WARM_WORKERS = "0";
+    await create("persistent");
+    for (const [i, threadId] of ["t-all-1", "t-all-2", "t-all-3"].entries()) {
+      await instance.adapter.sendTurn({ threadId, text: `msg ${i}` });
+      await recorder.until(
+        (e) => e.type === "turn.completed" && recorder.events.filter((x) => x.type === "turn.completed").length === i + 1,
+      );
+    }
+
+    expect(instance.adapter.hasSession("t-all-1")).toBe(true);
+    expect(instance.adapter.hasSession("t-all-2")).toBe(true);
+    expect(instance.adapter.hasSession("t-all-3")).toBe(true);
+  });
+
   it("interrupt cancels the turn without a runtime error", async () => {
     await create("hang");
     await instance.adapter.sendTurn({ threadId: "t-int", text: "go" });
@@ -506,6 +525,7 @@ describe("ClaudeDriver worker liveness (fake CLI)", () => {
     delete process.env.FAKE_CLAUDE_DEAF_FLAG;
     delete process.env.MULTIBOT_FIRST_EVENT_MS;
     delete process.env.MULTIBOT_FIRST_EVENT_COLD_MS;
+    delete process.env.MULTIBOT_WARM_WORKERS;
     recorder?.stop();
     await instance?.dispose();
     rmSync(scratch, { recursive: true, force: true });
