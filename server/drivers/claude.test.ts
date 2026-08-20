@@ -295,6 +295,49 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "session.started")).toHaveLength(1);
   });
 
+  // multibot: prompt systemowy niesie pamięć bota, a szedł do CLI tylko przy
+  // spawnie — więc siedział w podpisie workera i KAŻDY zapis do pamięci kasował
+  // ciepłą sesję. Zimny start to 83 s na telefonie wobec 1.7 s na ciepłej, więc
+  // bot z pamięcią płacił go co turę. Teraz proces zostaje, a nowy kontekst
+  // dojeżdża tą turą.
+  it("a memory write keeps the worker and ships the new context with the turn", async () => {
+    await create("persistent");
+    const dump = join(scratch, "context.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-context", text: "one", system: "Memory facts:\n- alpha" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    await instance.adapter.sendTurn({
+      threadId: "t-context", text: "two", system: "Memory facts:\n- alpha\n- beta",
+    });
+    await recorder.until(
+      (e) => e.type === "turn.completed" && recorder.events.filter((x) => x.type === "turn.completed").length === 2,
+    );
+
+    // jeden proces na obie tury — zmiana pamięci nie zapłaciła zimnym startem
+    expect(recorder.events.filter((e) => e.type === "session.started")).toHaveLength(1);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.prompt.message.content).toContain("- beta");
+    expect(seen.prompt.message.content).toContain("two");
+  });
+
+  // multibot: godzina ciepłego procesu razy liczba wątków zjadłaby telefon,
+  // więc żywych workerów jest najwyżej MAX_WARM_WORKERS (domyślnie 2).
+  it("keeps only the most recent warm workers", async () => {
+    await create("persistent");
+    for (const [i, threadId] of ["t-lru-1", "t-lru-2", "t-lru-3"].entries()) {
+      await instance.adapter.sendTurn({ threadId, text: `msg ${i}` });
+      await recorder.until(
+        (e) => e.type === "turn.completed" && recorder.events.filter((x) => x.type === "turn.completed").length === i + 1,
+      );
+    }
+
+    expect(instance.adapter.hasSession("t-lru-1")).toBe(false);
+    expect(instance.adapter.hasSession("t-lru-2")).toBe(true);
+    expect(instance.adapter.hasSession("t-lru-3")).toBe(true);
+  });
+
   it("interrupt cancels the turn without a runtime error", async () => {
     await create("hang");
     await instance.adapter.sendTurn({ threadId: "t-int", text: "go" });

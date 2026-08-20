@@ -63,7 +63,14 @@ const cliModel = (model: string | undefined) => {
   return canonicalModel(model);
 };
 
-const WORKER_IDLE_MS = 10 * 60_000;
+// multibot: ciepła sesja odpowiada w ~1.7 s, zimny start CLI na telefonie pod
+// obciążeniem kosztował 83 s — o szybkości bota decyduje więc to, czy proces
+// jeszcze żyje, a nie jaki model i ile myśli. Stąd godzina bezczynności zamiast
+// dziesięciu minut. Telefon nie ma RAM-u na proces per wątek, więc liczbę
+// żywych workerów ogranicza LRU (reapWarmWorkers) — ciepły zostaje ten, z kim
+// użytkownik faktycznie rozmawia.
+const WORKER_IDLE_MS = Number(process.env.MULTIBOT_WORKER_IDLE_MS) || 60 * 60_000;
+const MAX_WARM_WORKERS = Number(process.env.MULTIBOT_WARM_WORKERS) || 2;
 
 // proxy entry files live next to this one as .ts in dev (node type
 // stripping) and .js in the compiled dist-server the packaged app ships
@@ -257,6 +264,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       current?: Turn;
       buffer: string;
       stderr: string;
+      /** prompt systemowy, z którym ten proces wstał (--append-system-prompt) */
+      system: string;
+      /** do LRU: monotoniczny licznik użycia. NIE zegar — dwie tury w tej samej
+       *  milisekundzie dałyby remis i eksmisję świeżo powołanego procesu. */
+      lastUsed: number;
       idleTimer?: ReturnType<typeof setTimeout>;
       onLine?: (line: string) => void;
       finish?: (ok: boolean, stopReason: string | null, cost?: number | null) => void;
@@ -266,6 +278,24 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     // worker restart.
     const active = new Map<string, { stop: () => void; turnId: string; broker?: Broker }>();
     const workers = new Map<string, Worker>();
+    let useSeq = 0;
+    // multibot: ubijamy najdawniej używane BEZCZYNNE procesy, nigdy takiego z turą
+    // w locie. Bez limitu każdy wątek trzymałby własny CLI przez godzinę.
+    // `protect` to wątek, dla którego właśnie stawiamy proces — jego `current`
+    // jeszcze nie istnieje, więc bez tego wyjątku mógłby paść własną ofiarą.
+    const reapWarmWorkers = (protect: string) => {
+      if (workers.size <= MAX_WARM_WORKERS) return;
+      const idle = [...workers.entries()]
+        .filter(([key, w]) => !w.current && key !== protect)
+        .sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+      for (const [key, victim] of idle) {
+        if (workers.size <= MAX_WARM_WORKERS) break;
+        workers.delete(key);
+        if (victim.idleTimer) clearTimeout(victim.idleTimer);
+        victim.broker?.close();
+        killTree(victim.child);
+      }
+    };
 
     const emit = (event: RuntimeEvent) => {
       for (const l of [...listeners]) l(event);
@@ -346,9 +376,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (Object.keys(mcpServers).length) {
         args.push("--mcp-config", JSON.stringify({ mcpServers }), "--allowedTools", allowed.join(","));
       }
+      // multibot: to jest podpis PROCESU, nie tury — wszystko tutaj jest zapiekane
+      // w argv przy spawnie, więc zmiana wymaga nowego procesu. `system` celowo
+      // tu NIE MA: prompt systemowy niesie pamięć bota (sharedFacts/sharedMemory/
+      // sharedSkills z server/index.ts), więc każdy zapis do pamięci zmieniał
+      // podpis i kosztował pełny zimny start. Zmieniony kontekst dowozimy niżej
+      // wiadomością — model dostaje aktualną pamięć, ale bez restartu CLI.
       const signature = JSON.stringify({
         selectedModel, effort: selectedModel === "claude-haiku-4-5" ? null : requestedReasoning || "low",
-        permissionMode, denied, cwd: turn.cwd ?? homedir(), system: turn.system ?? "", mcpServers,
+        permissionMode, denied, cwd: turn.cwd ?? homedir(), mcpServers,
       });
 
       let worker = workers.get(threadId);
@@ -379,11 +415,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           cwd: turn.cwd ?? homedir(), env, stdio: ["pipe", "pipe", "pipe"],
           windowsVerbatimArguments: cli.windowsVerbatimArguments, detached: true,
         });
-        worker = { child, signature, sessionId, buffer: "", stderr: "" };
+        worker = { child, signature, sessionId, buffer: "", stderr: "", system: turn.system ?? "", lastUsed: ++useSeq };
         workers.set(threadId, worker);
         spawnedWorker = true;
+        reapWarmWorkers(threadId);
       }
       if (worker.idleTimer) clearTimeout(worker.idleTimer);
+      worker.lastUsed = ++useSeq;
+      // multibot: prompt systemowy trafia do CLI raz, przy spawnie. Gdy zmienił
+      // się między turami (bot coś zapamiętał, doszedł skill, zmieniła się
+      // autonomia), dowozimy go tą turą zamiast stawiać proces od nowa.
+      const systemNow = turn.system ?? "";
+      const contextUpdate = !spawnedWorker && worker.system !== systemNow ? systemNow : "";
+      worker.system = systemNow;
       const current: Turn = { turnId, settled: false, sawStreamDelta: false };
       worker.current = current;
 
@@ -554,15 +598,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       // Keep stdin open: Claude Code accepts multiple stream-json user frames.
       const nativeImages = (turn.attachments ?? []).filter((file) => /^image\/(?:png|jpeg|gif|webp)$/i.test(file.mime));
+      const promptText = contextUpdate
+        ? `[MultiBot] Updated workspace context — this replaces the context you were given at session start; where they differ, this one wins:\n${contextUpdate}\n\n${turn.text}`
+        : turn.text;
       const content = nativeImages.length
         ? [
-            { type: "text", text: turn.text },
+            { type: "text", text: promptText },
             ...nativeImages.map((file) => ({
               type: "image",
               source: { type: "base64", media_type: file.mime, data: readFileSync(file.path).toString("base64") },
             })),
           ]
-        : turn.text;
+        : promptText;
       const promptMsg = { type: "user", message: { role: "user", content } };
       try {
         worker.child.stdin!.write(JSON.stringify(promptMsg) + "\n");
