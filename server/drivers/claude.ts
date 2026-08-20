@@ -69,7 +69,12 @@ const cliModel = (model: string | undefined) => {
 // dziesięciu minut. Telefon nie ma RAM-u na proces per wątek, więc liczbę
 // żywych workerów ogranicza LRU (reapWarmWorkers) — ciepły zostaje ten, z kim
 // użytkownik faktycznie rozmawia.
-const WORKER_IDLE_MS = Number(process.env.MULTIBOT_WORKER_IDLE_MS) || 60 * 60_000;
+// Godzina to dokładnie ten przypadek, na który skarżył się użytkownik („także po
+// godzinie ciszy"), więc okno idzie na pół doby. Nie kosztuje to niczego, bo
+// pamięć ogranicza już LRU niżej, a nie zegar: żywych procesów jest tyle samo,
+// tylko czekają na rozmowę dłużej. Zmierzone na s10e: tura po ciszy 70–72 s do
+// pierwszego tokena (dwa boty), ta sama tura na ciepłym workerze 4 s.
+const WORKER_IDLE_MS = Number(process.env.MULTIBOT_WORKER_IDLE_MS) || 12 * 60 * 60_000;
 const MAX_WARM_WORKERS = Number(process.env.MULTIBOT_WARM_WORKERS) || 2;
 
 // proxy entry files live next to this one as .ts in dev (node type
