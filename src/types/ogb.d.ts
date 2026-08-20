@@ -3,6 +3,10 @@ export {};
 
 declare global {
   interface Window {
+    /** Wstrzykiwane przez proxy trybu zdalnego (electron/remote-ui.mjs) do
+     * `index.html`. Nieobecne wszędzie indziej: w przeglądarce i pod
+     * Electronem z lokalnym serwerem. */
+    __MULTIBOT_REMOTE__?: true;
     ogb?: {
       screenFrame(): Promise<string | null>;
       speechStart(): Promise<void>;

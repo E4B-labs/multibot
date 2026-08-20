@@ -189,7 +189,15 @@ export default function App() {
   // fragmentem adresu — Electron jest wtedy tylko widzem i onboarding „postaw
   // serwer" nie ma sensu; bez tego rozróżnienia panel wyboru wyskakiwał w
   // aplikacji desktopowej przy każdym połączeniu ze zdalnym serwerem.
-  const electronLocal = isElectron && ["127.0.0.1", "localhost"].includes(window.location.hostname);
+  // Sam hostname już nie wystarcza: w trybie zdalnym apka podnosi u siebie
+  // proxy na 127.0.0.1 i to z niego bierze interfejs (electron/remote-ui.mjs),
+  // więc oba tryby wyglądają stąd tak samo i panel „postaw serwer" wracał w
+  // trybie zdalnym po aktualizacji. Rozstrzyga flaga, którą proxy wstrzykuje
+  // do `index.html` — lokalny harness nigdy jej nie wysyła. Hostname ZOSTAJE
+  // jako drugi warunek, bo gdy proxy nie wstanie, main.mjs celowo ładuje
+  // interfejs prosto z hosta: flagi wtedy nie ma, ale adres jest zdalny.
+  const electronLocal =
+    isElectron && !window.__MULTIBOT_REMOTE__ && ["127.0.0.1", "localhost"].includes(window.location.hostname);
   const configured = emailGateDone() || (Boolean(getAuthToken()) && !electronLocal);
   const [gated, setGated] = useState(() => !configured);
   // Sesja z logowania Google siedzi w ciasteczku HttpOnly, więc `getAuthToken`

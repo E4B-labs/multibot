@@ -67,7 +67,7 @@ function get(url, headers = {}) {
 const staticDir = mkdtempSync(join(tmpdir(), "multibot-ui-"));
 mkdirSync(join(staticDir, "assets"));
 mkdirSync(join(staticDir, "api"));
-writeFileSync(join(staticDir, "index.html"), "<html>INTERFEJS Z PACZKI</html>");
+writeFileSync(join(staticDir, "index.html"), "<html><head><title>x</title></head><body>INTERFEJS Z PACZKI</body></html>");
 writeFileSync(join(staticDir, "assets", "index-abc123.js"), "console.log('z paczki')");
 // Pułapka: plik o nazwie trasy API. Nie wolno go nigdy oddać zamiast hosta.
 writeFileSync(join(staticDir, "api", "ping"), "PODSZYWKA");
@@ -96,6 +96,18 @@ test("`/` oddaje interfejs z paczki, nie z hosta", async () => {
   assert.doesNotMatch(res.body, /INTERFEJS Z HOSTA/);
   // Po aktualizacji użytkownik musi dostać nowy ekran, nie ten z cache.
   assert.equal(res.headers["cache-control"], "no-cache");
+});
+
+test("index.html z proxy niesie flagę trybu zdalnego, inne pliki nie", async () => {
+  for (const path of ["/", "/index.html"]) {
+    const res = await get(`${ui.url}${path}`);
+    assert.match(res.body, /window\.__MULTIBOT_REMOTE__=true/, `${path} musi nieść flagę`);
+    // Bez tego przeglądarka ucina koniec dokumentu o długość flagi.
+    assert.equal(Number(res.headers["content-length"]), Buffer.byteLength(res.body), "długość liczona po wstrzyknięciu");
+    assert.match(res.body, /<script>window\.__MULTIBOT_REMOTE__=true<\/script><\/head>/, "flaga przed </head>");
+  }
+  const asset = await get(`${ui.url}/assets/index-abc123.js`);
+  assert.doesNotMatch(asset.body, /__MULTIBOT_REMOTE__/, "pliki statyczne zostają nietknięte");
 });
 
 test("pliki z assets/ idą z dysku i mają hash w nazwie, więc mogą leżeć w cache", async () => {

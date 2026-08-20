@@ -20,7 +20,7 @@
 // Proxy NIE dokłada tokenu. Przepuszcza wyłącznie nagłówek przysłany przez
 // renderer, więc inny lokalny proces, który trafi na ten port, dostanie z
 // telefonu 401 dokładnie tak samo jak z sieci.
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { extname, join, resolve, sep } from "node:path";
@@ -69,6 +69,17 @@ function staticFileFor(staticDir, pathname) {
   return full;
 }
 
+/**
+ * Znacznik trybu zdalnego dla renderera. Bramka onboardingu w `src/App.tsx`
+ * musi rozstrzygnąć SYNCHRONICZNIE, przy montowaniu, czy interfejs przyszedł z
+ * tego proxy, czy z lokalnego harnessu — a od czasu, gdy proxy stoi na
+ * 127.0.0.1, sam `location.hostname` już ich nie odróżnia. Most `window.ogb`
+ * jest asynchroniczny (IPC), więc na tę decyzję za późno. Wstrzykujemy więc
+ * flagę prosto w `index.html`, i to WYŁĄCZNIE tutaj: lokalny harness serwuje
+ * ten sam plik bez niej.
+ */
+const REMOTE_FLAG = "<script>window.__MULTIBOT_REMOTE__=true</script>";
+
 function serveStatic(res, file, method) {
   const ext = extname(file).toLowerCase();
   const headers = {
@@ -77,6 +88,14 @@ function serveStatic(res, file, method) {
     // hash w nazwie, więc mogą spokojnie leżeć w cache.
     "cache-control": file.endsWith("index.html") ? "no-cache" : "public, max-age=31536000, immutable",
   };
+  if (file.endsWith("index.html")) {
+    // Długość liczymy z treści PO wstrzyknięciu — rozmiar z dysku byłby o
+    // flagę za krótki i przeglądarka ucięłaby koniec dokumentu.
+    const body = Buffer.from(readFileSync(file, "utf8").replace("</head>", REMOTE_FLAG + "</head>"));
+    res.writeHead(200, { ...headers, "content-length": String(body.length) });
+    res.end(method === "HEAD" ? undefined : body);
+    return;
+  }
   if (method === "HEAD") {
     res.writeHead(200, { ...headers, "content-length": String(statSync(file).size) });
     res.end();
