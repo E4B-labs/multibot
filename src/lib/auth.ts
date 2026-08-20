@@ -51,25 +51,93 @@ export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}
   return response;
 }
 
-export function authenticatedEventSource(path: string): {
+type EventChannel = {
   onopen: (() => void) | null;
   onerror: (() => void) | null;
   onmessage: ((event: MessageEvent<string>) => void) | null;
   close: () => void;
-} {
+};
+
+/**
+ * Kanał zdarzeń aplikacji. WebSocket jest transportem pierwszego wyboru, bo
+ * pośrednicy potrafią buforować odpowiedź SSE do końca strumienia — szybki
+ * tunel Cloudflare robi dokładnie to i `/api/events` po SSE nie dowozi wtedy
+ * ani jednej ramki (dymek wysłanej wiadomości zostaje szary, bo `message`
+ * nigdy nie przychodzi). Gdy WS nie wstanie ani razu — zwykle blokada po
+ * drodze albo brak WebSocketa w środowisku — schodzimy na SSE i działamy jak
+ * dotąd.
+ */
+export function authenticatedEventSource(path: string): EventChannel {
+  const source: EventChannel = {
+    onopen: null,
+    onerror: null,
+    onmessage: null,
+    close: () => {},
+  };
+  if (typeof WebSocket === "undefined" || typeof location === "undefined") {
+    return sseEventSource(path, source);
+  }
+
+  let stopped = false;
+  let socket: WebSocket | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let sse: EventChannel | undefined;
+  let retry = 0;
+
+  const fallback = () => {
+    sse = sseEventSource(path, source);
+  };
+
+  const open = () => {
+    if (stopped) return;
+    let opened = false;
+    try {
+      socket = authenticatedWebSocket(path);
+    } catch {
+      // brak `location`/WebSocketa (np. test w node) — zostaje SSE
+      return fallback();
+    }
+    socket.onopen = () => {
+      opened = true;
+      retry = 0;
+      source.onopen?.();
+    };
+    socket.onmessage = (event) => {
+      source.onmessage?.(new MessageEvent("message", { data: String(event.data) }));
+    };
+    socket.onclose = () => {
+      if (stopped) return;
+      source.onerror?.();
+      // Nigdy nie zdążył się otworzyć przy pierwszym podejściu — ten transport
+      // tu nie przechodzi, więc nie zapętlamy się na nim.
+      if (!opened && retry === 0) return fallback();
+      retry = Math.min(retry + 1, 5);
+      timer = setTimeout(open, retry * 1000);
+    };
+    socket.onerror = () => {
+      /* onclose i tak przyjdzie — tam jest cała obsługa */
+    };
+  };
+
+  source.close = () => {
+    stopped = true;
+    clearTimeout(timer);
+    sse?.close();
+    socket?.close();
+  };
+  open();
+  return source;
+}
+
+function sseEventSource(path: string, source: EventChannel): EventChannel {
   let stopped = false;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let pendingWait: ReturnType<typeof setTimeout> | undefined;
   let retry = 0;
-  const source = {
-    onopen: null as (() => void) | null,
-    onerror: null as (() => void) | null,
-    onmessage: null as ((event: MessageEvent<string>) => void) | null,
-    close: () => {
-      stopped = true;
-      clearTimeout(pendingWait);
-      void reader?.cancel();
-    },
+  source.close = () => {
+    stopped = true;
+    clearTimeout(pendingWait);
+    void reader?.cancel();
   };
   const wait = () => new Promise<void>((resolve) => {
     pendingWait = setTimeout(resolve, retry * 1000);

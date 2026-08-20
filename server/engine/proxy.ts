@@ -172,6 +172,8 @@ export function mountEngineProxy(
     // ubijało jego upgrade, zanim zdążył odpowiedzieć: websockify zwracał 101,
     // a klient nie dostawał nic.
     if (matchVncRoute(url.pathname)) return;
+    // kanał zdarzeń harnessu ma własny handler (server/events-ws.ts)
+    if (url.pathname === "/api/events") return;
     if (!url.pathname.startsWith(`${PREFIX}/`)) return socket.destroy();
     // multibot (F5): WS silnika jest więcej niż jeden. `/api/engine/ws` →
     // `/api/ws` (kanał eventów) wychodzi z tego samego `rewrite()` co HTTP, a

@@ -564,6 +564,43 @@ describe("harness HTTP API", () => {
     expect(after.body.cards.some((c: { source: string }) => c.source === "custom")).toBe(false);
   });
 
+  // Tunel (cloudflared --url) buforuje odpowiedź SSE do końca strumienia, więc
+  // `/api/events` po SSE nie dowozi zdalnej apce ani jednej ramki — wysłany
+  // dymek zostaje szary. WebSocket ten sam tunel przepuszcza na żywo.
+  it("dowozi zdarzenia po WebSocket na tej samej ścieżce co SSE", async () => {
+    const socket = new WebSocket(`${BASE.replace("http", "ws")}/api/events?lang=pl`, [
+      "multibot-auth",
+      TOKEN,
+    ]);
+    const frames: any[] = [];
+    let resolveFrame: (() => void) | null = null;
+    socket.onmessage = (event) => {
+      frames.push(JSON.parse(String(event.data)));
+      resolveFrame?.();
+    };
+    const next = () => new Promise<void>((resolve) => (resolveFrame = resolve));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.onopen = () => resolve();
+        socket.onerror = () => reject(new Error("upgrade odrzucony"));
+      });
+      await Promise.race([next(), new Promise((r) => setTimeout(r, 5_000))]);
+      expect(frames[0]).toEqual({ kind: "hello" });
+
+      const created = await api("POST", "/api/bots");
+      expect(created.status).toBe(201);
+      await api("PATCH", `/api/bots/${created.body.bot.id}`, { name: "Ws Test" });
+      const deadline = Date.now() + 5_000;
+      while (!frames.some((f) => f.kind === "bot" && f.bot?.name === "Ws Test") && Date.now() < deadline) {
+        await Promise.race([next(), new Promise((r) => setTimeout(r, 200))]);
+      }
+      expect(frames.some((f) => f.kind === "bot" && f.bot?.name === "Ws Test")).toBe(true);
+      await api("DELETE", `/api/bots/${created.body.bot.id}`);
+    } finally {
+      socket.close();
+    }
+  });
+
   it("404s unknown routes with the route in the error", async () => {
     const res = await api("GET", "/api/definitely-not-a-route");
     expect(res.status).toBe(404);

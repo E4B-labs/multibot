@@ -54,6 +54,7 @@ import { claimPairing, pairingPending, startPairing } from "./pairing.ts";
 import { pairingQrSvg } from "./qr.ts";
 import { filterSearchResults, searchText, type SearchResult } from "./search.ts";
 import { matchVncRoute, mountVncUpgrade, proxyVncHttp } from "./computer-vnc-proxy.ts";
+import { broadcastWs, mountEventsWs } from "./events-ws.ts";
 import { mountEngineProxy } from "./engine/proxy.ts";
 import { EventBus } from "./harness/bus.ts";
 // multibot (F7): własne serwery MCP użytkownika obok Composio
@@ -547,7 +548,8 @@ if (existingEngineProfile && (!hadHarnessBots || seededPlaceholder || localFirst
 // ── SSE fan-out to clients ─────────────────────────────────────────────
 const sseClients = new Set<ServerResponse>();
 function broadcast(payload: unknown) {
-  const frame = `data: ${JSON.stringify(payload)}\n\n`;
+  const text = JSON.stringify(payload);
+  const frame = `data: ${text}\n\n`;
   for (const res of [...sseClients]) {
     try {
       res.write(frame);
@@ -555,6 +557,8 @@ function broadcast(payload: unknown) {
       sseClients.delete(res);
     }
   }
+  // ten sam strumień po WS — SSE nie przechodzi przez buforujące tunele
+  broadcastWs(text);
 }
 
 // ── server-side event folding (upstream's ingestion worker, miniature) ──
@@ -3119,6 +3123,13 @@ const server = createServer(async (req, res) => {
 mountEngineProxy(server, { harnessWebhook: harnessWebhookInbound });
 // multibot (H4): the bot's screen. Mounted before auth so one gate covers it.
 mountVncUpgrade(server);
+// Kanał zdarzeń po WS — ta sama ścieżka co SSE, ta sama bramka auth (montaż
+// przed `mountAuth`). Patrz `server/events-ws.ts`: tunel buforuje SSE.
+mountEventsWs(server, (url, send) => {
+  const lang = url.searchParams.get("lang");
+  if (lang === "pl" || lang === "en") uiLang = lang;
+  send(JSON.stringify({ kind: "hello" }));
+});
 
 // Auth mounts after the proxy so one wrapper covers harness HTTP, proxied
 // engine HTTP, and both engine WS upgrade paths.
