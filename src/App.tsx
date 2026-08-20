@@ -184,7 +184,13 @@ export default function App() {
   // wejście do instalacji silnika (`POST /api/provision` woła wyłącznie
   // Onboarding). Efekt: świeża instalacja desktopowa wchodziła od razu do
   // aplikacji i pisała „Usługa offline", bo silnika nikt nigdy nie zainstalował.
-  const configured = emailGateDone() || (Boolean(getAuthToken()) && !isElectron);
+  // …ALE ten wyjątek dotyczy tylko Electrona z LOKALNYM serwerem. W trybie
+  // zdalnym (C2) okno ładuje interfejs prosto z cudzego hosta, a token wjeżdża
+  // fragmentem adresu — Electron jest wtedy tylko widzem i onboarding „postaw
+  // serwer" nie ma sensu; bez tego rozróżnienia panel wyboru wyskakiwał w
+  // aplikacji desktopowej przy każdym połączeniu ze zdalnym serwerem.
+  const electronLocal = isElectron && ["127.0.0.1", "localhost"].includes(window.location.hostname);
+  const configured = emailGateDone() || (Boolean(getAuthToken()) && !electronLocal);
   const [gated, setGated] = useState(() => !configured);
   // Sesja z logowania Google siedzi w ciasteczku HttpOnly, więc `getAuthToken`
   // jej nie widzi — `LoginScreen` sam sprawdza `/api/auth/status` i wpuszcza.
