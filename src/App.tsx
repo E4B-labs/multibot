@@ -198,7 +198,12 @@ export default function App() {
     window.addEventListener(authEventName(), onAuthRequired);
     return () => window.removeEventListener(authEventName(), onAuthRequired);
   }, []);
-  if (!authenticated) return <LoginScreen onLogin={() => setAuthenticated(true)} />;
+  // Zalogowanie gasi też bramkę: skoro serwer przyjął token (albo ciasteczko,
+  // albo Google), to istnieje i jest skonfigurowany — onboarding „postaw
+  // serwer" nie ma po nim sensu. Bez tego świeża przeglądarka liczyła
+  // `configured` PRZED zalogowaniem (token jeszcze pusty), więc zaraz po
+  // wpisaniu tokenu nad aplikacją wyskakiwał drugi panel logowania.
+  if (!authenticated) return <LoginScreen onLogin={() => { setAuthenticated(true); setGated(false); }} />;
   return (
     <StoreProvider>
       <Shell />
