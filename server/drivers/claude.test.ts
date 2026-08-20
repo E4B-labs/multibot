@@ -65,7 +65,10 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   afterEach(async () => {
     delete process.env.FAKE_CLAUDE_MODE;
     delete process.env.FAKE_CLAUDE_DUMP;
+    delete process.env.FAKE_CLAUDE_DEAF_FLAG;
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.MULTIBOT_FIRST_EVENT_MS;
+    delete process.env.MULTIBOT_FIRST_EVENT_COLD_MS;
     recorder?.stop();
     await instance?.dispose();
     rmSync(scratch, { recursive: true, force: true });
@@ -465,5 +468,81 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     ).rejects.toThrow(/pending request/);
     await instance.adapter.interruptTurn("t-perm-2");
     await recorder.until((e) => e.type === "turn.completed");
+  });
+});
+
+// multibot (B): kontrola żywotności patrzyła na `child.stdin.destroyed`, a
+// `child` to proces PROOTA — zaobserwowano „proot żyje, claude w środku
+// martwy". Tura szła wtedy do rury, której nikt nie czyta, i wisiała bez końca.
+// Driver pilnuje więc PIERWSZEGO znaku życia na stdout: budżet dotyczy tylko
+// pierwszego bajtu, długie tury zostają nietknięte.
+describe("ClaudeDriver worker liveness (fake CLI)", () => {
+  let instance: ProviderInstance;
+  let recorder: EventRecorder;
+  let scratch: string;
+
+  const create = async (mode: string) => {
+    process.env.FAKE_CLAUDE_MODE = mode;
+    instance = await ClaudeDriver.create({
+      instanceId: "claude-liveness",
+      displayName: "Claude Liveness",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, permissionMode: "acceptEdits" },
+    });
+    recorder = recordEvents(instance.adapter);
+  };
+
+  beforeEach(() => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    scratch = mkdtempSync(join(tmpdir(), "omb-claude-live-"));
+    process.env.MULTIBOT_FIRST_EVENT_MS = "300";
+    process.env.MULTIBOT_FIRST_EVENT_COLD_MS = "300";
+  });
+
+  afterEach(async () => {
+    delete process.env.FAKE_CLAUDE_MODE;
+    delete process.env.FAKE_CLAUDE_DEAF_FLAG;
+    delete process.env.MULTIBOT_FIRST_EVENT_MS;
+    delete process.env.MULTIBOT_FIRST_EVENT_COLD_MS;
+    recorder?.stop();
+    await instance?.dispose();
+    rmSync(scratch, { recursive: true, force: true });
+  });
+
+  it("kills a silent worker, respawns it and replays the turn once", async () => {
+    process.env.FAKE_CLAUDE_DEAF_FLAG = join(scratch, "deaf.flag");
+    await create("deaf-once");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-deaf-once", text: "hi" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    // Ta sama tura, nie nowa: użytkownik nie widzi ani błędu, ani drugiej bańki.
+    expect(done).toMatchObject({ type: "turn.completed", ok: true, turnId });
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
+    expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(1);
+  });
+
+  it("gives up after one restart and says the worker is dead", async () => {
+    await create("deaf");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-deaf", text: "hi" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ type: "turn.completed", ok: false, stopReason: "worker_unresponsive", turnId });
+    expect(
+      recorder.events.some((e) => e.type === "runtime.error" && /sign of life/.test((e as any).message)),
+    ).toBe(true);
+  });
+
+  // multibot (A2): rozgrzewka stawia proces i NIC więcej — żadnej tury, żadnych
+  // zdarzeń. Inaczej UI dostałby turę-widmo, a prawdziwa odbiłaby się o
+  // „a turn is already running".
+  it("warm spawn leaves a live worker and emits nothing", async () => {
+    await create("persistent");
+    await instance.adapter.sendTurn({ threadId: "t-warm", text: "", warmOnly: true } as never);
+    expect(instance.adapter.hasSession("t-warm")).toBe(true);
+    expect(recorder.events).toHaveLength(0);
+
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-warm", text: "hi" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ type: "turn.completed", ok: true, turnId });
   });
 });

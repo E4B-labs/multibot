@@ -738,6 +738,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (bot?.unread) {
             api(`/api/bots/${action.id}`, { method: "PATCH", body: JSON.stringify({ unread: false }) }).catch(() => {});
           }
+          // multibot (A2): otwarcie bota rozgrzewa jego proces CLI, żeby pierwsza
+          // wiadomość nie płaciła zimnego startu. Fire-and-forget — błąd niczego
+          // tu nie zmienia, bo tura i tak postawi proces sama, tylko wolniej.
+          api(`/api/bots/${action.id}/warm`, { method: "POST" }).catch(() => {});
           break;
         }
         case "setModel":

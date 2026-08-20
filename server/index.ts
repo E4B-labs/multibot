@@ -67,8 +67,8 @@ import { GroupStore } from "./group-store.ts";
 import { RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
-import { turnToolsText } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
-import { chainDepth, mentionedBots, Store, type Message } from "./store.ts";
+import { turnToolsText, type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
+import { chainDepth, mentionedBots, Store, type BotRecord, type Message } from "./store.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
 import { WorkspaceStore } from "./workspace.ts";
 import { canUseIntegration, clearTurnPolicy, rememberApprovalRule, setTurnPolicy } from "./turn-policy.ts";
@@ -1084,6 +1084,174 @@ async function handleGoalCommand(bot: ReturnType<Store["bot"]>, text: string): P
   return `Goal started: ${parsed.task}\nBudgets: ${parsed.options.steps} tool steps, ${parsed.options.turns} turns, ${parsed.options.time} min. I'll keep working and report progress here.`;
 }
 
+/**
+ * multibot: prompt systemowy bota w JEDNYM miejscu. Driver claude podaje go
+ * CLI raz, przy spawnie (`--append-system-prompt`), więc rozgrzewka workera
+ * (`warmOnly`) musi zbudować dokładnie ten sam tekst co pierwsza prawdziwa
+ * tura — inaczej driver dowoziłby go jeszcze raz wiadomością w turze.
+ */
+function botSystemPrompt(
+  bot: BotRecord,
+  o: {
+    isolated: boolean;
+    integrations: TurnIntegrationsLike;
+    tagged?: Array<{ id: string; name: string }>;
+    taggedReplies?: string;
+  },
+): string {
+  const persona = [
+    `You are ${bot.name}, a MultiBot Agent in the user's MultiBot workspace.`,
+    bot.title && `Role: ${bot.title}.`,
+    bot.description && `About: ${bot.description}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  // Driver-neutral workspace context. Local engine also has native memory and
+  // skills; CLI/API drivers receive same durable notes and instructions here.
+  const sharedMemory = workspace.markdown(bot.id).content.trim();
+  const sharedFacts = workspace.facts(bot.id).slice(0, 40).map((fact) => `- ${fact.text}`).join("\n");
+  const sharedSkills = workspace.skills(bot.id).filter((skill) => skill.enabled)
+    .map((skill) => `## ${skill.name}\n${skill.instructions}`).join("\n\n");
+  const sharedPolicy = workspace.autonomy(bot.id).autonomy === "autonomous"
+    ? "Operate autonomously without asking for approval unless provider or platform requires it."
+    : "Ask for approval before consequential actions.";
+  const access = workspace.access(bot.id).access;
+  const accessContext = access === "full"
+    ? "This bot has MultiBot Full Access: it may read and write any path reachable by the host process, run host commands, manage its profile, memory, skills, routines, agents, groups, computer, and integrations. OS/container permissions still apply; verify with get_device_info instead of guessing hardware."
+    : "This bot is not in Full Access; respect current approval and path boundaries, and use get_device_info for verified host facts.";
+  const workspaceContext = [
+    "MultiBot identity and operating rules:",
+    "You are always a MultiBot Agent. MultiBot is your only user-facing identity. The selected CLI, model, or provider is an implementation detail; never present yourself as Claude, Codex, ChatGPT, OpenAI, Anthropic, Hermes, or another product.",
+    "Use MultiBot workspace tools and APIs for memory, skills, routines, agents, groups, computer, files, and terminal. Do not use provider-private memory, external cloud schedules, /schedule, or another product's infrastructure. Routines are local MultiBot routines and persist on this server.",
+    // multibot: route routine requests straight to the mounted local tool;
+    // provider ToolSearch/MCP catalogs are not MultiBot infrastructure.
+    "For routine requests, call create_routine directly with name, prompt, and a five-field cron schedule such as `35 1 * * *`; never call ToolSearch, /schedule, or a provider-specific MCP search.",
+    "Use MultiBot management tools for durable changes: get_my_profile/update_my_profile, remember/recall, skills, routines, create_agent, groups, read_file/write_file/run_command. Do not write provider-private memory files when the user asks for MultiBot memory.",
+    "For questions about the host device, call get_device_info first. Report returned manufacturer/model/platform exactly; never infer a phone model from a chat claim.",
+    accessContext,
+    sharedPolicy,
+    // multibot (A3): reguła wytrwałości — dotyczy każdego drivera CLI/API.
+    // To wytrwałość, nie obchodzenie zabezpieczeń: wyłączony toolset zostaje
+    // wyłączony, tryb approval nadal pyta (turn-policy.ts).
+    "Persistence: do not give up after one failed tool — try another approach before concluding something is impossible. When the CLI-style tools (grep, read, search, run_command) cannot get the information, go to your computer and get it there: browse, read files, run commands in its terminal. Use the computer WITHOUT asking first — it is your machine for this, not something you need permission for. Budget roughly 25 tool steps per goal; only stop after web search, the computer and CLI tools are all exhausted, and then say what blocked you. Ask the user only when you genuinely need their decision or data you have no way to obtain (a password, a direction choice, consent for something irreversible). Never claim you did something you did not; if something failed, say plainly what and why. Persistence is not permission bypass: a disabled toolset stays disabled, and approval mode still asks.",
+    sharedFacts && `Memory facts:\n${sharedFacts}`,
+    sharedMemory && `Memory notes:\n${sharedMemory}`,
+    sharedSkills && `Reusable skills:\n${sharedSkills}`,
+  ].filter(Boolean).join("\n\n");
+  const isolated = o.isolated;
+  const integrations = o.integrations;
+  const tagged = o.tagged ?? [];
+  const taggedReplies = o.taggedReplies ?? "";
+  // multibot (A2): bot ma OD RAZU wiedzieć, jakie narzędzia faktycznie
+  // dostał w tej turze — wyliczenie trafia do promptu systemowego.
+  const toolsText = turnToolsText(integrations);
+  return (
+      persona + "\n\n" + workspaceContext +
+      (isolated ? "\n\nYou are answering in a shared group room. Use only this room's conversation as context." : "") +
+      // multibot (A2): wyliczenie narzędzi tej tury (agents/computer/composio)
+      (toolsText ? "\n\n" + toolsText : "") +
+      // multibot (H3): jeden opis komputera dla każdego drivera. Desktop,
+      // przeglądarka i pliki to JEDNO środowisko, więc agent musi wiedzieć,
+      // że plik pobrany w przeglądarce zobaczy w terminalu — i że
+      // `computer_exec` chodzi w kontenerze, nie na maszynie użytkownika.
+      (integrations.localComputer
+        ? " You share one persistent computer with the user's other bots — a Linux desktop with a browser, a terminal and files, all one environment." +
+          " Anything you leave there (open tabs, downloads, logins) is visible to them and to the user, and they may change it while you work, so re-check the screen instead of trusting what you saw earlier." +
+          " Take a screenshot or read the page first, then click/type_text/key/scroll on what you actually see; navigate opens a URL and read_page returns the page text." +
+          " move takes a list of points and glides the cursor along them — the user watches that cursor, so use it to show where you are looking or to hover something." +
+          " computer_exec runs commands inside your computer, never on the user's machine. The user sees this same screen and may take control — if input comes back user_has_control, wait and keep watching rather than retrying." +
+          // multibot (A4): nawigacja ma iść przez komputer, nie przez shell
+          // hosta — słaby model wziął xdg-open na HOŚCIE i "nie widział"
+          // navigate (tool search pokazuje namespaces, nie pojedyncze
+          // narzędzia). Wprost: preferuj navigate, shell hosta nie dotyka
+          // komputera, szukaj narzędzi w namespace.
+          " To open a URL, call navigate(url) — prefer it over shell commands. The shell tools you may also have (bash, exec_command) run on the HOST machine, never inside your computer; for anything on the computer use only the computer tools (navigate, screenshot, read_page, click, type_text, key, scroll, status, computer_exec). If a computer tool is not visible, search for it in the mcp__computer tool namespace."
+        : "") +
+      (integrations.agents
+        ? " You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
+        : "") +
+      (tagged.length
+        ? integrations.agents
+          ? ` The user tagged ${tagged
+              .map((t) => `@${t.name} (ask_bot bot_id ${t.id})`)
+              .join(" and ")} in their message — bring them in with ask_bot and fold their reply into your answer.`
+          : " The harness already fetched the tagged peer replies and appended them below."
+        : "") +
+      taggedReplies
+  );
+}
+
+/**
+ * multibot (A2): zimny start CLI kosztuje na telefonie kilkadziesiąt sekund i
+ * dotąd płacił go użytkownik PIERWSZĄ wiadomością — po restarcie harnessu i po
+ * każdym przełączeniu bota. Rozgrzewka stawia proces zawczasu: nic nie wysyła,
+ * niczego nie dopisuje do rozmowy, tylko zostawia gotowy proces.
+ *
+ * Podpis procesu (server/drivers/claude.ts) zależy od modelu, polityki tury i
+ * serwerów MCP, więc liczymy je DOKŁADNIE tak jak tura — inaczej pierwsza tura
+ * ubiłaby rozgrzanego workera na niezgodności podpisu i nic byśmy nie ugrali.
+ * Jeden świadomy wyjątek: komputer bota. Jego wykrycie znaczy `ensureComputer()`
+ * (potrafi stawiać kontener) i leasing agenta, a rozgrzewka nie ma prawa robić
+ * ani jednego, ani drugiego. Bot z komputerem dostanie więc podpis inny niż
+ * rozgrzany i zapłaci zimny start jak dotąd — nigdy nic gorszego.
+ */
+async function warmBot(botId: string): Promise<void> {
+  const bot = store.bot(botId);
+  if (!bot || bot.busy) return;
+  const instance = registry.get(bot.modelSelection.instanceId);
+  // Tylko driver, który trzyma proces CLI między turami i rozumie `warmOnly`.
+  // Dla pozostałych driverów pusta tura byłaby PRAWDZIWĄ turą do modelu.
+  if (!instance || instance.driverKind !== "claudeAgent") return;
+  if (instance.adapter.hasSession?.(bot.threadId)) return; // już ciepły
+  const integrations: TurnIntegrationsLike & Record<string, unknown> = {};
+  if (cfg.composio?.key && canUseIntegration(bot.threadId, "integrations")) {
+    integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
+  }
+  if (instance.adapter.capabilities.agentsMcp === true) {
+    integrations.agents = agentsIntegration(bot.id, 0);
+  }
+  // Polityka tury MUSI stać przed spawnem: to z niej driver bierze
+  // `permissionMode` i listę wyłączonych narzędzi, a jedno i drugie siedzi w
+  // podpisie procesu. Wartości są te same, które ustawi prawdziwa tura.
+  setTurnPolicy(bot.threadId, {
+    autonomy: workspace.autonomy(bot.id).autonomy,
+    access: workspace.access(bot.id).access,
+    permissions: workspace.permissions(bot.id),
+    approvalRules: workspace.approvalRules(bot.id),
+  });
+  await instance.adapter.sendTurn({
+    threadId: bot.threadId,
+    text: "",
+    model: bot.modelSelection.model,
+    // Ten sam kursor co tura — inaczej rozgrzalibyśmy proces z NOWĄ sesją, a
+    // tura wzięłaby go (kursor nie wchodzi do podpisu) i zgubiła kontekst.
+    resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId],
+    system: botSystemPrompt(bot, { isolated: false, integrations }),
+    integrations,
+    warmOnly: true,
+  } as Parameters<typeof instance.adapter.sendTurn>[0] & { warmOnly: boolean });
+}
+
+/**
+ * multibot (A2): rozgrzewka po starcie harnessu — boty w kolejności ostatniej
+ * rozmowy, do limitu żywych workerów. Sekwencyjnie i bez pośpiechu: dwa zimne
+ * starty CLI naraz biją się na telefonie o RAM i CPU, więc szeregowo wychodzi
+ * szybciej niż równolegle.
+ */
+async function warmBotsOnBoot(): Promise<void> {
+  const limit = Number(process.env.MULTIBOT_WARM_WORKERS) || 2;
+  const lastAt = (b: BotRecord) => store.messagesFor(b.threadId).at(-1)?.at ?? b.createdAt;
+  const recent = store.bots
+    .filter((b) => !b.hidden && !b.temporary)
+    .sort((a, b) => lastAt(b) - lastAt(a))
+    .slice(0, limit);
+  for (const bot of recent) {
+    await warmBot(bot.id).catch((e) =>
+      console.warn(`[multibot] warmup failed for ${bot.id}:`, e instanceof Error ? e.message : e),
+    );
+  }
+}
+
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 type ReasoningLevel = "low" | "medium" | "high" | "xhigh" | "max";
 const isReasoningLevel = (value: unknown): value is ReasoningLevel =>
@@ -1161,45 +1329,6 @@ opts?: {
     .slice(-40)
     .map((m) => ({ role: m.role === "user" ? ("user" as const) : ("assistant" as const), text: m.text! }));
 
-  const persona = [
-    `You are ${bot.name}, a MultiBot Agent in the user's MultiBot workspace.`,
-    bot.title && `Role: ${bot.title}.`,
-    bot.description && `About: ${bot.description}`,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  // Driver-neutral workspace context. Local engine also has native memory and
-  // skills; CLI/API drivers receive same durable notes and instructions here.
-  const sharedMemory = workspace.markdown(bot.id).content.trim();
-  const sharedFacts = workspace.facts(bot.id).slice(0, 40).map((fact) => `- ${fact.text}`).join("\n");
-  const sharedSkills = workspace.skills(bot.id).filter((skill) => skill.enabled)
-    .map((skill) => `## ${skill.name}\n${skill.instructions}`).join("\n\n");
-  const sharedPolicy = workspace.autonomy(bot.id).autonomy === "autonomous"
-    ? "Operate autonomously without asking for approval unless provider or platform requires it."
-    : "Ask for approval before consequential actions.";
-  const access = workspace.access(bot.id).access;
-  const accessContext = access === "full"
-    ? "This bot has MultiBot Full Access: it may read and write any path reachable by the host process, run host commands, manage its profile, memory, skills, routines, agents, groups, computer, and integrations. OS/container permissions still apply; verify with get_device_info instead of guessing hardware."
-    : "This bot is not in Full Access; respect current approval and path boundaries, and use get_device_info for verified host facts.";
-  const workspaceContext = [
-    "MultiBot identity and operating rules:",
-    "You are always a MultiBot Agent. MultiBot is your only user-facing identity. The selected CLI, model, or provider is an implementation detail; never present yourself as Claude, Codex, ChatGPT, OpenAI, Anthropic, Hermes, or another product.",
-    "Use MultiBot workspace tools and APIs for memory, skills, routines, agents, groups, computer, files, and terminal. Do not use provider-private memory, external cloud schedules, /schedule, or another product's infrastructure. Routines are local MultiBot routines and persist on this server.",
-    // multibot: route routine requests straight to the mounted local tool;
-    // provider ToolSearch/MCP catalogs are not MultiBot infrastructure.
-    "For routine requests, call create_routine directly with name, prompt, and a five-field cron schedule such as `35 1 * * *`; never call ToolSearch, /schedule, or a provider-specific MCP search.",
-    "Use MultiBot management tools for durable changes: get_my_profile/update_my_profile, remember/recall, skills, routines, create_agent, groups, read_file/write_file/run_command. Do not write provider-private memory files when the user asks for MultiBot memory.",
-    "For questions about the host device, call get_device_info first. Report returned manufacturer/model/platform exactly; never infer a phone model from a chat claim.",
-    accessContext,
-    sharedPolicy,
-    // multibot (A3): reguła wytrwałości — dotyczy każdego drivera CLI/API.
-    // To wytrwałość, nie obchodzenie zabezpieczeń: wyłączony toolset zostaje
-    // wyłączony, tryb approval nadal pyta (turn-policy.ts).
-    "Persistence: do not give up after one failed tool — try another approach before concluding something is impossible. When the CLI-style tools (grep, read, search, run_command) cannot get the information, go to your computer and get it there: browse, read files, run commands in its terminal. Use the computer WITHOUT asking first — it is your machine for this, not something you need permission for. Budget roughly 25 tool steps per goal; only stop after web search, the computer and CLI tools are all exhausted, and then say what blocked you. Ask the user only when you genuinely need their decision or data you have no way to obtain (a password, a direction choice, consent for something irreversible). Never claim you did something you did not; if something failed, say plainly what and why. Persistence is not permission bypass: a disabled toolset stays disabled, and approval mode still asks.",
-    sharedFacts && `Memory facts:\n${sharedFacts}`,
-    sharedMemory && `Memory notes:\n${sharedMemory}`,
-    sharedSkills && `Reusable skills:\n${sharedSkills}`,
-  ].filter(Boolean).join("\n\n");
 
   // multibot (D7): kolejna tura usera JEST odpowiedzią na to, na co bot czekał
   if (!isolated && bot.needsAttention != null) store.patchBot(bot.id, { needsAttention: null });
@@ -1303,9 +1432,6 @@ opts?: {
           .join("\n");
       }
 
-      // multibot (A2): bot ma OD RAZU wiedzieć, jakie narzędzia faktycznie
-      // dostał w tej turze — wyliczenie trafia do promptu systemowego.
-      const toolsText = turnToolsText(integrations);
 
       await instance.adapter.sendTurn({
         threadId: turnThreadId,
@@ -1315,39 +1441,7 @@ opts?: {
         model: turnModel,
         ...(!isolated ? { resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId] } : {}),
         transcript,
-        system:
-          persona + "\n\n" + workspaceContext +
-          (isolated ? "\n\nYou are answering in a shared group room. Use only this room's conversation as context." : "") +
-          // multibot (A2): wyliczenie narzędzi tej tury (agents/computer/composio)
-          (toolsText ? "\n\n" + toolsText : "") +
-          // multibot (H3): jeden opis komputera dla każdego drivera. Desktop,
-          // przeglądarka i pliki to JEDNO środowisko, więc agent musi wiedzieć,
-          // że plik pobrany w przeglądarce zobaczy w terminalu — i że
-          // `computer_exec` chodzi w kontenerze, nie na maszynie użytkownika.
-          (integrations.localComputer
-            ? " You share one persistent computer with the user's other bots — a Linux desktop with a browser, a terminal and files, all one environment." +
-              " Anything you leave there (open tabs, downloads, logins) is visible to them and to the user, and they may change it while you work, so re-check the screen instead of trusting what you saw earlier." +
-              " Take a screenshot or read the page first, then click/type_text/key/scroll on what you actually see; navigate opens a URL and read_page returns the page text." +
-              " move takes a list of points and glides the cursor along them — the user watches that cursor, so use it to show where you are looking or to hover something." +
-              " computer_exec runs commands inside your computer, never on the user's machine. The user sees this same screen and may take control — if input comes back user_has_control, wait and keep watching rather than retrying." +
-              // multibot (A4): nawigacja ma iść przez komputer, nie przez shell
-              // hosta — słaby model wziął xdg-open na HOŚCIE i "nie widział"
-              // navigate (tool search pokazuje namespaces, nie pojedyncze
-              // narzędzia). Wprost: preferuj navigate, shell hosta nie dotyka
-              // komputera, szukaj narzędzi w namespace.
-              " To open a URL, call navigate(url) — prefer it over shell commands. The shell tools you may also have (bash, exec_command) run on the HOST machine, never inside your computer; for anything on the computer use only the computer tools (navigate, screenshot, read_page, click, type_text, key, scroll, status, computer_exec). If a computer tool is not visible, search for it in the mcp__computer tool namespace."
-            : "") +
-          (integrations.agents
-            ? " You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
-            : "") +
-          (tagged.length
-            ? integrations.agents
-              ? ` The user tagged ${tagged
-                  .map((t) => `@${t.name} (ask_bot bot_id ${t.id})`)
-                  .join(" and ")} in their message — bring them in with ask_bot and fold their reply into your answer.`
-              : " The harness already fetched the tagged peer replies and appended them below."
-            : "") +
-          taggedReplies,
+        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies }),
         integrations,
         ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
       } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel });
@@ -2259,6 +2353,17 @@ const server = createServer(async (req, res) => {
         return res.end(bytes);
       }
       return json(res, 405, { error: "method not allowed" });
+    }
+
+    // multibot (A2): UI mówi „otworzyłem tego bota" — stawiamy mu proces CLI,
+    // zanim użytkownik zdąży cokolwiek napisać. Odpowiedź leci od razu, sama
+    // rozgrzewka idzie w tle; jej niepowodzenie nic nie psuje, bo pierwsza tura
+    // i tak postawi proces sama (tylko wolniej).
+    m = path.match(/^\/api\/bots\/([\w-]+)\/warm$/);
+    if (m && method === "POST") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      void warmBot(m[1]).catch(() => {});
+      return json(res, 202, { ok: true });
     }
 
     // onboarding/ask cards persist their answered/dismissed state
@@ -3187,6 +3292,9 @@ server.listen(PORT, HOST, () => {
   console.log(`multibot server on http://${HOST}:${PORT}`);
   if (access.created) console.log(`[multibot] access token (shown once): ${access.token}`);
   void reconcileComputers().catch((e) => console.warn("[multibot] computer reconcile failed:", e));
+  // multibot (A2): rozgrzewka rusza PO podniesieniu HTTP i nie czeka na nic —
+  // serwer odpowiada od pierwszej sekundy, a workery wstają w tle.
+  void warmBotsOnBoot().catch((e) => console.warn("[multibot] warmup failed:", e));
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

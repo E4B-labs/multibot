@@ -77,6 +77,18 @@ const cliModel = (model: string | undefined) => {
 const WORKER_IDLE_MS = Number(process.env.MULTIBOT_WORKER_IDLE_MS) || 12 * 60 * 60_000;
 const MAX_WARM_WORKERS = Number(process.env.MULTIBOT_WARM_WORKERS) || 2;
 
+// multibot (B): budżet na PIERWSZY znak życia procesu po wysłaniu tury — nie na
+// całą turę (długie tury są legalne i nie wolno ich ucinać). Ciepły worker
+// odzywa się na s10e w 3–4 s, więc 20 s to szeroki zapas; świeżo postawiony ma
+// najpierw przejść zimny start CLI (zmierzone ~9 s na spokojnym telefonie,
+// kilkadziesiąt pod obciążeniem) plus handshake serwerów MCP — stąd 120 s.
+// Czytane przy każdej turze, nie przy imporcie — test ma je podkręcić bez
+// przeładowywania modułu.
+const firstEventMs = (freshSpawn: boolean) =>
+  freshSpawn
+    ? Number(process.env.MULTIBOT_FIRST_EVENT_COLD_MS) || 120_000
+    : Number(process.env.MULTIBOT_FIRST_EVENT_MS) || 20_000;
+
 // proxy entry files live next to this one as .ts in dev (node type
 // stripping) and .js in the compiled dist-server the packaged app ships
 const proxyPath = (basename: string) => {
@@ -88,6 +100,29 @@ const PERM_PROXY_PATH = proxyPath("permission-proxy");
 // in the packaged app process.execPath is the Electron binary — this env
 // makes it behave as plain node for the spawned MCP proxies (harmless in dev)
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+
+// multibot: zimny start CLI na telefonie kosztował 59 s, z czego 30 s to sam
+// czas jądra. Powód zmierzony `strace -c`: Claude Code przy starcie przechodzi
+// pętlą po CAŁEJ tablicy deskryptorów — 196 470 nieudanych `fcntl()` przy
+// RLIMIT_NOFILE = 32768 (sześć przebiegów po 32768). W Termuksie CLI chodzi pod
+// prootem, gdzie KAŻDY syscall to przystanek ptrace, więc ta pętla rośnie
+// liniowo z limitem: 256 → 8,1 s, 1024 → 9,8 s, 4096 → 13,3 s, 32768 → 59 s.
+// Zbijamy limit do klasycznych 1024 — CLI trzyma kilkanaście deskryptorów, a
+// serwery MCP to osobne procesy z własnymi limitami, więc niczego to nie ucina.
+// `ulimit` obniża limit miękki, na co nie trzeba uprawnień; gdyby się nie udało,
+// błąd idzie do kosza i proces startuje jak dotąd.
+const CLI_NOFILE = Number(process.env.MULTIBOT_CLI_NOFILE) || 1024;
+type ResolvedSpawn = ReturnType<typeof resolveCliSpawn>;
+function cliSpawn(cli: string, args: string[]): ResolvedSpawn {
+  const resolved = resolveCliSpawn(cli, args);
+  // Windows nie ma ulimitu ani problemu — tam zostaje wywołanie jak dotąd.
+  if (process.platform === "win32") return resolved;
+  return {
+    ...resolved,
+    command: "/bin/sh",
+    args: ["-c", `ulimit -n ${CLI_NOFILE} 2>/dev/null; exec "$0" "$@"`, resolved.command, ...resolved.args],
+  };
+}
 
 // ── permission broker (ported from agentcal drivers/claude.js) ─────────
 // A headless run that hits a permission acceptEdits doesn't cover should
@@ -276,6 +311,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       lastUsed: number;
       idleTimer?: ReturnType<typeof setTimeout>;
       onLine?: (line: string) => void;
+      /** multibot (B): pierwszy znak życia z procesu — rozbraja watchdoga tury */
+      onData?: () => void;
       finish?: (ok: boolean, stopReason: string | null, cost?: number | null) => void;
     };
     // One active turn per thread; workers survive completed turns. The CLI
@@ -392,6 +429,36 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         permissionMode, denied, cwd: turn.cwd ?? homedir(), mcpServers,
       });
 
+      // multibot: rozgrzewka — proces ma wstać i czekać, bez tury. Podpis liczy
+      // się tym samym kodem co prawdziwa tura, więc rozgrzany worker zostaje
+      // ponownie użyty zamiast paść od razu na niezgodność podpisu.
+      const warmOnly = (turn as SendTurnInput & { warmOnly?: boolean }).warmOnly === true;
+
+      const spawnWorker = (resume: string | null): Worker => {
+        // multibot (A1): Claude Code NIE ma wyścigu codexa — czeka na łączące się
+        // serwery MCP (tool search / WaitForMcpServers), a awarię serwera zgłasza
+        // Claude'owi zamiast cicho pominąć narzędzia. `MCP_TIMEOUT` to startup
+        // timeout serwerów MCP (default 10 s; serwer komputera to Python i na
+        // telefonie wstaje ~4 s — 30 s zostawia zapas na wolny dzień s10e).
+        // Stdio serwery nie reconnectują się same, więc start musi się zmieścić
+        // w tym oknie — stąd podbicie, a nie domyślne 10 s.
+        const env: Record<string, string | undefined> = { ...process.env, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error", MCP_TIMEOUT: "30000" };
+        delete env.ANTHROPIC_API_KEY;
+        delete env.CLAUDECODE;
+        delete env.CLAUDE_CODE_ENTRYPOINT;
+        const sessionId = resume ?? newId();
+        const launchArgs = [...args, resume ? "--resume" : "--session-id", sessionId, "--model", selectedModel];
+        if (turn.system) launchArgs.push("--append-system-prompt", turn.system);
+        const cli = cliSpawn(config.cli, launchArgs);
+        const child = spawn(cli.command, cli.args, {
+          cwd: turn.cwd ?? homedir(), env, stdio: ["pipe", "pipe", "pipe"],
+          windowsVerbatimArguments: cli.windowsVerbatimArguments, detached: true,
+        });
+        const fresh: Worker = { child, signature, sessionId, buffer: "", stderr: "", system: turn.system ?? "", lastUsed: ++useSeq };
+        workers.set(threadId, fresh);
+        return fresh;
+      };
+
       let worker = workers.get(threadId);
       if (worker && worker.signature !== signature) {
         workers.delete(threadId);
@@ -401,27 +468,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       let spawnedWorker = false;
       if (!worker || worker.child.stdin?.destroyed) {
-        // multibot (A1): Claude Code NIE ma wyścigu codexa — czeka na łączące się
-      // serwery MCP (tool search / WaitForMcpServers), a awarię serwera zgłasza
-      // Claude'owi zamiast cicho pominąć narzędzia. `MCP_TIMEOUT` to startup
-      // timeout serwerów MCP (default 10 s; serwer komputera to Python i na
-      // telefonie wstaje ~4 s — 30 s zostawia zapas na wolny dzień s10e).
-      // Stdio serwery nie reconnectują się same, więc start musi się zmieścić
-      // w tym oknie — stąd podbicie, a nie domyślne 10 s.
-      const env: Record<string, string | undefined> = { ...process.env, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error", MCP_TIMEOUT: "30000" };
-        delete env.ANTHROPIC_API_KEY;
-        delete env.CLAUDECODE;
-        delete env.CLAUDE_CODE_ENTRYPOINT;
-        const sessionId = typeof turn.resumeCursor === "string" ? turn.resumeCursor : newId();
-        const launchArgs = [...args, typeof turn.resumeCursor === "string" ? "--resume" : "--session-id", sessionId, "--model", selectedModel];
-        if (turn.system) launchArgs.push("--append-system-prompt", turn.system);
-        const cli = resolveCliSpawn(config.cli, launchArgs);
-        const child = spawn(cli.command, cli.args, {
-          cwd: turn.cwd ?? homedir(), env, stdio: ["pipe", "pipe", "pipe"],
-          windowsVerbatimArguments: cli.windowsVerbatimArguments, detached: true,
-        });
-        worker = { child, signature, sessionId, buffer: "", stderr: "", system: turn.system ?? "", lastUsed: ++useSeq };
-        workers.set(threadId, worker);
+        worker = spawnWorker(typeof turn.resumeCursor === "string" ? turn.resumeCursor : null);
         spawnedWorker = true;
         reapWarmWorkers(threadId);
       }
@@ -434,24 +481,35 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const contextUpdate = !spawnedWorker && worker.system !== systemNow ? systemNow : "";
       worker.system = systemNow;
       const current: Turn = { turnId, settled: false, sawStreamDelta: false };
-      worker.current = current;
+      // Rozgrzewka NIE jest turą: bez `current` nie ma zdarzeń, nie ma wpisu w
+      // `active` i kolejna prawdziwa tura nie odbija się o „a turn is already
+      // running".
+      if (!warmOnly) worker.current = current;
+      let firstEventTimer: ReturnType<typeof setTimeout> | undefined;
+
+      // multibot: zegar bezczynności zbrojony w jednym miejscu — po turze i po
+      // rozgrzewce, żeby proces postawiony „na zapas" też kiedyś zszedł.
+      const armIdle = () => {
+        const w = worker!;
+        if (w.idleTimer) clearTimeout(w.idleTimer);
+        w.idleTimer = setTimeout(() => {
+          if (!w.current && workers.get(threadId) === w) {
+            workers.delete(threadId);
+            w.broker?.close();
+            killTree(w.child);
+          }
+        }, WORKER_IDLE_MS);
+        w.idleTimer.unref?.();
+      };
 
       const settle = (ok: boolean, stopReason: string | null, cost: number | null = null) => {
         if (current.settled) return;
         current.settled = true;
+        if (firstEventTimer) clearTimeout(firstEventTimer);
         if (worker?.current === current) worker.current = undefined;
         active.delete(threadId);
         emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost });
-        if (worker && workers.get(threadId) === worker) {
-          worker.idleTimer = setTimeout(() => {
-            if (!worker?.current && workers.get(threadId) === worker) {
-              workers.delete(threadId);
-              worker.broker?.close();
-              killTree(worker.child);
-            }
-          }, WORKER_IDLE_MS);
-          worker.idleTimer.unref?.();
-        }
+        if (worker && workers.get(threadId) === worker) armIdle();
       };
       const broker = worker.broker ?? (brokerNeeded ? createPermissionBroker({
         socketPath,
@@ -560,38 +618,51 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       worker.onLine = handleLine;
       worker.finish = settle;
 
-      if (spawnedWorker) {
-        worker.child.stdout!.on("data", (chunk) => {
-          worker!.buffer += chunk;
+      // multibot: uchwyty pinujemy do KONKRETNEGO procesu (`w`), nie do zmiennej
+      // `worker`. Po podmianie workera (inny podpis, respawn po zawisie) stare
+      // `close` starego procesu strzelało w NOWY: zdejmowało go z mapy i
+      // wywracało jego turę komunikatem „claude exited … before result".
+      const attach = (w: Worker) => {
+        w.child.stdout!.on("data", (chunk) => {
+          w.onData?.();
+          w.buffer += chunk;
           let nl;
-          while ((nl = worker!.buffer.indexOf("\n")) !== -1) {
-            const line = worker!.buffer.slice(0, nl);
-            worker!.buffer = worker!.buffer.slice(nl + 1);
-            if (line.trim()) worker!.onLine?.(line);
+          while ((nl = w.buffer.indexOf("\n")) !== -1) {
+            const line = w.buffer.slice(0, nl);
+            w.buffer = w.buffer.slice(nl + 1);
+            if (line.trim()) w.onLine?.(line);
           }
         });
-        worker.child.stderr!.on("data", (c) => {
-          worker!.stderr += c;
-          if (worker!.stderr.length > 8192) worker!.stderr = worker!.stderr.slice(-8192);
+        w.child.stderr!.on("data", (c) => {
+          w.stderr += c;
+          if (w.stderr.length > 8192) w.stderr = w.stderr.slice(-8192);
         });
-        worker.child.once("error", (e) => {
-          const activeTurn = worker!.current;
+        w.child.once("error", (e) => {
+          const activeTurn = w.current;
           const errorTurnId = activeTurn?.turnId ?? turnId;
           emit({ ...base(threadId, errorTurnId), type: "runtime.error", message: `spawn failed: ${e.message}` });
-          worker!.finish?.(false, "spawn_error");
+          w.finish?.(false, "spawn_error");
         });
-        worker.child.once("close", (code) => {
-          const activeTurn = worker!.current;
+        w.child.once("close", (code) => {
+          const activeTurn = w.current;
           if (activeTurn && !activeTurn.settled) {
             emit({
               ...base(threadId, activeTurn.turnId),
-              type: "runtime.error", message: `claude exited ${code} before result${worker!.stderr ? `: ${worker!.stderr.trim().slice(-300)}` : ""}`,
+              type: "runtime.error", message: `claude exited ${code} before result${w.stderr ? `: ${w.stderr.trim().slice(-300)}` : ""}`,
             });
-            worker!.finish?.(false, "exit_before_result");
+            w.finish?.(false, "exit_before_result");
           }
-          worker!.broker?.close();
-          if (workers.get(threadId) === worker) workers.delete(threadId);
+          w.broker?.close();
+          if (workers.get(threadId) === w) workers.delete(threadId);
         });
+      };
+      if (spawnedWorker) attach(worker);
+
+      // Rozgrzewka kończy się TU: proces stoi, broker stoi, nic nie poszło na
+      // stdin. Pierwsza prawdziwa tura zastanie ciepły CLI.
+      if (warmOnly) {
+        armIdle();
+        return { turnId };
       }
 
       const stop = () => {
@@ -616,13 +687,70 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           ]
         : promptText;
       const promptMsg = { type: "user", message: { role: "user", content } };
-      try {
-        worker.child.stdin!.write(JSON.stringify(promptMsg) + "\n");
-      } catch (error) {
-        emit({ ...base(threadId, turnId), type: "runtime.error", message: `claude input failed: ${error instanceof Error ? error.message : String(error)}` });
-        settle(false, "stdin_error");
-        killTree(worker.child);
+
+      // multibot (B): żywotność workera mierzyliśmy przez `child.stdin.destroyed`,
+      // a `child` to proces PROOTA — proot potrafi żyć z martwym claude w środku
+      // (zaobserwowane), więc tura szła do rury, której nikt nie czyta, i wisiała
+      // bez końca. Pilnujemy więc PIERWSZEGO znaku życia na stdout: nie ma go w
+      // budżecie → proces jest martwy, ubijamy, stawiamy nowy i powtarzamy turę
+      // RAZ; dopiero drugie milczenie idzie do użytkownika jako błąd. Budżet
+      // dotyczy wyłącznie pierwszego bajtu — długie tury zostają nietknięte.
+      // stderr się NIE liczy: proot wypisuje tam ostrzeżenia także wtedy, gdy CLI
+      // w środku już nie żyje.
+      let freshSpawn = spawnedWorker;
+      let retried = false;
+      const sendPrompt = () => {
+        const w = worker!;
+        w.onData = () => {
+          if (firstEventTimer) clearTimeout(firstEventTimer);
+          firstEventTimer = undefined;
+        };
+        try {
+          w.child.stdin!.write(JSON.stringify(promptMsg) + "\n");
+        } catch (error) {
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: `claude input failed: ${error instanceof Error ? error.message : String(error)}` });
+          settle(false, "stdin_error");
+          killTree(w.child);
+          return;
+        }
+        firstEventTimer = setTimeout(onSilence, firstEventMs(freshSpawn));
+        firstEventTimer.unref?.();
+      };
+      function onSilence() {
+        firstEventTimer = undefined;
+        if (current.settled) return;
+        const dead = worker!;
+        // Sprzątamy MARTWEGO tak, żeby jego `close` nie ruszył tury ani nowego
+        // procesu: bez `current` nie zgłosi błędu, bez brokera go nie zamknie
+        // (broker jest na wątek i przechodzi do następcy).
+        dead.current = undefined;
+        dead.onData = undefined;
+        dead.onLine = undefined;
+        dead.finish = undefined;
+        const inherited = dead.broker;
+        dead.broker = undefined;
+        if (dead.idleTimer) clearTimeout(dead.idleTimer);
+        if (workers.get(threadId) === dead) workers.delete(threadId);
+        killTree(dead.child);
+        if (retried) {
+          inherited?.close();
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: "claude worker gave no sign of life, also after a restart" });
+          settle(false, "worker_unresponsive");
+          return;
+        }
+        retried = true;
+        // Sesja mogła już istnieć (worker odpowiadał wcześniej) — wznawiamy ją,
+        // żeby powtórzona tura nie zgubiła kontekstu rozmowy.
+        worker = spawnWorker(dead.sessionId);
+        worker.broker = inherited;
+        worker.current = current;
+        worker.onLine = handleLine;
+        worker.finish = settle;
+        attach(worker);
+        freshSpawn = true;
+        sendPrompt();
       }
+      sendPrompt();
       appendNative(threadId, { dir: "out", source: "claude.sdk.message", msg: promptMsg });
 
       return { turnId };
@@ -630,7 +758,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     const snapshot = async (): Promise<ProviderSnapshot> => {
       const version = await new Promise<string | null>((resolve) => {
-        const cli = resolveCliSpawn(config.cli, ["--version"]); // multibot
+        const cli = cliSpawn(config.cli, ["--version"]); // multibot
         execFile(
           cli.command,
           cli.args,
@@ -689,7 +817,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       generateText: (prompt: string) =>
         new Promise((resolve, reject) => {
           // multibot
-          const cli = resolveCliSpawn(config.cli, ["-p", prompt, "--model", "haiku", "--output-format", "text"]);
+          const cli = cliSpawn(config.cli, ["-p", prompt, "--model", "haiku", "--output-format", "text"]);
           execFile(
             cli.command,
             cli.args,

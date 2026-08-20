@@ -7,13 +7,32 @@
 //   FAKE_CLAUDE_MODE   happy (default) | persistent | exit-early | hang | malformed
 //                      | stream (partial-message text deltas before the
 //                        whole-message frame, plus subagent noise to drop)
+//                      | deaf (alive but NOTHING on stdout, ever — proot żyje,
+//                        claude w środku nie; watchdog tury ma to wyłapać)
+//                      | deaf-once (jak wyżej, ale tylko pierwszy proces; drugi
+//                        odpowiada normalnie — do testu respawnu i powtórki)
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, prompt} as JSON, so the
 //                      test can assert on argv shape and env hygiene
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 
-const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
+let mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
+// deaf-once: pierwszy proces milczy, każdy następny gada. Znacznik na dysku, bo
+// procesy są osobne — driver ubija ten pierwszy i stawia drugi.
+if (mode === "deaf-once") {
+  const flag = process.env.FAKE_CLAUDE_DEAF_FLAG ?? "";
+  if (flag && existsSync(flag)) mode = "persistent";
+  else {
+    if (flag) writeFileSync(flag, "1");
+    mode = "deaf";
+  }
+}
+if (mode === "deaf") {
+  // Żywy proces, zero bajtów na stdout — dokładnie ten przypadek, w którym
+  // `stdin.destroyed` kłamie, że worker żyje.
+  setInterval(() => {}, 1_000);
+}
 
 const argv = process.argv.slice(2);
 const argAfter = (flag: string): string | null => {
@@ -28,6 +47,7 @@ let initialized = false;
 let turns = 0;
 const handlePrompt = (raw: string) => {
   turns += 1;
+  if (mode === "deaf") return; // tura wpada do rury i nikt nie odpowiada
   let prompt: unknown = null;
   try {
     prompt = JSON.parse(raw);
