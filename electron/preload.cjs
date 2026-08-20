@@ -26,6 +26,13 @@ contextBridge.exposeInMainWorld("ogb", {
   /** Opens System Settings on the given privacy pane: mic|screen|speech. */
   permOpenSettings: (pane) => ipcRenderer.invoke("perm:open-settings", pane),
 
+  /** Onboarding "connect": remember this remote host and switch to it, so the
+   * next launch goes straight there instead of showing onboarding again. The
+   * main process reloads this window, so the returned promise usually dies
+   * with the page — that's expected. */
+  addRemoteHost: (url) =>
+    ipcRenderer.invoke("hosts:add-remote", { url }).then((host) => ipcRenderer.invoke("hosts:use-host", host.id)),
+
   /** In-app auto-update. State object:
    *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",
    *    version?, percent?, message? }. onState fires immediately with the

@@ -48,11 +48,13 @@ export function getActiveId() {
   return readRaw().activeId ?? "local";
 }
 
+// The token is optional: the onboarding "connect" flow saves the address
+// alone and lets the host's own LoginScreen take the token (it lands in that
+// origin's localStorage, which outlives restarts and updates).
 export function addRemoteHost({ name, url, token }) {
-  if (!token || !token.trim()) throw new Error("An access token is required.");
   const config = readRaw();
   const normalized = normalizeRemoteUrl(url);
-  const tokenEnc = encryptToken(token.trim());
+  const tokenEnc = token?.trim() ? encryptToken(token.trim()) : undefined;
   const host = {
     id: `h_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     name: (name ?? "").trim() || normalized,
@@ -83,5 +85,6 @@ export function setActiveHost(id) {
 export function resolveLoadTarget() {
   const resolved = resolveActiveTarget(readRaw());
   if (resolved.mode === "local") return resolved;
-  return { mode: "remote", url: resolved.host.url, token: decryptToken(resolved.host.tokenEnc), name: resolved.host.name };
+  const token = resolved.host.tokenEnc ? decryptToken(resolved.host.tokenEnc) : "";
+  return { mode: "remote", url: resolved.host.url, token, name: resolved.host.name };
 }

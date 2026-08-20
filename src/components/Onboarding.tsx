@@ -87,6 +87,15 @@ async function readProgress(path: string, onProgress: (value: Progress) => void)
   }
 }
 
+// In Electron, hand the address to the shell first so it remembers the host
+// across restarts (it reloads the window itself); in a plain browser — or an
+// older shell without the bridge method — just navigate.
+function connectTo(url: string) {
+  const save = window.ogb?.addRemoteHost;
+  if (!save) return window.location.assign(url);
+  save(url).catch(() => window.location.assign(url));
+}
+
 export function Onboarding({ onDone }: { onDone: () => void }) {
   const polish = useLanguage() === "pl";
   const [entry, setEntry] = useState<"choice" | "server" | "connect">("choice");
@@ -218,7 +227,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         {entry === "connect" && <div className="flex flex-col">
           <h1 className="text-[18px] font-semibold text-ink">{polish ? "Zaloguj się do serwera" : "Sign in to a server"}</h1>
           <p className="mt-1 text-[13.5px] text-ink-secondary">{polish ? "Wpisz adres serwera." : "Enter the server address."}</p>
-          <div className="mt-2 flex gap-2"><input value={manualAddress} onChange={(event) => setManualAddress(event.target.value)} placeholder="https://server.example" className={`min-w-0 flex-1 ${inputClass}`} /><button onClick={() => manualAddress.trim() && window.location.assign(manualAddress.trim())} className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink">{polish ? "Połącz" : "Connect"}</button></div>
+          <div className="mt-2 flex gap-2"><input value={manualAddress} onChange={(event) => setManualAddress(event.target.value)} placeholder="https://server.example" className={`min-w-0 flex-1 ${inputClass}`} /><button onClick={() => manualAddress.trim() && connectTo(manualAddress.trim())} className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink">{polish ? "Połącz" : "Connect"}</button></div>
           <button onClick={() => setEntry("choice")} className="mt-4 text-[12px] text-ink-secondary hover:text-ink">{polish ? "Wstecz" : "Back"}</button>
         </div>}
 
