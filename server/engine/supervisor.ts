@@ -33,6 +33,23 @@ export function defaultEngineDataDir(): string {
 
 export class EngineUnavailableError extends Error {}
 
+/**
+ * Twardy wyłącznik silnika: `MULTIBOT_ENGINE=off` w środowisku harnessu.
+ *
+ * Powód (decyzja użytkownika, produkcja na telefonie s10e/Termux): Android LMK
+ * ubija ciepłe workery CLI, gdy wolnej pamięci robi się <120 MB, a silnik
+ * Pythona wraz z jego botami zjada jej kilkaset. Wszystkie używane boty jadą na
+ * driverze `claude`, więc silnik jest tam czystym kosztem pamięci.
+ *
+ * Jedna bramka w `ensureEngine()` wystarcza na wszystko: spawn jest prywatny i
+ * osiągalny wyłącznie tędy, a każdy wołający (przelotka `/api/engine/*`, driver
+ * slafy, MCP komputera, import profilu na starcie) już dziś umie obsłużyć
+ * `EngineUnavailableError` jako "silnika nie da się mieć" — 503 zamiast
+ * wywrotki. Dodatkowo wycinamy pętlę reconnectu w `watchEngineAttention`, żeby
+ * nie pukała w martwy port co 5 s.
+ */
+export const engineDisabled = (): boolean => (process.env.MULTIBOT_ENGINE ?? "").toLowerCase() === "off";
+
 /** Python z venvu silnika — ten sam wzór resolvingu co scripts/dev-engine.mjs. */
 export function venvPython(engineDir = ENGINE_DIR): string {
   return process.platform === "win32"
@@ -145,6 +162,7 @@ export function ensureEngine(): Promise<string> {
 }
 
 async function run(): Promise<string> {
+  if (engineDisabled()) throw new EngineUnavailableError("silnik wyłączony (MULTIBOT_ENGINE=off)");
   const external = process.env.ENGINE_URL;
   const baseUrl = engineBaseUrl();
 

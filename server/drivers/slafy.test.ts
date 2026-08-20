@@ -421,6 +421,25 @@ describe("SlafyDriver attach-sync (D4)", () => {
   });
 });
 
+// Wyłącznik silnika: żywy silnik pod ENGINE_URL i tak ma być odrzucony, bo
+// `MULTIBOT_ENGINE=off` znaczy "nie tykamy silnika w ogóle" (pamięć telefonu).
+describe("ensureEngine with MULTIBOT_ENGINE=off", () => {
+  let engine: FakeEngine;
+
+  afterEach(async () => {
+    delete process.env.MULTIBOT_ENGINE;
+    delete process.env.ENGINE_URL;
+    await engine?.close();
+  });
+
+  it("rejects without spawning or probing, even with a live engine", async () => {
+    engine = await startFakeEngine();
+    process.env.ENGINE_URL = engine.url;
+    process.env.MULTIBOT_ENGINE = "off";
+    await expect(ensureEngine()).rejects.toThrow(/silnik wy/);
+  });
+});
+
 describe("ensureEngine with ENGINE_URL", () => {
   let engine: FakeEngine;
 

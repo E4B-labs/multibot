@@ -15,7 +15,7 @@ import { randomBytes } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import type { Duplex } from "node:stream";
 
-import { engineBaseUrl } from "./supervisor.ts";
+import { engineBaseUrl, engineDisabled } from "./supervisor.ts";
 
 const RETRY_MS = 5_000;
 
@@ -77,6 +77,9 @@ export interface AttentionWatch {
 
 /** Startuje pętlę nasłuchu; zwraca funkcję zatrzymującą. */
 export function watchEngineAttention(watch: AttentionWatch): () => void {
+  // Silnik wyłączony (`MULTIBOT_ENGINE=off`) = nie ma czego słuchać. Bez tego
+  // pętla reconnectu pukałaby w martwy port 8700 co 5 s do końca życia procesu.
+  if (engineDisabled()) return () => {};
   let stopped = false;
   let socket: Duplex | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
