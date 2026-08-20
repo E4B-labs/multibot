@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, AlertTriangle, Loader2, Mic } from "lucide-react";
 import { MausAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, track } from "@/lib/analytics";
@@ -108,8 +108,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [modelError, setModelError] = useState<string | null>(null);
   const [perms, setPerms] = useState<{ mic: string } | null>(null);
   const [manualAddress, setManualAddress] = useState("");
-  const [scanError, setScanError] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 
   useEffect(() => {
@@ -137,50 +135,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
       return () => clearInterval(timer);
     }
   }, [entry, step, device, cli]);
-
-  useEffect(() => {
-    if (entry !== "connect") return;
-    const Detector = (window as any).BarcodeDetector as (new (options?: { formats: string[] }) => { detect(video: HTMLVideoElement): Promise<Array<{ rawValue?: string }>> }) | undefined;
-    if (!Detector || !navigator.mediaDevices?.getUserMedia) {
-      setScanError(polish ? "Ta przeglądarka nie obsługuje skanowania QR. Wpisz adres ręcznie." : "This browser cannot scan QR codes. Enter the address manually.");
-      return;
-    }
-    let alive = true;
-    let stream: MediaStream | null = null;
-    const scan = async () => {
-      if (!alive || !videoRef.current) return;
-      try {
-        const hit = (await new Detector({ formats: ["qr_code"] }).detect(videoRef.current))[0]?.rawValue;
-        if (!hit) return;
-        const url = new URL(hit);
-        const params = new URLSearchParams(url.hash.replace(/^#/, "") || url.search);
-        const code = params.get("pair");
-        if (!code) return;
-        const response = await fetch(`${url.origin}/api/pair/claim`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, deviceName: "browser" }) });
-        if (!response.ok) throw new Error("Pairing failed");
-        window.location.assign(url.origin);
-      } catch (error) {
-        setScanError(error instanceof Error ? error.message : String(error));
-      }
-    };
-    void navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-      .then((value) => {
-        stream = value;
-        if (videoRef.current) {
-          videoRef.current.srcObject = value;
-          void videoRef.current.play();
-        }
-        const timer = window.setInterval(() => void scan(), 700);
-        (videoRef.current as any).__multibotScanTimer = timer;
-      })
-      .catch((error) => setScanError(error instanceof Error ? error.message : String(error)));
-    return () => {
-      alive = false;
-      const timer = (videoRef.current as any)?.__multibotScanTimer as number | undefined;
-      if (timer) window.clearInterval(timer);
-      stream?.getTracks().forEach((track) => track.stop());
-    };
-  }, [entry, polish]);
 
   const startProvision = async () => {
     setProvision({ message: "Starting server setup…" });
@@ -263,10 +217,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
         {entry === "connect" && <div className="flex flex-col">
           <h1 className="text-[18px] font-semibold text-ink">{polish ? "Zaloguj się do serwera" : "Sign in to a server"}</h1>
-          <p className="mt-1 text-[13.5px] text-ink-secondary">{polish ? "Zeskanuj kod QR pokazany w ustawieniach serwera." : "Scan the QR code shown in server settings."}</p>
-          <video ref={videoRef} muted playsInline className="mt-5 aspect-square w-full rounded-xl bg-black object-cover" />
-          {scanError && <div className="mt-2 text-[12px] text-danger">{scanError}</div>}
-          <div className="mt-4 text-center text-[12px] text-ink-secondary">{polish ? "Wpisz adres ręcznie" : "Enter address manually"}</div>
+          <p className="mt-1 text-[13.5px] text-ink-secondary">{polish ? "Wpisz adres serwera." : "Enter the server address."}</p>
           <div className="mt-2 flex gap-2"><input value={manualAddress} onChange={(event) => setManualAddress(event.target.value)} placeholder="https://server.example" className={`min-w-0 flex-1 ${inputClass}`} /><button onClick={() => manualAddress.trim() && window.location.assign(manualAddress.trim())} className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink">{polish ? "Połącz" : "Connect"}</button></div>
           <button onClick={() => setEntry("choice")} className="mt-4 text-[12px] text-ink-secondary hover:text-ink">{polish ? "Wstecz" : "Back"}</button>
         </div>}
@@ -277,7 +228,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           <div className="mt-4 rounded-xl bg-card p-3.5 text-[12.5px] leading-relaxed text-ink-secondary">
             <div>{polish ? "1. Uruchom MultiBota na komputerze albo telefonie, który ma być serwerem." : "1. Run MultiBot on the computer or phone that will be the server."}</div>
             <div>{polish ? "2. W ustawieniach serwera wejdź w Połącz urządzenie. Pokaże kod QR." : "2. In server settings, open Connect device. It will show a QR code."}</div>
-            <div>{polish ? "3. Wróć tutaj, wybierz Zaloguj się do serwera i zeskanuj ten kod." : "3. Return here, choose Sign in to a server and scan that code."}</div>
+            <div>{polish ? "3. Wróć tutaj, wybierz Zaloguj się do serwera i wpisz adres serwera." : "3. Return here, choose Sign in to a server and enter the server address."}</div>
           </div>
           <p className="mt-1.5 text-[14px] leading-relaxed text-ink-secondary">{polish ? "Skanujemy urządzenie, aby dopasować konfigurację." : "We scan this device so setup matches its capabilities."}</p>
           {device ? <div className="mt-4 rounded-xl bg-card p-3.5 text-[13px] text-ink-secondary">
