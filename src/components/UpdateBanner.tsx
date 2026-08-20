@@ -28,7 +28,9 @@ export function UpdateBanner() {
           : polish ? "Sprawdzanie aktualizacji nieudane" : "Update check failed";
   const subtitle =
     s.status === "available"
-      ? polish ? "Nowsza wersja jest gotowa do pobrania." : "A newer version is ready to download."
+      ? polish
+        ? "Kliknij, aby pobrać i zainstalować (aplikacja uruchomi się ponownie)."
+        : "Click to download and install (the app will restart)."
       : s.status === "downloading"
         ? `${Math.round(s.percent ?? 0)}%`
         : s.status === "downloaded"
@@ -74,7 +76,7 @@ export function UpdateBanner() {
               onClick={() => void updater.download()}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-white"
             >
-              <ArrowDownToLine size={13} /> {polish ? "Pobierz" : "Download"}
+              <ArrowDownToLine size={13} /> {polish ? "Aktualizuj" : "Update"}
             </button>
           )}
           {s.status === "downloaded" && (

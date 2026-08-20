@@ -18,6 +18,8 @@ let autoUpdater = null;
 let win = null;
 // status: idle | checking | available | downloading | downloaded | error
 let state = { status: "idle" };
+// set by the renderer's "Aktualizuj" click — one button downloads AND installs
+let installWhenDownloaded = false;
 
 function setState(patch) {
   state = { ...state, ...patch };
@@ -46,6 +48,7 @@ export function registerUpdaterIpc() {
   ipcMain.handle("update:download", (event) => {
     if (!isLocalSender(event)) return;
     try {
+      installWhenDownloaded = true;
       autoUpdater?.downloadUpdate();
     } catch (e) {
       setState({ status: "error", message: String(e?.message ?? e) });
@@ -87,10 +90,23 @@ export function startUpdater(mainWindow) {
   autoUpdater.on("download-progress", (p) =>
     setState({ status: "downloading", percent: Math.round(p?.percent ?? 0) }),
   );
-  autoUpdater.on("update-downloaded", (info) =>
-    setState({ status: "downloaded", version: info?.version }),
-  );
-  autoUpdater.on("error", (e) => setState({ status: "error", message: String(e?.message ?? e) }));
+  autoUpdater.on("update-downloaded", (info) => {
+    setState({ status: "downloaded", version: info?.version });
+    // one click = download + install; the "Restart to update" button stays
+    // as the fallback when the download wasn't started from that click
+    if (installWhenDownloaded) {
+      installWhenDownloaded = false;
+      try {
+        autoUpdater.quitAndInstall(true, true);
+      } catch (e) {
+        setState({ status: "error", message: String(e?.message ?? e) });
+      }
+    }
+  });
+  autoUpdater.on("error", (e) => {
+    installWhenDownloaded = false;
+    setState({ status: "error", message: String(e?.message ?? e) });
+  });
 
   // first check ~15s after launch (let the app settle), then hourly
   setTimeout(check, 15_000).unref?.();
