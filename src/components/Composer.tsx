@@ -1,11 +1,11 @@
 import { track } from "@/lib/analytics";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Brain, CalendarClock, Camera, File as FileIcon, Images, Loader2, Mic, Plus, Puzzle, SlidersHorizontal, Square, Wand2, Wrench, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
 import { MausAvatar } from "./Avatar";
-import { normalizeState } from "@/lib/mascot";
+import { normalizeState, stateForBot } from "@/lib/mascot";
 import { useLanguage } from "@/lib/language";
 import { parseSchedule, type PresetOrUnknown } from "@/lib/routineSchedule";
 import { AttachmentCard } from "./AttachmentCard";
@@ -452,7 +452,7 @@ export function Composer({ bot }: { bot: Bot }) {
     for (const url of previewUrls.current) URL.revokeObjectURL(url);
   }, []);
 
-  const addFiles = (list: FileList | null) => {
+  const addFiles = useCallback((list: FileList | File[] | null) => {
     if (!list?.length) return;
     setAttachmentError(null);
     const incoming = [...list];
@@ -471,7 +471,18 @@ export function Composer({ bot }: { bot: Bot }) {
       return { id: crypto.randomUUID(), file, preview, status: "ready" as const };
     })]);
     setAttachOpen(false);
-  };
+  }, [attachments.length]);
+
+  // desktop drag&drop: ChatView dispatches File[] when user drops onto chat
+  useEffect(() => {
+    const onDropFiles = (e: Event) => {
+      const files = (e as CustomEvent<File[]>).detail;
+      if (!files?.length) return;
+      addFiles(files);
+    };
+    window.addEventListener("mb:composer:addFiles", onDropFiles as EventListener);
+    return () => window.removeEventListener("mb:composer:addFiles", onDropFiles as EventListener);
+  }, [addFiles]);
 
   const removeAttachment = (id: string) => setAttachments((current) => current.filter((item) => {
     if (item.id === id && item.preview) {
@@ -680,7 +691,11 @@ setText("");
             ))}
           </div>
         )}
-        <div className="flex items-end gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-2 pr-2">
+        <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5">
+        {/* Desktop agent avatar: 96 px, no frame, anchored above Attach. */}
+        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-24 items-center justify-center md:flex" title={bot.name}>
+          <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={96} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
+        </div>
         <button
           type="button"
           data-attach-toggle
@@ -761,7 +776,7 @@ setText("");
           // `max-h-64` przycina wzrost, `overflow-y-auto` daje pasek. Bez
           // liczenia sufitu w JS: styl wpisany na sztywno i tak jest zacięty
           // przez `max-height`.
-          className="max-h-64 w-full resize-none overflow-y-auto bg-transparent py-1 text-[15px] leading-snug text-ink placeholder:text-ink-secondary focus:outline-none"
+          className="max-h-64 w-full resize-none overflow-y-auto bg-transparent py-1 text-[15px] leading-5 text-ink placeholder:text-ink-secondary focus:outline-none"
         />
         <div className="relative shrink-0">
           <button

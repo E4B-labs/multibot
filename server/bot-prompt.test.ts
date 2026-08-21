@@ -42,7 +42,10 @@ describe("botSystemPrompt", () => {
     // 3.1/3.2: ton współpracownika + potwierdzenie jednym zdaniem.
     expect(text).toContain("coworker on a messenger");
     expect(text).toContain("As an AI");
-    expect(text).toContain("On it —");
+    expect(text).toContain("On it:");
+    expect(text).toContain("ask_user(question, choices)` is the ONLY way");
+    expect(text).toContain("# Human writing style");
+    expect(text).not.toMatch(/[—–]/);
     // Pamięć, notatki i skille użytkownika lecą na końcu.
     expect(text.indexOf("# Memory facts")).toBeGreaterThan(text.indexOf("# How you work"));
     expect(text).toContain("Kacper woli krótkie odpowiedzi.");
@@ -51,14 +54,14 @@ describe("botSystemPrompt", () => {
 
   it("bez komputera nie ma sekcji komputera", () => {
     const text = prompt({ agents: { command: "node" } });
-    expect(text).not.toContain("Your computer —");
+    expect(text).not.toContain("Your computer -");
     expect(text).not.toContain("computer_exec");
     expect(text).not.toContain("Handing the computer over");
   });
 
   it("bez serwera agents nie podpowiada hand_over_computer", () => {
     const text = prompt({ localComputer: { command: "py" } });
-    expect(text).toContain("Your computer —");
+    expect(text).toContain("Your computer -");
     expect(text).not.toContain("Handing the computer over");
     expect(text).not.toContain("hand_over_computer");
     expect(text).not.toContain("create_routine");
