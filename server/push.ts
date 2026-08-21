@@ -20,6 +20,7 @@ export async function notifyPushDevices(
   title: string,
   body: string,
   botId?: string,
+  data?: Record<string, string>,
 ): Promise<void> {
   const cfg = loadConfig();
   const devices = cfg.pushDevices ?? {};
@@ -29,10 +30,10 @@ export async function notifyPushDevices(
   if (tokens.length === 0) return;
   await Promise.allSettled(
     tokens.map((to) =>
-      fetch("https://exp.host/--/api/v2/push/send", {
+      fetch(process.env.MULTIBOT_EXPO_PUSH_URL || "https://exp.host/--/api/v2/push/send", {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ to, title, body }),
+        body: JSON.stringify({ to, title, body, ...(data ? { data } : {}) }),
       }).catch(() => {}),
     ),
   );

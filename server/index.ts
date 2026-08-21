@@ -255,7 +255,7 @@ function askBotAndWait(
       () => finish(text || "(timed out waiting for the bot to reply)"),
       options?.timeoutMs ?? 4 * 60_000,
     );
-    startTurn(targetBotId, message, { commsDepth: depth + 1, ...options }).catch((err) =>
+    startTurn(targetBotId, message, { commsDepth: depth + 1, ...options, origin: "bot" }).catch((err) =>
       finish(`(couldn't start that bot: ${err instanceof Error ? err.message : String(err)})`),
     );
   });
@@ -589,10 +589,55 @@ const USER_ASK_DISMISS_NOTE = "MultiBot: the user closed the question without an
  * jedna droga zamknięcia karty. Zwraca tekst, który wraca do bota jako wynik
  * narzędzia.
  */
+// ── multibot: push na telefon (U28+) ──────────────────────────────────
+// JEDNO miejsce wysyłki powiadomień: sprawdza przełącznik bota, tytułem jest
+// nazwa bota, a `data.botId` pozwala aplikacji otworzyć po tapnięciu właśnie
+// tego bota. Wysyłka nigdy nie przerywa obsługi zdarzenia.
+type PushKind = "question" | "handoff" | "approval" | "started" | "finished" | "failed" | "attention";
+function pushForBot(botId: string, kind: PushKind, body: string): void {
+  const bot = store.bot(botId);
+  // `=== false` a nie `!`: boty zapisane zanim pole istniało nie mają go w JSON
+  if (!bot || bot.notifications === false) return;
+  void notifyPushDevices(bot.name || "Bot", body.slice(0, 300) || "…", bot.id, { botId: bot.id, kind }).catch(() => {});
+}
+
+// Kto zaczął turę: tury bot-bot (`ask_bot`, runda grupy, cel) nie pushują
+// startu ani końca — rozmowa trzech botów dałaby sześć powiadomień. Rozgrzewka
+// (`warmBot`) omija `startTurn`, więc nie trafia do mapy i też nie pushuje.
+type TurnOrigin = "user" | "routine" | "bot";
+const turnOrigin = new Map<string, TurnOrigin>();
+const startedPushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function cancelStartedPush(botId: string): void {
+  const timer = startedPushTimers.get(botId);
+  if (timer) clearTimeout(timer);
+  startedPushTimers.delete(botId);
+}
+/** Anty-zalew: bot, który odpowiedział w < 5 s, wysyła tylko „koniec". */
+function scheduleStartedPush(botId: string, body: string): void {
+  cancelStartedPush(botId);
+  const timer = setTimeout(() => {
+    startedPushTimers.delete(botId);
+    pushForBot(botId, "started", body);
+  }, 5_000);
+  timer.unref?.();
+  startedPushTimers.set(botId, timer);
+}
+function endTurnPush(botId: string, kind: "finished" | "failed", body: string): void {
+  const origin = turnOrigin.get(botId);
+  turnOrigin.delete(botId);
+  cancelStartedPush(botId);
+  if (!origin || origin === "bot") return;
+  pushForBot(botId, kind, body);
+}
+
 async function askOwnerAndWait(threadId: string, card: Omit<OptionCardData, "requestId">): Promise<string> {
   const requestId = newId();
   const message = store.appendMessage(threadId, { role: "bot", kind: "options", card: { ...card, requestId } });
   broadcast({ kind: "message", threadId, message });
+  // pytanie / przekazanie komputera idzie na telefon także z tury izolowanej
+  // (grupa, pokój) — o odpowiedź prosi człowieka, nie drugiego bota
+  const asker = store.botByThread(threadId) ?? store.bot(isolatedTurnBots.get(threadId) ?? "");
+  if (asker) pushForBot(asker.id, card.kind === "computer-handoff" ? "handoff" : "question", card.subtitle || card.title);
   return new Promise<string>((resolve) => {
     const timer = setTimeout(() => {
       if (!pendingUserAsks.delete(requestId)) return;
@@ -692,6 +737,8 @@ bus.subscribe((event: RuntimeEvent) => {
           },
       });
       if (event.requestId) askMessageByRequest.set(event.requestId, message.id);
+      pushForBot(bot.id, permission ? "approval" : "question",
+        event.summary || (permission ? t("Bot prosi o zgodę.", "The bot needs approval.") : t("Bot ma pytanie.", "The bot has a question.")));
       if (permission && event.requestId && event.approvalRule) approvalRuleByRequest.set(event.requestId, event.approvalRule);
       break;
     }
@@ -719,6 +766,7 @@ bus.subscribe((event: RuntimeEvent) => {
     }
     case "runtime.error":
       pushMessage({ role: "bot", kind: "activity", tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false } });
+      endTurnPush(bot.id, "failed", event.message.slice(0, 120));
       break;
     case "turn.completed": {
       // the last live frame becomes a settled inline screen message —
@@ -726,6 +774,8 @@ bus.subscribe((event: RuntimeEvent) => {
       const frame = stopScreenPoller(bot.id);
       if (frame) pushMessage({ role: "bot", kind: "screen", png: frame.png, mime: frame.mime });
       store.patchBot(bot.id, { busy: false, unread: true });
+      const lastReply = store.messagesFor(bot.threadId).filter((m) => m.role === "bot" && m.kind === "text" && m.text).at(-1)?.text ?? "";
+      endTurnPush(bot.id, "finished", lastReply.slice(0, 120) || t("skończył pracę", "finished working"));
       clearTurnPolicy(bot.threadId);
       activeCommsDepth.delete(bot.id); // multibot (F9): tura skończona — licznik też
       turnModelByThread.delete(event.threadId); // multibot (F12): sprzątanie badge
@@ -1222,6 +1272,10 @@ opts?: {
      * co użytkownik napisał. Bez tego dostawał drugą bańkę z całym transkryptem
      * pokoju, który ma przecież własny, klikalny widok. */
     userMessagePosted?: boolean;
+    /** multibot: kto zaczął turę — decyduje o pushach start/koniec. */
+    origin?: TurnOrigin;
+    /** nazwa rutyny do treści pushu „rutyna X wystartowała" */
+    routineName?: string;
   },
 ) {
   const bot = store.bot(botId);
@@ -1292,6 +1346,10 @@ opts?: {
       approvalRules: workspace.approvalRules(bot.id),
     });
     activeCommsDepth.set(bot.id, commsDepth); // multibot (F9): patrz `activeCommsDepth`
+    const origin: TurnOrigin = opts?.origin ?? "user";
+    turnOrigin.set(bot.id, origin);
+    if (origin === "routine") scheduleStartedPush(bot.id, `rutyna ${opts?.routineName ?? ""} wystartowała`);
+    else if (origin === "user") scheduleStartedPush(bot.id, `zaczyna pracę: ${text.slice(0, 80)}`);
     broadcast({ kind: "bot", bot: store.bot(bot.id) });
   }
 
@@ -1406,6 +1464,7 @@ opts?: {
         });
         broadcast({ kind: "message", threadId: bot.threadId, message: failure });
         store.patchBot(bot.id, { busy: false });
+        endTurnPush(bot.id, "failed", message.slice(0, 120));
         clearTurnPolicy(bot.threadId);
         activeCommsDepth.delete(bot.id); // multibot (F9): tura padła — licznik też
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
@@ -1456,7 +1515,7 @@ const setupJobs = new SetupJobs(join(DATA_DIR, "setup-jobs.json"), (job) =>
 // jako osobny, oznaczony blok — `routineTurnText` jest JEDNYM wspólnym
 // miejscem składania dla wszystkich ścieżek (webhook, tick, Run now).
 const harnessRoutines = new HarnessRoutines(join(DATA_DIR, "routines.json"), async (routine, payload) => {
-  await startTurn(routine.botId, routineTurnText(routine.name, routine.prompt, payload));
+  await startTurn(routine.botId, routineTurnText(routine.name, routine.prompt, payload), { origin: "routine", routineName: routine.name });
 });
 
 // ── multibot (webhook): publiczny inbound rutyn harnessu ──────────────
@@ -3269,11 +3328,7 @@ watchEngineAttention({
     broadcast({ kind: "bot", bot: store.bot(bot.id) });
     // multibot (U28): telefon dostaje push, gdy bot czegoś chce (login, captcha,
     // decyzja). Odporność: błąd wysyłki nie przerywa obsługi uwagi.
-    void notifyPushDevices(
-      `${bot.name ?? "Bot"} potrzebuje uwagi`,
-      reason || "Bot czeka na Twoją decyzję.",
-      bot.id,
-    ).catch(() => {});
+    pushForBot(bot.id, "attention", reason || "Bot czeka na Twoją decyzję.");
   },
 });
 
