@@ -35,20 +35,48 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 function remarkMentions({ bots }: { bots: MentionBot[] }) {
   const names = bots.map((b) => b.name).sort((a, b) => b.length - a.length).map(escapeRe);
-  const re = new RegExp(`(?<![\\w.@-])@(${names.join("|")})(?![\\w-])`, "gi");
+  // multibot: lookbehind (?<!) jest od Chrome 62 / WebView 62 — na starszych
+  // telefonach rzuca SyntaxError i wywala cały bundle (czarny ekran po starcie).
+  // Próbuj lookbehind, przy błędzie fallback na kompatybilny (bez lookbehind).
+  let reLB: RegExp | null = null;
+  try {
+    reLB = new RegExp(`(?<![\\w.@-])@(${names.join("|")})(?![\\w-])`, "gi");
+  } catch {}
+  const reCompat = new RegExp(`(^|[^\\w.@-])@(${names.join("|")})(?![\\w-])`, "gi");
+
   return (tree: any) => {
     const split = (node: any): any[] => {
       const out: any[] = [];
+      if (reLB) {
+        let last = 0;
+        reLB.lastIndex = 0;
+        for (let m = reLB.exec(node.value); m; m = reLB.exec(node.value)) {
+          if (m.index > last) out.push({ type: "text", value: node.value.slice(last, m.index) });
+          out.push({
+            type: "mention",
+            data: { hName: "span", hProperties: { dataMention: m[1] } },
+            children: [{ type: "text", value: m[0] }],
+          });
+          last = m.index + m[0].length;
+        }
+        if (!out.length) return [node];
+        if (last < node.value.length) out.push({ type: "text", value: node.value.slice(last) });
+        return out;
+      }
       let last = 0;
-      re.lastIndex = 0;
-      for (let m = re.exec(node.value); m; m = re.exec(node.value)) {
-        if (m.index > last) out.push({ type: "text", value: node.value.slice(last, m.index) });
+      reCompat.lastIndex = 0;
+      for (let m = reCompat.exec(node.value); m; m = reCompat.exec(node.value)) {
+        const prev = m[1];
+        const name = m[2];
+        const atName = `@${name}`;
+        const atIndex = m.index + prev.length;
+        if (atIndex > last) out.push({ type: "text", value: node.value.slice(last, atIndex) });
         out.push({
           type: "mention",
-          data: { hName: "span", hProperties: { dataMention: m[1] } },
-          children: [{ type: "text", value: m[0] }],
+          data: { hName: "span", hProperties: { dataMention: name } },
+          children: [{ type: "text", value: atName }],
         });
-        last = m.index + m[0].length;
+        last = atIndex + atName.length;
       }
       if (!out.length) return [node];
       if (last < node.value.length) out.push({ type: "text", value: node.value.slice(last) });
@@ -149,7 +177,7 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             if (!bot) return <span>{children}</span>;
             return (
               <span className="inline-flex translate-y-px items-center gap-1 rounded-full bg-raised px-2 py-0.5 align-middle text-[13px] font-medium text-ink">
-                <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? "happy"} size={16} animated={false} />
+                <MausAvatar color={(bot.color as any) ?? "blue"} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? "happy"} size={16} animated={false} />
                 {children}
               </span>
             );
