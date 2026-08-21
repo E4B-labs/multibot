@@ -15,8 +15,7 @@ import { ComputerPanel } from "@/components/ComputerPanel";
 import { AppSettingsPanel } from "@/components/AppSettingsPanel";
 // multibot: F6 — panel rutyn silnika slafy
 import { RoutinesPanel } from "@/components/RoutinesPanel";
-// multibot: F8 — panele pamięci i skilli silnika slafy
-import { MemoryPanel } from "@/components/MemoryPanel";
+// multibot: F8 — panel skilli silnika slafy
 import { SkillsPanel } from "@/components/SkillsPanel";
 // multibot: F9-FE — pokój grupowy silnika slafy
 import { GroupPanel } from "@/components/GroupPanel";
@@ -179,8 +178,6 @@ function Shell() {
       {state.computerOpen && bot && <ComputerPanel bot={bot} />}
       {/* multibot: routines are harness-owned and available for every driver. */}
       {state.routinesOpen && bot && <RoutinesPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}
-      {/* multibot: workspace memory/skills are provider-neutral shadow profiles. */}
-      {state.memoryOpen && bot && <MemoryPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}
       {state.skillsOpen && bot && <SkillsPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}
       {/* multibot: F9-FE — pokój grupowy; otwierany wyłącznie z sekcji Groups
           (widocznej tylko przy botach slafy), klucz per grupę = świeży mount */}

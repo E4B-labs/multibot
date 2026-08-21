@@ -311,7 +311,6 @@ export function Composer({ bot }: { bot: Bot }) {
       { id: "goal", label: "/goal", hint: polish ? "Cel: bot goni go przez wiele tur" : "Goal: the bot pursues it across turns", kind: "action" },
       { id: "a-settings", label: polish ? "Ustawienia bota" : "Bot settings", hint: here, kind: "action", run: () => dispatch({ type: "toggleSettings", open: true }) },
       { id: "a-computer", label: polish ? "Komputer bota" : "Bot's computer", hint: here, kind: "action", run: () => dispatch({ type: "toggleComputer", open: true }) },
-      { id: "a-memory", label: polish ? "Pamięć" : "Memory", hint: here, kind: "action", run: () => dispatch({ type: "toggleMemory", open: true }) },
       { id: "a-skills", label: polish ? "Umiejętności" : "Skills", hint: here, kind: "action", run: () => dispatch({ type: "toggleSkills", open: true }) },
       { id: "a-routines", label: polish ? "Rutyny" : "Routines", hint: here, kind: "action", run: () => dispatch({ type: "toggleRoutines", open: true }) },
       { id: "a-plugins", label: polish ? "Wtyczki" : "Plugins", hint: app, kind: "action", run: () => dispatch({ type: "togglePlugins", open: true }) },

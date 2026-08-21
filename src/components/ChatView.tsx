@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, Brain, CalendarClock, Crosshair, Loader2, Monitor, Square, Wand2 } from "lucide-react";
+import { ArrowDown, CalendarClock, Crosshair, Loader2, Monitor, Square, Wand2 } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
 import { AttachmentCard } from "./AttachmentCard";
@@ -335,17 +335,6 @@ export function ChatView({ bot }: { bot: Bot }) {
             title={polish ? "Komputer bota" : "Bot's computer"}
           >
             <Monitor size={18} />
-          </button>
-          <button
-            onClick={() => dispatch({ type: "toggleMemory" })}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.memoryOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title={polish ? "Pamięć bota" : "Bot memory"}
-            aria-label={polish ? "Pamięć bota" : "Bot memory"}
-          >
-            <Brain size={18} />
           </button>
           <button
             onClick={() => dispatch({ type: "toggleRoutines" })}
