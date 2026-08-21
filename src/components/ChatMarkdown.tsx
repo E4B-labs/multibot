@@ -12,6 +12,8 @@ import { useLanguage } from "@/lib/language";
 import { normalizeState } from "@/lib/mascot";
 import { MausAvatar } from "./Avatar";
 import { useStore } from "@/state/store";
+// multibot (2.4): wzmianki jako chip — logika wtyczki w osobnym, testowanym pliku.
+import { mentionPlugins } from "@/lib/mentions";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed, capped, never written while streaming
@@ -26,45 +28,9 @@ const hash = (s: string) => {
   return (h >>> 0).toString(36);
 };
 
-// multibot (2.4): wzmianki @imię bota renderują się jako chip z awatarem,
-// nie surowy tekst. Plugin rozbija węzły tekstowe markdowna na segmenty;
-// znane imiona biorę ze store'a, więc poza blokami kodu nic się nie zmienia.
+// multibot (2.4): typ bota ze store'a — wzmianka rysuje jego awatar, więc
+// potrzebuje więcej niż imienia. Sama wtyczka siedzi w `@/lib/mentions`.
 type MentionBot = ReturnType<typeof useStore>["state"]["bots"][number];
-
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-function remarkMentions({ bots }: { bots: MentionBot[] }) {
-  const names = bots.map((b) => b.name).sort((a, b) => b.length - a.length).map(escapeRe);
-  const re = new RegExp(`(?<![\\w.@-])@(${names.join("|")})(?![\\w-])`, "gi");
-  return (tree: any) => {
-    const split = (node: any): any[] => {
-      const out: any[] = [];
-      let last = 0;
-      re.lastIndex = 0;
-      for (let m = re.exec(node.value); m; m = re.exec(node.value)) {
-        if (m.index > last) out.push({ type: "text", value: node.value.slice(last, m.index) });
-        out.push({
-          type: "mention",
-          data: { hName: "span", hProperties: { dataMention: m[1] } },
-          children: [{ type: "text", value: m[0] }],
-        });
-        last = m.index + m[0].length;
-      }
-      if (!out.length) return [node];
-      if (last < node.value.length) out.push({ type: "text", value: node.value.slice(last) });
-      return out;
-    };
-    const walk = (node: any) => {
-      if (!Array.isArray(node.children)) return;
-      for (let i = node.children.length - 1; i >= 0; i--) {
-        const child = node.children[i];
-        if (child.type === "text") node.children.splice(i, 1, ...split(child));
-        else walk(child);
-      }
-    };
-    walk(tree);
-  };
-}
 
 function CodeBlock({ code, lang, streaming }: { code: string; lang: string; streaming: boolean }) {
   const polish = useLanguage() === "pl";
@@ -134,10 +100,7 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
 function ChatMarkdownComponent({ text, streaming = false }: { text: string; streaming?: boolean }) {
   const { state } = useStore();
   const bots = useMemo<MentionBot[]>(() => state.bots, [state.bots]);
-  const remarkPlugins = useMemo<any[]>(
-    () => (bots.length ? [remarkGfm, remarkMentions({ bots })] : [remarkGfm]),
-    [bots],
-  );
+  const remarkPlugins = useMemo<any[]>(() => mentionPlugins(remarkGfm, bots) as any[], [bots]);
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
