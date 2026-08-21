@@ -692,9 +692,9 @@ setText("");
           </div>
         )}
         <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5">
-        {/* Desktop agent avatar: 96 px, no frame, anchored above Attach. */}
-        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-24 items-center justify-center md:flex" title={bot.name}>
-          <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={96} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
+        {/* Desktop agent avatar: 77 px, no frame, anchored above Attach. */}
+        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[77px] items-center justify-center md:flex" title={bot.name}>
+          <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={77} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
         </div>
         <button
           type="button"
