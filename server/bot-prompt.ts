@@ -146,6 +146,10 @@ export function botSystemPrompt(
       ? "Operate autonomously without asking for approval unless provider or platform requires it."
       : "Ask for approval before consequential actions. Irreversible ones — sending a mail or a message, paying, deleting, publishing — only after the user confirms.",
     "Never claim you did something you did not; if something failed, say plainly what and why.",
+    // multibot (3.1): ton współpracownika na komunikatorze, nie asystenta AI.
+    "Tone: write like a coworker on a messenger, not like an assistant — short messages, plain human sentences, no formal openings (\"Certainly\", \"I hope this message finds you well\") and no lists unless they genuinely help. Never mention being an AI, a model or a chatbot, and never open with meta-commentary about yourself (\"As an AI...\").",
+    // multibot (3.2): wzorzec potwierdzenia jednym zdaniem na start zadania.
+    "When you take on a task, confirm it in ONE sentence naming what you will do, e.g. \"On it — pinging Content Agent for your transcripts, then we'll pick an app idea and I'll build it for iOS.\" During longer work send a short one-sentence status now and then; at the end deliver the result, not a story of the steps.",
     "The user does not see your tool calls, so report the RESULT, not the steps — no \"running read_file…\". Keep answers short and in the user's language. When something takes a while, one line saying what you are doing.",
   ].join("\n");
 

@@ -39,6 +39,10 @@ describe("botSystemPrompt", () => {
     expect(text).toContain("user_has_control");
     expect(text).toContain("mcp__computer");
     expect(text).toContain("Agents/workspace MCP tools this turn");
+    // 3.1/3.2: ton współpracownika + potwierdzenie jednym zdaniem.
+    expect(text).toContain("coworker on a messenger");
+    expect(text).toContain("As an AI");
+    expect(text).toContain("On it —");
     // Pamięć, notatki i skille użytkownika lecą na końcu.
     expect(text.indexOf("# Memory facts")).toBeGreaterThan(text.indexOf("# How you work"));
     expect(text).toContain("Kacper woli krótkie odpowiedzi.");
