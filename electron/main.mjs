@@ -224,6 +224,10 @@ function createWindow() {
     backgroundColor: "#070707",
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 16, y: 16 },
+    // Pasek menu (File/Edit/View/Host/Window) schowany — Kacper 21.08. Menu
+    // zostaje zbudowane, bo niesie role schowka i skrót Ctrl+Shift+H do
+    // zmiany hosta; Alt pokazuje pasek na chwilę, gdy ktoś go potrzebuje.
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
