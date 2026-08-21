@@ -16,14 +16,13 @@
   --color-ink-secondary: #8a8a8a;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
-  --color-bubble-assistant: #292929;
   --color-bubble-user: #5a5a5a;
   --color-success: #38d591;
   --color-danger: #ff5667;
   --color-warning: #ff9800;
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
-    system-ui, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
 
   /* multibot (U26/inspiracje.png): rogi mocno zaokrąglone 12–16 px */
   --radius-lg: 12px;

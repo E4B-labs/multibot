@@ -32,6 +32,8 @@ import { authFetch } from "@/lib/auth";
 import { engineOnline } from "@/lib/engineStatus";
 import { getLanguage, useLanguage } from "@/lib/language";
 
+const isElectron = navigator.userAgent.includes("Electron");
+
 // multibot: przy wąskim oknie sidebar sam zwija się do szyny z samymi
 // awatarami. Dolna granica nie jest ozdobna: poniżej 700 px `styles.css` ma
 // układ telefonu, który kładzie sidebar na całą szerokość nad czatem — szyna
@@ -197,8 +199,8 @@ function BotListItem({
       // tooltip — inaczej bot bez własnego koloru jest nie do odróżnienia.
       title={collapsed ? bot.name : undefined}
       className={cn(
-        "flex w-full items-center rounded-[10px] text-left",
-        collapsed ? "relative justify-center px-0 py-1.5" : "gap-2.5 px-2 py-1.5",
+        "flex w-full items-center rounded-xl text-left",
+        collapsed ? "relative justify-center px-0 py-1.5" : "gap-3 px-3 py-2.5",
         selected ? "bg-raised" : "hover:bg-raised/50",
       )}
     >
@@ -206,7 +208,7 @@ function BotListItem({
         color={bot.color}
         shape={bot.mascotShape}
         state={stateForBot(bot)}
-        size={36}
+        size={56}
         motion={mascotMotion?.kind ?? "none"}
         motionKey={mascotMotion?.nonce ?? 0}
       />
@@ -227,21 +229,21 @@ function BotListItem({
       {!collapsed && (
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-           <span className="flex min-w-0 items-center gap-1.5 truncate text-[14px] font-semibold text-ink">
+           <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
              {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
              <span className="truncate">{bot.name}</span>
              {bot.title && (
-               <span className="shrink-0 rounded bg-raised px-1.5 py-0.5 text-[9px] font-normal text-ink-secondary">{bot.title}</span>
+               <span className="shrink-0 rounded-full bg-raised px-2 py-0.5 text-[10px] font-normal text-ink-secondary">{bot.title}</span>
              )}
            </span>
-          {last && (
+          {selected && last && (
             <span className="shrink-0 text-xs text-ink-secondary">
               {formatTime(last.at)}
             </span>
           )}
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[12px] text-ink-secondary">
+          <span className="truncate text-[13px] text-ink-secondary">
             {preview(bot)}
           </span>
           {/* multibot: needs-attention dot — same pattern as the unread dot below,
@@ -743,17 +745,29 @@ export function Sidebar() {
       className={cn(
         "flex h-full shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel",
         "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        collapsed ? "w-[72px]" : "w-[266px]",
+        collapsed ? "w-[80px]" : "w-[320px]",
       )}
     >
-      {/* Zwinięcie po lewej, dodawanie po prawej — jak we wzorcu. */}
+      {/* Titlebar: real traffic lights in Electron, faux ones in the browser */}
       <div
         className={cn(
-          "flex h-10 items-center px-3",
+          "flex items-center px-4 pt-3.5 pb-1",
           collapsed ? "justify-center" : "justify-between",
         )}
         style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       >
+        {!collapsed && (
+          isElectron ? (
+            <div className="w-14" />
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="size-3 rounded-full bg-[#ff5f57]" />
+              <span className="size-3 rounded-full bg-[#febc2e]" />
+              <span className="size-3 rounded-full bg-[#28c840]" />
+            </div>
+          )
+        )}
+        <div className="flex items-center gap-1">
         {/* multibot: przełącznik szyny. `no-drag` obowiązkowo — bez tego pod
             Electronem klik ląduje w obszarze przeciągania okna. */}
         <button
@@ -805,11 +819,12 @@ export function Sidebar() {
           )}
         </div>
         )}
+        </div>
       </div>
 
       {/* Search */}
       {!collapsed && (
-      <div className="px-2 pb-2 pt-1">
+      <div className="px-3 pt-2 pb-3">
         {/* multibot: to było `input` bez `value` i bez `onChange` — dało się w
             nie pisać i nic się nie działo. Wyszukiwanie ma paleta poleceń
             (CmdK), więc jest teraz jej widocznym wejściem: Ctrl+K sam z siebie
@@ -819,10 +834,11 @@ export function Sidebar() {
           type="button"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => window.dispatchEvent(new CustomEvent("mb:cmdk:open"))}
-          className="flex h-8 w-full items-center gap-2 rounded-lg bg-raised/70 px-2.5 text-left hover:bg-raised"
+          className="flex w-full items-center gap-2 rounded-lg bg-raised/70 px-3 py-2 text-left hover:bg-raised"
         >
           <Search size={16} className="shrink-0 text-ink-secondary" />
-          <span className="flex-1 truncate text-[13px] text-ink-secondary">{polish ? "Szukaj" : "Search"}</span>
+          <span className="flex-1 truncate text-[14px] text-ink-secondary">{polish ? "Szukaj" : "Search"}</span>
+          <kbd className="shrink-0 rounded border border-hairline/60 px-1.5 py-0.5 text-[10px] text-ink-secondary">Ctrl K</kbd>
         </button>
       </div>
       )}
@@ -847,7 +863,7 @@ export function Sidebar() {
       </div>
 
       {/* Footer */}
-      <div className={cn("pb-3 pt-2", collapsed ? "px-1" : "px-2")}>
+      <div className={cn("pb-3 pt-2", collapsed ? "px-1" : "px-3")}>
         {/* multibot: F11 — subtelna kropka statusu silnika, tylko offline+slafy;
             szara bg-raised-hover = konwencja "Service offline" */}
         {engineOffline && (

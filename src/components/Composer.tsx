@@ -585,23 +585,23 @@ setText("");
   };
 
   return (
-    <div className="px-3 pb-3 pt-1">
+    <div className="px-5 pb-5 pt-2">
       {!secureContext && !window.ogb && (
-        <div className="mx-auto mb-2 max-w-[1040px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
+        <div className="mx-auto mb-2 max-w-[900px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           Dictation needs a secure context: use HTTPS or localhost. Plain HTTP on a LAN cannot access the microphone.
         </div>
       )}
       {speechError && (
-        <div className="mx-auto mb-2 max-w-[1040px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
+        <div className="mx-auto mb-2 max-w-[900px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
         </div>
       )}
       {attachmentError && (
-        <div className="mx-auto mb-2 max-w-[1040px] rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+        <div className="mx-auto mb-2 max-w-[900px] rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
           {attachmentError}
         </div>
       )}
-      <div className="relative mx-auto w-full max-w-[1040px]">
+      <div className="relative mx-auto max-w-[900px]">
         <input ref={cameraRef} hidden type="file" accept="image/*" capture="environment" onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
         <input ref={photosRef} hidden type="file" accept="image/*" multiple onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
         <input ref={filesRef} hidden type="file" multiple onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
@@ -691,10 +691,10 @@ setText("");
             ))}
           </div>
         )}
-        <div className="group/composer relative flex min-h-11 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised py-1.5 pl-3 pr-2.5 md:mt-[34px]">
-        {/* Mały podpis bota jak we wzorcu: tuż nad composerem, bez osobnej ramki. */}
-        <div className="absolute bottom-[calc(100%+6px)] left-1 z-20 hidden size-[26px] items-center justify-center md:flex" title={bot.name}>
-          <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={26} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
+        <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5 md:mt-[85px]">
+        {/* Desktop agent avatar: 77 px, no frame, anchored above Attach. */}
+        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[77px] items-center justify-center md:flex" title={bot.name}>
+          <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={77} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
         </div>
         <button
           type="button"
@@ -776,9 +776,9 @@ setText("");
           // `max-h-64` przycina wzrost, `overflow-y-auto` daje pasek. Bez
           // liczenia sufitu w JS: styl wpisany na sztywno i tak jest zacięty
           // przez `max-height`.
-          className="max-h-64 w-full resize-none overflow-y-auto bg-transparent py-1 text-[14px] leading-5 text-ink placeholder:text-ink-secondary focus:outline-none"
+          className="max-h-64 w-full resize-none overflow-y-auto bg-transparent py-1 text-[15px] leading-5 text-ink placeholder:text-ink-secondary focus:outline-none"
         />
-        <div className="relative shrink-0 opacity-0 transition-opacity duration-200 group-hover/composer:opacity-100 focus-within:opacity-100 max-md:opacity-100">
+        <div className="relative shrink-0">
           <button
             onClick={() => setReasoningOpen((open) => !open)}
             aria-expanded={reasoningOpen}
@@ -822,7 +822,7 @@ setText("");
               "flex size-8 shrink-0 items-center justify-center rounded-full",
               recording
                 ? "animate-pulse bg-danger/20 text-danger"
-                : "bg-white text-black hover:bg-white/90",
+                : "text-ink-secondary hover:bg-raised hover:text-ink",
             )}
             title={recording ? polish ? "Zatrzymaj dyktowanie (Esc)" : "Stop dictation (Esc)" : polish ? "Dyktuj" : "Dictate"}
           >
