@@ -1195,7 +1195,12 @@ function botSystemPrompt(
           // multibot: logowanie/2FA/captcha to nie jest pytanie w tekście —
           // człowiek musi usiąść do TEGO komputera. Karta przekazania robi to
           // jednym kliknięciem i wstrzymuje turę do jego odpowiedzi.
-          " When the screen needs a human — a login, a 2FA code, a captcha, a payment confirmation — call hand_over_computer(reason) instead of asking in text: it hands this computer to the user and waits for them."
+          // `hand_over_computer` montuje serwer `agents`, nie komputer — bez
+          // niego (tura w pokoju, głęboka delegacja, driver bez agentsMcp)
+          // to zdanie kazałoby wołać narzędzie, którego bot nie dostał.
+          (integrations.agents
+            ? " When the screen needs a human — a login, a 2FA code, a captcha, a payment confirmation — call hand_over_computer(reason) instead of asking in text: it hands this computer to the user and waits for them."
+            : "")
         : "") +
       (integrations.agents
         ? " You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
