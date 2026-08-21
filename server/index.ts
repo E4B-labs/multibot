@@ -38,7 +38,7 @@ import { deviceInfo, deviceResources } from "./device.ts";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 // multibot: silnik slafy — proxy `/api/engine/*`, pipe WS i uwaga botów (D7)
 import { engineBotIdFor, threadIdOfEngineBot } from "./drivers/slafy.ts";
-import { ensureEngine } from "./engine/supervisor.ts";
+import { engineDisabled, ensureEngine } from "./engine/supervisor.ts";
 import { findExistingEngineProfile, importExistingEngineProfile } from "./engine/bootstrap.ts";
 import { watchEngineAttention } from "./engine/attention.ts";
 import { attachExternalBrowser, configureEngineComputer, engineComputer } from "./engine/computer-mcp.ts";
@@ -1767,6 +1767,29 @@ async function deleteGroupRecord(id: string): Promise<{ found: boolean; engineSy
   return { found: true, engineSynced };
 }
 
+// multibot: tworzenie grupy nie potrzebuje silnika slafy — rozmowa grupowa i
+// tak idzie przez harness (runGroupRound/askBotAndWait). Przy
+// MULTIBOT_ENGINE=off (telefon) id nadajemy lokalnie, zamiast oddawać 502 z
+// ensureEngine(). Z silnikiem włączonym ścieżka zostaje bez zmian.
+async function createGroupRecord(name: string, engineIds: string[]): Promise<{ status: number; body: unknown }> {
+  if (engineDisabled()) {
+    const group = groupStore.upsert({ name, bot_ids: engineIds });
+    broadcast({ kind: "group", group });
+    return { status: 201, body: group };
+  }
+  const base = await ensureEngine();
+  for (const id of engineIds) {
+    const bot = store.botByThread(threadIdOfEngineBot(id) ?? "");
+    await fetch(`${base}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, name: bot?.name ?? id }) });
+  }
+  const created = await fetch(`${base}/api/groups`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, bot_ids: engineIds }) });
+  const payload = await created.json().catch(() => ({})) as { id?: string };
+  if (!created.ok) return { status: created.status, body: payload };
+  const group = groupStore.upsert({ id: String(payload.id), name, bot_ids: engineIds });
+  broadcast({ kind: "group", group });
+  return { status: 201, body: group };
+}
+
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -1951,14 +1974,10 @@ const server = createServer(async (req, res) => {
           case "device.info": return json(res, 200, await deviceInfo());
           case "groups.create": {
             requireFull();
-            const base = await ensureEngine();
             const botIds: string[] = Array.isArray(body.bot_ids) ? (body.bot_ids as unknown[]).map(String) : [];
             const engineIds = botIds.map((id) => engineBotIdFor(store.bot(id)?.threadId ?? id));
-            for (const id of engineIds) await fetch(`${base}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, name: store.botByThread(threadIdOfEngineBot(id) ?? "")?.name ?? id }) });
-            const created = await fetch(`${base}/api/groups`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: String(body.name ?? "Group"), bot_ids: engineIds }) });
-            const payload = await created.json() as { id?: string };
-            if (!created.ok) return json(res, created.status, payload);
-            return json(res, 201, groupStore.upsert({ id: String(payload.id), name: String(body.name ?? "Group"), bot_ids: engineIds }));
+            const result = await createGroupRecord(String(body.name ?? "Group"), engineIds);
+            return json(res, result.status, result.body);
           }
           case "groups.send": {
             requireFull();
@@ -2186,18 +2205,9 @@ const server = createServer(async (req, res) => {
       const botIds = rawIds.map((id) => store.bot(id)?.id ?? (id.startsWith("mb-") ? store.botByThread(id.slice(3))?.id : undefined)).filter((id): id is string => !!id);
       if (!name || !botIds.length) return json(res, 422, { error: "group needs at least one bot" });
       try {
-        const base = await ensureEngine();
         const engineIds = botIds.map((id) => engineBotIdFor(store.bot(id)!.threadId));
-        for (const id of engineIds) {
-          const bot = store.botByThread(threadIdOfEngineBot(id) ?? "");
-          await fetch(`${base}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, name: bot?.name ?? id }) });
-        }
-        const created = await fetch(`${base}/api/groups`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, bot_ids: engineIds }) });
-        const payload = await created.json().catch(() => ({})) as { id?: string };
-        if (!created.ok) return json(res, created.status, payload);
-        const group = groupStore.upsert({ id: String(payload.id), name, bot_ids: engineIds });
-        broadcast({ kind: "group", group });
-        return json(res, 201, group);
+        const result = await createGroupRecord(name, engineIds);
+        return json(res, result.status, result.body);
       } catch (error) {
         return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
       }
@@ -2222,10 +2232,21 @@ const server = createServer(async (req, res) => {
       const message = String(body.message ?? "").trim();
       if (!message) return json(res, 422, { error: "message required" });
       try {
-        const base = await ensureEngine();
-        const groupResponse = await fetch(`${base}/api/groups/${encodeURIComponent(m[1])}`);
-        if (!groupResponse.ok) return json(res, groupResponse.status === 404 ? 404 : 502, { error: "no such group" });
-        const group = await groupResponse.json() as { bot_ids?: unknown[] };
+        // multibot: bez silnika skład grupy bierzemy z trwałego zapisu harnessu —
+        // tury i tak liczy harness, więc pytanie silnika o membership było
+        // jedynym powodem, dla którego czat grupowy padał na 502 przy
+        // MULTIBOT_ENGINE=off.
+        let group: { bot_ids?: unknown[]; name?: unknown };
+        if (engineDisabled()) {
+          const stored = groupStore.get(m[1]);
+          if (!stored) return json(res, 404, { error: "no such group" });
+          group = stored;
+        } else {
+          const base = await ensureEngine();
+          const groupResponse = await fetch(`${base}/api/groups/${encodeURIComponent(m[1])}`);
+          if (!groupResponse.ok) return json(res, groupResponse.status === 404 ? 404 : 502, { error: "no such group" });
+          group = await groupResponse.json() as { bot_ids?: unknown[] };
+        }
         const durable = groupStore.get(m[1]) ?? groupStore.upsert({ id: m[1], name: String((group as { name?: unknown }).name ?? "Group"), bot_ids: (group.bot_ids ?? []).map(String) });
         groupStore.append(m[1], { from: "you", text: message });
         const turns: Array<{ bot_id: string; reply: string }> = [];
