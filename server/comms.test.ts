@@ -101,6 +101,12 @@ describe("comms e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "ask-user" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          // trzeci tryb: bot oddaje komputer człowiekowi (logowanie/2FA/captcha)
+          grokHandoff: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "handoff" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           codex: {
             driver: "codex",
             config: { cli: FAKE_CODEX, fullAuto: true },
@@ -294,6 +300,69 @@ describe("comms e2e (fake ACP fleet)", () => {
       }
     },
     40_000,
+  );
+
+  // multibot: karta przekazania komputera. Logowanie, 2FA i captcha to nie jest
+  // pytanie w tekście — człowiek musi usiąść do TEGO ekranu, a bot ma czekać.
+  const handoffCard = async (name: string) => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { name, modelSelection: { instanceId: "grokHandoff", model: "fake-model" } });
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "open linkedin" })).status).toBe(202);
+    const deadline = Date.now() + 25_000;
+    for (;;) {
+      const fresh = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === bot.id);
+      const message = fresh?.messages.find((m: any) => m.card?.kind === "computer-handoff");
+      if (message) return { botId: bot.id, messageId: message.id, card: message.card };
+      if (Date.now() > deadline) throw new Error(`no handoff card. stderr: ${stderr.slice(-2000)}`);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  };
+
+  const waitForReply = async (botId: string, text: string) => {
+    const deadline = Date.now() + 25_000;
+    for (;;) {
+      const fresh = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === botId);
+      const reply = fresh?.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
+      if (reply?.text?.includes(text) && !fresh.busy) return fresh;
+      if (Date.now() > deadline) throw new Error(`bot never got "${text}". stderr: ${stderr.slice(-2000)}`);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  };
+
+  it(
+    "hands the computer to the user: takeover leases input, done unblocks the turn",
+    async () => {
+      const { botId, messageId, card } = await handoffCard("Handoff");
+      expect(card).toMatchObject({ title: "Computer", subtitle: "Sign in to LinkedIn, then hand it back" });
+      expect(card.requestId).toBeTruthy();
+
+      // Przejmij — sterowanie idzie do człowieka, karta ZOSTAJE otwarta
+      const takeover = await api("PATCH", `/api/bots/${botId}/cards/${messageId}`, { option: "takeover" });
+      expect(takeover.status).toBe(200);
+      expect(takeover.body.owner).toBe("user");
+      expect((await api("GET", `/api/bots/${botId}/computer/control`)).body.owner).toBe("user");
+      expect(takeover.body.message.card.answered).toBeUndefined();
+
+      // Gotowe — sterowanie wraca do agenta, a tura rusza dalej z notatką
+      const done = await api("PATCH", `/api/bots/${botId}/cards/${messageId}`, { option: "done", note: "logged in" });
+      expect(done.status).toBe(200);
+      expect(done.body.message.card).toMatchObject({ answered: "done", dismissed: false });
+      expect((await api("GET", `/api/bots/${botId}/computer/control`)).body.owner).toBe("agent");
+      await waitForReply(botId, "handoff: user finished: logged in");
+    },
+    60_000,
+  );
+
+  it(
+    "skip answers the bot with `user skipped` and settles the card",
+    async () => {
+      const { botId, messageId } = await handoffCard("Skipper");
+      const skip = await api("PATCH", `/api/bots/${botId}/cards/${messageId}`, { option: "skip" });
+      expect(skip.status).toBe(200);
+      expect(skip.body.message.card).toMatchObject({ answered: "skip", dismissed: true });
+      await waitForReply(botId, "handoff: user skipped");
+    },
+    60_000,
   );
 
   it(

@@ -68,7 +68,7 @@ import { RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { turnToolsText, type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
-import { chainDepth, mentionedBots, Store, type BotRecord, type Message } from "./store.ts";
+import { chainDepth, mentionedBots, Store, type BotRecord, type Message, type OptionCardData } from "./store.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
 import { WorkspaceStore } from "./workspace.ts";
 import { canUseIntegration, clearTurnPolicy, rememberApprovalRule, setTurnPolicy } from "./turn-policy.ts";
@@ -581,6 +581,32 @@ const pendingUserAsks = new Map<string, (answer: string) => void>();
 const USER_ASK_TIMEOUT_MS = 4 * 60_000;
 const USER_ASK_TIMEOUT_NOTE = "MultiBot: nobody answered in time. Use your best judgment and continue.";
 const USER_ASK_DISMISS_NOTE = "MultiBot: the user closed the question without answering. Use your best judgment and continue.";
+
+/**
+ * Karta w czacie + czekanie na człowieka. Wspólne dla `ask_user` i przekazania
+ * komputera (`hand_over_computer`): jeden mechanizm `requestId`, jeden timeout,
+ * jedna droga zamknięcia karty. Zwraca tekst, który wraca do bota jako wynik
+ * narzędzia.
+ */
+async function askOwnerAndWait(threadId: string, card: Omit<OptionCardData, "requestId">): Promise<string> {
+  const requestId = newId();
+  const message = store.appendMessage(threadId, { role: "bot", kind: "options", card: { ...card, requestId } });
+  broadcast({ kind: "message", threadId, message });
+  return new Promise<string>((resolve) => {
+    const timer = setTimeout(() => {
+      if (!pendingUserAsks.delete(requestId)) return;
+      // karta bez odpowiedzi zostaje w czacie na zawsze i przyjmuje kliknięcia,
+      // które nie mają już gdzie trafić — zamykamy ją
+      const patched = store.patchMessage(threadId, message.id, { card: { ...message.card!, dismissed: true } });
+      if (patched) broadcast({ kind: "message", threadId, message: patched });
+      resolve(USER_ASK_TIMEOUT_NOTE);
+    }, USER_ASK_TIMEOUT_MS);
+    pendingUserAsks.set(requestId, (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+  });
+}
 // multibot (F12): model faktycznie użyty w bieżącej turze (z `session.started`)
 // — przypinany do odpowiedzi bota, żeby badge pokazywał realny model.
 const turnModelByThread = new Map<string, string>();
@@ -1165,7 +1191,11 @@ function botSystemPrompt(
           // navigate (tool search pokazuje namespaces, nie pojedyncze
           // narzędzia). Wprost: preferuj navigate, shell hosta nie dotyka
           // komputera, szukaj narzędzi w namespace.
-          " To open a URL, call navigate(url) — prefer it over shell commands. The shell tools you may also have (bash, exec_command) run on the HOST machine, never inside your computer; for anything on the computer use only the computer tools (navigate, screenshot, read_page, click, type_text, key, scroll, status, computer_exec). If a computer tool is not visible, search for it in the mcp__computer tool namespace."
+          " To open a URL, call navigate(url) — prefer it over shell commands. The shell tools you may also have (bash, exec_command) run on the HOST machine, never inside your computer; for anything on the computer use only the computer tools (navigate, screenshot, read_page, click, type_text, key, scroll, status, computer_exec). If a computer tool is not visible, search for it in the mcp__computer tool namespace." +
+          // multibot: logowanie/2FA/captcha to nie jest pytanie w tekście —
+          // człowiek musi usiąść do TEGO komputera. Karta przekazania robi to
+          // jednym kliknięciem i wstrzymuje turę do jego odpowiedzi.
+          " When the screen needs a human — a login, a 2FA code, a captcha, a payment confirmation — call hand_over_computer(reason) instead of asking in text: it hands this computer to the user and waits for them."
         : "") +
       (integrations.agents
         ? " You can work with the user's other bots through the agents tools — list_bots shows who's available, ask_bot sends one of them a message and returns their reply."
@@ -1902,28 +1932,25 @@ const server = createServer(async (req, res) => {
             const choices = Array.isArray(body.choices)
               ? body.choices.map((choice: unknown) => String(choice).trim()).filter(Boolean).slice(0, 5)
               : [];
-            const requestId = newId();
-            const message = store.appendMessage(caller.threadId, {
-              role: "bot",
-              kind: "options",
-              card: { title: t("Bot ma pytanie", "Your bot has a question"), subtitle: question, options: choices, requestId },
+            const answer = await askOwnerAndWait(caller.threadId, {
+              title: t("Bot ma pytanie", "Your bot has a question"),
+              subtitle: question,
+              options: choices,
             });
-            broadcast({ kind: "message", threadId: caller.threadId, message });
-            const answer = await new Promise<string>((resolve) => {
-              const timer = setTimeout(() => {
-                if (!pendingUserAsks.delete(requestId)) return;
-                // karta bez odpowiedzi zostaje w czacie na zawsze i przyjmuje
-                // kliknięcia, które nie mają już gdzie trafić — zamykamy ją
-                const patched = store.patchMessage(caller.threadId, message.id, {
-                  card: { ...message.card!, dismissed: true },
-                });
-                if (patched) broadcast({ kind: "message", threadId: caller.threadId, message: patched });
-                resolve(USER_ASK_TIMEOUT_NOTE);
-              }, USER_ASK_TIMEOUT_MS);
-              pendingUserAsks.set(requestId, (value) => {
-                clearTimeout(timer);
-                resolve(value);
-              });
+            return json(res, 200, { answer });
+          }
+          // multibot: bot oddaje komputer człowiekowi — logowanie, 2FA, captcha.
+          // Ta sama karta i ten sam mechanizm czekania co `user.ask`; różni się
+          // tylko `kind`, po którym UI rysuje przejmij / gotowe / pomiń.
+          // Każdy bot ma własny hosted computer (H1), więc nie ma czego bramkować.
+          case "computer.handover": {
+            const reason = String(body.reason ?? "").trim();
+            if (!reason) return json(res, 422, { error: "reason required" });
+            const answer = await askOwnerAndWait(caller.threadId, {
+              kind: "computer-handoff",
+              title: t("Komputer", "Computer"),
+              subtitle: reason,
+              options: [],
             });
             return json(res, 200, { answer });
           }
@@ -2424,6 +2451,32 @@ const server = createServer(async (req, res) => {
       const existing = store.messagesFor(bot.threadId).find((msg) => msg.id === m![2]);
       if (!existing?.card) return json(res, 404, { error: "no such card" });
       const body = await readBody(req);
+      // multibot: karta przekazania komputera ma trzy akcje zamiast wolnego
+      // tekstu. `takeover` NIE zamyka karty — człowiek dopiero zaczyna robotę.
+      const option = typeof body.option === "string" ? body.option : "";
+      if (option === "takeover" || option === "done" || option === "skip") {
+        if (option === "takeover") {
+          computerControl.acquire();
+          broadcast({ kind: "computer", botId: bot.id, state: "user-control" });
+          return json(res, 200, { message: existing, ...computerControl.control() });
+        }
+        // oddajemy sterowanie agentowi i odblokowujemy jego turę
+        computerControl.release();
+        broadcast({ kind: "computer-queue", ...computerControl.control() });
+        broadcast({ kind: "computer", botId: bot.id, state: "ready" });
+        const note = String(body.note ?? "").trim();
+        const requestId = String(existing.card.requestId ?? "");
+        const pending = pendingUserAsks.get(requestId);
+        if (pending) {
+          pendingUserAsks.delete(requestId);
+          pending(option === "done" ? (note ? `user finished: ${note}` : "user finished") : "user skipped");
+        }
+        const settled = store.patchMessage(bot.threadId, m[2], {
+          card: { ...existing.card, answered: option, dismissed: option === "skip" },
+        });
+        broadcast({ kind: "message.patch", threadId: bot.threadId, message: settled });
+        return json(res, 200, { message: settled });
+      }
       const patched = store.patchMessage(bot.threadId, m[2], {
         card: {
           ...existing.card,

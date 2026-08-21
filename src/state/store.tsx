@@ -29,6 +29,9 @@ export interface OptionCardData {
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
   requestId?: string;
+  /** multibot: `computer-handoff` — bot prosi człowieka o zrobienie czegoś na
+   *  jego komputerze (logowanie, 2FA, captcha). Brak = zwykła karta. */
+  kind?: "computer-handoff";
 }
 
 export interface Message {

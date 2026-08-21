@@ -38,7 +38,7 @@ export const COMPUTER_MCP_TOOLS = [
  *
  * Cena: bot traci pamięć po stronie dostawcy. Transkrypt harnessu zostaje.
  */
-export const AGENTS_TOOLS_VERSION = 5;
+export const AGENTS_TOOLS_VERSION = 6;
 
 /** Narzędzia serwera agents — mirror `server/drivers/agents-proxy.ts` TOOLS. */
 export const AGENTS_MCP_TOOLS = [
@@ -67,6 +67,7 @@ export const AGENTS_MCP_TOOLS = [
   "get_device_info",
   "send_file",
   "ask_user",
+  "hand_over_computer",
 ] as const;
 
 export interface TurnIntegrationsLike {

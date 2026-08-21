@@ -9,6 +9,7 @@ import { MausAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { OptionCard } from "./OptionCard";
+import { ComputerHandoffCard } from "./ComputerHandoffCard";
 import { Composer } from "./Composer";
 // multibot: TTS głośniczek przy wiadomościach bota (tylko driver slafy)
 import { SpeakButton } from "./SpeakButton";
@@ -408,7 +409,11 @@ export function ChatView({ bot }: { bot: Bot }) {
             let child: ReactNode;
             switch (m.kind) {
               case "options":
-                child = <OptionCard key={m.id} botId={bot.id} message={m} />;
+                // multibot: karta przekazania komputera ma własny render
+                // (miniatura ekranu + przejmij/gotowe/pomiń), reszta kart bez zmian
+                child = m.card?.kind === "computer-handoff"
+                  ? <ComputerHandoffCard key={m.id} botId={bot.id} message={m} />
+                  : <OptionCard key={m.id} botId={bot.id} message={m} />;
                 break;
               // multibot: wywołania narzędzi lecą dalej do stanu (Sidebar pokazuje
               // last.tool.name jako status), ale w czacie są niewidoczne —

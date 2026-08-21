@@ -245,6 +245,21 @@ function handle(msg: any) {
           });
         return;
       }
+      // handoff: bot oddaje komputer człowiekowi i czeka na jego odpowiedź
+      if (mode === "handoff" && agentsMcp) {
+        void driveMcp(agentsMcp, [
+          { name: "hand_over_computer", args: () => ({ reason: "Sign in to LinkedIn, then hand it back" }) },
+        ])
+          .then((answer) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `handoff: ${answer}` } } } });
+            complete();
+          })
+          .catch((e) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `handoff error: ${(e as Error).message}` } } } });
+            complete();
+          });
+        return;
+      }
       playTurn();
       if (mode === "permission") {
         // ask the client to approve a tool, then complete once answered
