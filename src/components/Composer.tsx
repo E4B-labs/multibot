@@ -431,8 +431,22 @@ export function Composer({ bot }: { bot: Bot }) {
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape") setAttachOpen(false);
     };
+    // multibot: menu musi się chować przy tapnięciu obok — na telefonie nie ma
+    // Escape, wiszące menu sprawiało, że pierwszy tap na plusa je zamykał
+    // zamiast otworzyć (objaw „działa od drugiego kliknięcia", lista zmian 8.14).
+    // Mousedown, nie click: zamknięcie zanim zdarzenie doleci do celu, więc
+    // ten sam tap normalnie działa tam, gdzie user tapnął.
+    const closeOnOutside = (event: MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest("#attachment-menu, [data-attach-toggle]")) return;
+      setAttachOpen(false);
+    };
     document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
+    document.addEventListener("mousedown", closeOnOutside);
+    return () => {
+      document.removeEventListener("keydown", close);
+      document.removeEventListener("mousedown", closeOnOutside);
+    };
   }, [attachOpen]);
 
   useEffect(() => () => {
@@ -654,9 +668,12 @@ setText("");
         {attachOpen && (
           <div id="attachment-menu" className="absolute bottom-full left-0 z-30 mb-2 min-w-44 overflow-hidden rounded-xl border border-hairline/40 bg-card p-1 shadow-xl" role="menu">
             {[
-              { label: polish ? "Aparat" : "Camera", icon: Camera, action: () => cameraRef.current?.click() },
-              { label: polish ? "Zdjęcia" : "Photos", icon: Images, action: () => photosRef.current?.click() },
-              { label: polish ? "Pliki" : "Files", icon: FileIcon, action: () => filesRef.current?.click() },
+              // multibot: click() na inputcie musi iść w tym samym gesture co tap
+              // (inaczej WebView potrafi zignorować otwarcie wyboru pliku),
+              // dopiero po nim chowamy menu.
+              { label: polish ? "Aparat" : "Camera", icon: Camera, action: () => { cameraRef.current?.click(); setAttachOpen(false); } },
+              { label: polish ? "Zdjęcia" : "Photos", icon: Images, action: () => { photosRef.current?.click(); setAttachOpen(false); } },
+              { label: polish ? "Pliki" : "Files", icon: FileIcon, action: () => { filesRef.current?.click(); setAttachOpen(false); } },
             ].map(({ label, icon: Icon, action }) => (
               <button key={label} type="button" role="menuitem" onClick={action} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-ink hover:bg-raised">
                 <Icon size={16} className="text-ink-secondary" /> {label}
@@ -667,6 +684,7 @@ setText("");
         <div className="flex items-end gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-2 pr-2">
         <button
           type="button"
+          data-attach-toggle
           onClick={() => setAttachOpen((open) => !open)}
           aria-expanded={attachOpen}
           aria-haspopup="menu"
