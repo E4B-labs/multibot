@@ -21,13 +21,13 @@ export function EventChip({
   accent?: boolean;
 }) {
   // Zdarzenie nie należy do żadnej ze stron rozmowy, więc idzie środkiem. Bez
-  // obwódki — ramka robiła z tego kolejny kafelek, a to ma być cichy wtręt
-  // między wiadomościami.
+  // obwódki i bez tła — ramka i szary prostokąt robiły z tego kolejny kafelek,
+  // a to ma być cichy wtręt między wiadomościami (decyzja Kacpra 21.08).
   return (
     <div className="flex justify-center">
       <div
         className={cn(
-          "flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5 text-[12px]",
+          "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px]",
           accent ? "text-accent" : "text-ink-secondary",
         )}
       >
