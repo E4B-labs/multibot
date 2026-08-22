@@ -142,8 +142,6 @@ interface AppState {
   // multibot: F8 — panele pamięci i skilli silnika slafy, ten sam prawy slot
   memoryOpen: boolean;
   skillsOpen: boolean;
-  /** multibot: nazwy skilli do podświetlania w treści wiadomości (skillRefs) */
-  skillNames: string[];
   // multibot: F9-FE — otwarty pokój grupowy (prawy slot); null = zamknięty
   groupOpen: EngineGroup | null;
   // multibot: otwarty read-only pokój współpracy botów (zastępuje widok czatu)
@@ -199,8 +197,6 @@ type Action =
   // multibot: F8 — otwarcie/zamknięcie paneli pamięci i skilli
   | { type: "toggleMemory"; open?: boolean }
   | { type: "toggleSkills"; open?: boolean }
-  /** multibot: nazwy skilli do podświetlania w treści wiadomości */
-  | { type: "setSkillNames"; names: string[] }
   // multibot: F9-FE — otwarcie pokoju grupowego (group) / zamknięcie (null)
   | { type: "toggleGroup"; group: EngineGroup | null }
   // multibot: otwarcie read-only pokoju współpracy / zamknięcie (null)
@@ -508,8 +504,6 @@ function reducer(state: AppState, action: Action): AppState {
         groupOpen: open ? null : state.groupOpen,
       };
     }
-    case "setSkillNames":
-      return { ...state, skillNames: action.names };
     // multibot: F9-FE — pokój grupowy w prawym slocie, ta sama zasada wykluczania
     case "toggleGroup": {
       const open = action.group !== null;
@@ -586,7 +580,6 @@ const initialState: AppState = {
   routinesOpen: false,
   memoryOpen: false,
   skillsOpen: false,
-  skillNames: [],
   groupOpen: null,
   roomOpen: null,
   streaming: {},

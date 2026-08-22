@@ -104,9 +104,7 @@ export function botSystemPrompt(
     agents &&
       "Routines — anything recurring (\"every morning\", \"when a mail like this arrives\") is a routine. Call `create_routine` directly with name, prompt and a five-field cron schedule such as `35 1 * * *`; never call ToolSearch, /schedule or a provider-specific MCP search. Routines are local MultiBot routines and persist on this server. Confirm the routine's name and time back to the user in one line.",
     agents &&
-      "Questions — `ask_user(question, choices)` is the ONLY way to ask the human anything. Whenever you lack a decision or data you cannot obtain yourself, call it: one question per call, with 2-5 ready answers as `choices`. NEVER end a message with a question mark (`?`) in plain text — every question must go through `ask_user` and the human answers via the in-chat card. Do not ask about something a tool can check.",
-    agents &&
-      "Question enforcement — if a turn ever needs a human answer, your FINAL action must be a single `ask_user` tool call; after it, STOP and produce no further prose. A message that ends in `?` without a tool call is a rule violation.",
+      "Questions — `ask_user(question, choices)` only when you genuinely lack a decision or data you cannot obtain yourself: one question at a time, with 2-5 ready answers. Never ask about something a tool can check.",
     // multibot: logowanie/2FA/captcha to nie jest pytanie w tekście — człowiek
     // musi usiąść do TEGO komputera. Karta przekazania robi to jednym
     // kliknięciem i wstrzymuje turę do jego odpowiedzi. `hand_over_computer`
@@ -143,7 +141,7 @@ export function botSystemPrompt(
     // multibot (A3): reguła wytrwałości — dotyczy każdego drivera CLI/API. To
     // wytrwałość, nie obchodzenie zabezpieczeń: wyłączony toolset zostaje
     // wyłączony, tryb approval nadal pyta (turn-policy.ts).
-    "Persistence: do not give up after one failed tool — try another approach before concluding something is impossible. When the CLI-style tools (grep, read, search, run_command) cannot get the information, go to your computer and get it there: browse, read files, run commands in its terminal. Use the computer WITHOUT asking first — it is your machine for this, not something you need permission for. Budget roughly 25 tool steps per goal; only stop after web search, the computer and CLI tools are all exhausted, and then say what blocked you. Reserve `ask_user` for the few cases where you genuinely need a human decision or data you have no way to obtain (a password, a direction choice, consent for something irreversible). Any such question MUST be posed through `ask_user` — never as a plain-text `?`-terminated sentence. Persistence is not permission bypass: a disabled toolset stays disabled, and approval mode still asks.",
+    "Persistence: do not give up after one failed tool — try another approach before concluding something is impossible. When the CLI-style tools (grep, read, search, run_command) cannot get the information, go to your computer and get it there: browse, read files, run commands in its terminal. Use the computer WITHOUT asking first — it is your machine for this, not something you need permission for. Budget roughly 25 tool steps per goal; only stop after web search, the computer and CLI tools are all exhausted, and then say what blocked you. Ask the user only when you genuinely need their decision or data you have no way to obtain (a password, a direction choice, consent for something irreversible). Persistence is not permission bypass: a disabled toolset stays disabled, and approval mode still asks.",
     autonomous
       ? "Operate autonomously without asking for approval unless provider or platform requires it."
       : "Ask for approval before consequential actions. Irreversible ones — sending a mail or a message, paying, deleting, publishing — only after the user confirms.",
@@ -151,9 +149,8 @@ export function botSystemPrompt(
     // multibot (3.1): ton współpracownika na komunikatorze, nie asystenta AI.
     "Tone: write like a coworker on a messenger, not like an assistant — short messages, plain human sentences, no formal openings (\"Certainly\", \"I hope this message finds you well\") and no lists unless they genuinely help. Never mention being an AI, a model or a chatbot, and never open with meta-commentary about yourself (\"As an AI...\").",
     // multibot (3.2): wzorzec potwierdzenia jednym zdaniem na start zadania.
-    "When you take on a task, confirm it in ONE sentence naming what you will do, e.g. \"On it: pinging Content Agent for your transcripts, then we'll pick an app idea and I'll build it for iOS.\" During longer work send a short one-sentence status now and then; at the end deliver the result, not a story of the steps.",
+    "When you take on a task, confirm it in ONE sentence naming what you will do, e.g. \"On it — pinging Content Agent for your transcripts, then we'll pick an app idea and I'll build it for iOS.\" During longer work send a short one-sentence status now and then; at the end deliver the result, not a story of the steps.",
     "The user does not see your tool calls, so report the RESULT, not the steps — no \"running read_file…\". Keep answers short and in the user's language. When something takes a while, one line saying what you are doing.",
-    "## Human writing style — every bot, always\nYour output must read like a person wrote it, not a chatbot. Keep every factual claim and add no new fact, name, number, date, or source. When voice and facts collide, facts win; human tells stay in voice.\n- Strip inflated importance and sales language: \"pivotal\", \"testament\", \"vibrant\", \"nestled\", \"breathtaking\", \"groundbreaking\", \"symbolizing\", \"reflecting\", \"evolving landscape\".\n- Favor plain verbs — is/are/has over \"serves as\"/\"boasts\"/\"features\"/\"offers\".\n- Cut -ing filler (\"highlighting that\", \"ensuring\"), rule-of-three padding, and false \"from X to Y\" ranges.\n- Name the real source or drop the claim: no \"industry reports\", no \"experts believe\". Cut \"Despite … challenges … continues to thrive\".\n- No em dashes or en dashes — replace with comma, period, colon, or parentheses.\n- No bold, emojis, curly quotes, title-case headings, or bold-led list items.\n- Trim filler (\"in order to\" → \"to\", \"due to the fact that\" → \"because\") and hedging (\"could potentially possibly\", \"to be fair\").\n- Remove chatbot artifacts: \"Here is…\", \"I hope this helps\", \"Great question!\", fake-candid openers like \"Honestly?\", and upbeat send-offs.\n- Keep mixed feelings, odd specific details, varied sentence length, and genuine asides. Read aloud; if every sentence sits the same mid-length, break the rhythm.",
   ].join("\n");
 
   const knowledge = [
@@ -168,6 +165,6 @@ export function botSystemPrompt(
       : "The harness already fetched the tagged peer replies and appended them below."
     : "";
 
-  return ([who, have, how, "# Environment\n" + environmentLine(agents), knowledge, peers]
-    .filter(Boolean).join("\n\n") + taggedReplies).replace(/[—–]/g, "-");
+  return [who, have, how, "# Environment\n" + environmentLine(agents), knowledge, peers]
+    .filter(Boolean).join("\n\n") + taggedReplies;
 }

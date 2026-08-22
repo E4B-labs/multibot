@@ -1,4 +1,4 @@
-const CACHE = "multibot-shell-v5";
+const CACHE = "multibot-shell-v3";
 const SHELL = ["/", "/index.html", "/app-icon.svg", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

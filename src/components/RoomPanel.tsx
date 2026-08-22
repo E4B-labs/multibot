@@ -44,13 +44,6 @@ export function RoomPanel() {
     .map((id) => state.bots.find((b) => b.id === id))
     .filter((b): b is NonNullable<typeof b> => Boolean(b));
   const nameOf = (botId: string) => state.bots.find((b) => b.id === botId)?.name ?? botId;
-  // multibot: klikalna pigułka nazwy — otwiera czat tego bota, jak na screenie
-  // "Klaus Chief" / "Klaus -> Motion". Zamyka pokój i selectuje bota.
-  const openBot = (botId: string) => {
-    if (!state.bots.some((b) => b.id === botId)) return;
-    dispatch({ type: "toggleRoom", room: null });
-    dispatch({ type: "select", id: botId });
-  };
   const statusLabel =
     room.status === "running"
       ? polish ? "pracują…" : "working…"
@@ -117,26 +110,15 @@ export function RoomPanel() {
               const entryBot = members.find((b) => b.id === entry.from);
               return (
                 <div key={entry.id} className="flex justify-start gap-2.5">
+                  {entryBot && (
+                    <MausAvatar color={entryBot.color} shape={entryBot.mascotShape} state={stateForBot(entryBot)} size={28} animated={false} />
+                  )}
                   <div className="min-w-0 max-w-[85%]">
-                    <div className="mb-1 flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => openBot(entry.from)}
-                        className="flex shrink-0 items-center gap-1.5 rounded-full bg-raised/60 py-0.5 pl-0.5 pr-2 hover:bg-raised"
-                        title={polish ? `Otwórz czat ${nameOf(entry.from)}` : `Open ${nameOf(entry.from)}'s chat`}
-                      >
-                        {entryBot && (
-                          <MausAvatar color={entryBot.color} shape={entryBot.mascotShape} state={stateForBot(entryBot)} size={28} animated={false} />
-                        )}
-                        <span className="text-[12.5px] font-semibold text-accent">{nameOf(entry.from)}</span>
-                      </button>
-                      {entryBot?.title && (
-                        <span className="shrink-0 rounded-full bg-raised px-2 py-0.5 text-[10.5px] font-medium text-ink-secondary">
-                          {entryBot.title}
-                        </span>
-                      )}
+                    <div className="mb-1 flex flex-wrap items-baseline gap-2">
+                      <span className="text-[13px] font-semibold text-ink">{nameOf(entry.from)}</span>
                       <span className="text-[11px] text-ink-secondary">{formatTime(entry.at)}</span>
                     </div>
-                    <div className="rounded-2xl rounded-tl-md bg-card px-3.5 py-2 text-[14px] leading-relaxed text-ink">
+                    <div className="rounded-2xl bg-card px-3.5 py-2 text-[14px] leading-relaxed text-ink">
                       <ChatMarkdown text={entry.text} />
                     </div>
                   </div>

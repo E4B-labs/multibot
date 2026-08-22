@@ -471,12 +471,6 @@ body {
   50% { opacity: 1; transform: scale(1.1); }
 }
 
-@keyframes header-avatar-ping {
-  0% { transform: scale(0.92); opacity: 0.55; }
-  70% { opacity: 0.18; }
-  100% { transform: scale(1.32); opacity: 0; }
-}
-
 @keyframes maus-launch-body {
   0%, 100% { opacity: 1; transform: translate(0, 0) rotateZ(0) scale(1); }
   16% { transform: translate(-5px, 2px) rotateZ(-9deg) scale(1.13, 0.86); }
