@@ -39,18 +39,24 @@ export function AttachmentCard({
 }) {
   const dot = name.lastIndexOf(".");
   const ext = (dot > 0 ? name.slice(dot + 1, dot + 5) : "").toUpperCase();
+  const isSkill = name.toLowerCase() === "skill.md";
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-raised px-3 py-2.5">
-      {icon ?? (
-        <span
-          className={cn(
-            "grid size-9 shrink-0 place-items-center rounded-lg text-[10px] font-semibold",
-            EXT_TONE[ext] ?? "bg-inset text-ink-secondary",
-          )}
-        >
-          {ext || "FILE"}
-        </span>
-      )}
+    <div className={cn("flex items-center gap-3 rounded-xl px-3 py-2.5", isSkill ? "bg-[#1e2a33] border border-white/[0.04]" : "bg-raised")}>
+      {icon ??
+        (isSkill ? (
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#2a4a5e] text-accent">
+            <span className="text-[10px] font-bold leading-none">mD</span>
+          </span>
+        ) : (
+          <span
+            className={cn(
+              "grid size-9 shrink-0 place-items-center rounded-lg text-[10px] font-semibold",
+              EXT_TONE[ext] ?? "bg-inset text-ink-secondary",
+            )}
+          >
+            {ext || "FILE"}
+          </span>
+        ))}
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13.5px] text-ink">{name}</span>
         <span className="block text-[12px] text-ink-secondary">{formatFileSize(size)}</span>

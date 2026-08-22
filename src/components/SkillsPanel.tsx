@@ -18,6 +18,7 @@ import {
 import { useStore, type Bot } from "@/state/store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { cn } from "@/lib/cn";
+import { SkillPill } from "./SkillPill";
 import { authFetch } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
 
@@ -379,7 +380,7 @@ export function TeachCard({
         <>
           <div className="mt-3 text-[13px] text-success">
             {polish ? "Utworzono umiejętność: " : "Skill created: "}
-            <span className="font-medium">{teach.skillName}</span>
+            <SkillPill name={teach.skillName} />
           </div>
           <button
             onClick={() => setTeach({ phase: "idle" })}
@@ -417,6 +418,8 @@ export function SkillsPanel({ bot }: { bot: Bot }) {
     api(skillsRoot).then((ss: Skill[]) => {
       setSkills(ss);
       setStatus("ready");
+      // multibot: nazwy skilli do podświetlania w treści wiadomości (skillRefs)
+      dispatch({ type: "setSkillNames", names: ss.map((s) => s.name) });
     });
 
   useEffect(() => {

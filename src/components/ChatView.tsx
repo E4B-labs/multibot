@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, CalendarClock, Crosshair, Loader2, Monitor, Square, Wand2 } from "lucide-react";
+import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, Square, Upload, Wand2 } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
+import { SkillPill } from "./SkillPill";
 import { AttachmentCard } from "./AttachmentCard";
 import { routineStartName, slashCommandLabel } from "@/lib/transcriptChips";
 import { useStore, formatTime, type Bot, type Message } from "@/state/store";
@@ -107,9 +108,9 @@ function Bubble({ botId, message }: { botId: string; message: Message }) {
         )}
       >
         {message.model && <ModelBadge model={message.model} />}
-        {!!message.attachments?.length && (
+        {!!message.attachments?.length && message.attachments.some((f) => f.name.toLowerCase() !== "skill.md") && (
           <div className={cn("flex flex-col gap-2", text && "mb-2")}>
-            {message.attachments.map((file) => <MessageAttachment key={file.id} botId={botId} file={file} />)}
+            {message.attachments.filter((f) => f.name.toLowerCase() !== "skill.md").map((file) => <MessageAttachment key={file.id} botId={botId} file={file} />)}
           </div>
         )}
         {user ? (
@@ -144,6 +145,14 @@ function EventPill({ message, polish }: { message: Message; polish: boolean }) {
     : { renamed: "Renamed to", "skill-created": "Created skill", "routine-created": "Created routine", "goal-progress": "Goal" };
   // multibot: wspólna pigułka zamiast własnego markupu — patrz EventChip.tsx.
   // Rutyna dostaje ikonę zegara, zmiana nazwy zostaje czystym tekstem.
+  // skill-created → centered SkillPill (czarno-amber, klikalny) jak na screenie 561×110
+  if (message.event.type === "skill-created") {
+    return (
+      <div className="flex w-full justify-center py-1">
+        <SkillPill name={message.event.value} />
+      </div>
+    );
+  }
   return (
     <EventChip
       icon={message.event.type === "routine-created" ? <CalendarClock size={13} /> : message.event.type === "goal-progress" ? <Crosshair size={13} /> : undefined}
@@ -230,24 +239,6 @@ function StreamingBubble({ text }: { text: string }) {
   );
 }
 
-/** "Working for 12s" that ticks by mutating textContent on an interval —
- * no React commit per second while a turn streams (upstream trick). */
-function WorkingTimer({ since }: { since: number }) {
-  const polish = useLanguage() === "pl";
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    const tick = () => {
-      if (ref.current) ref.current.textContent = polish
-        ? `Praca trwa ${Math.max(0, Math.round((Date.now() - since) / 1000))} s`
-        : `Working for ${Math.max(0, Math.round((Date.now() - since) / 1000))}s`;
-    };
-    tick();
-    const timer = setInterval(tick, 1000);
-    return () => clearInterval(timer);
-  }, [polish, since]);
-  return <span ref={ref} className="text-[12.5px] text-ink-secondary" />;
-}
-
 /** multibot: niebieski separator "NEW" nad pierwszą nieprzeczytaną wiadomością */
 function NewSeparator() {
   return (
@@ -277,8 +268,24 @@ export function ChatView({ bot }: { bot: Bot }) {
   // (upstream-verified failure). Scrolling back to the end re-arms it.
   const [follow, setFollow] = useState(true);
   const touchY = useRef(0);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounter = useRef(0);
+  const latestSkillEvent = [...bot.messages].reverse().find((message) => message.event?.type === "skill-created")?.id;
 
   useEffect(() => setFollow(true), [bot.id]);
+  useEffect(() => {
+    let active = true;
+    authFetch(`/api/bots/${bot.id}/skills`)
+      .then((response) => response.ok ? response.json() : Promise.reject())
+      .then((skills: Array<{ name?: unknown }>) => {
+        if (active) dispatch({
+          type: "setSkillNames",
+          names: skills.flatMap((skill) => typeof skill.name === "string" ? [skill.name] : []),
+        });
+      })
+      .catch(() => active && dispatch({ type: "setSkillNames", names: [] }));
+    return () => { active = false; };
+  }, [bot.id, latestSkillEvent, dispatch]);
   useEffect(() => {
     if (follow) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [bot.id, bot.messages.length, streaming, bot.busy, follow]);
@@ -295,24 +302,59 @@ export function ChatView({ bot }: { bot: Bot }) {
   const first = bot.messages[0];
 
   return (
-    <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
-      {/* Header */}
+    <main
+      className="relative flex h-full min-w-0 flex-1 flex-col bg-app"
+      onDragEnter={(e) => {
+        e.preventDefault();
+        if (e.dataTransfer.types.includes("Files")) {
+          dragCounter.current++;
+          setDragOver(true);
+        }
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        if (e.dataTransfer.types.includes("Files")) e.dataTransfer.dropEffect = "copy";
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        dragCounter.current = Math.max(0, dragCounter.current - 1);
+        if (dragCounter.current === 0) setDragOver(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        dragCounter.current = 0;
+        setDragOver(false);
+        const files = [...e.dataTransfer.files];
+        if (files.length) {
+          window.dispatchEvent(new CustomEvent("mb:composer:addFiles", { detail: files }));
+        }
+      }}
+    >
+      {/* Header — avatar always visible; special animation when bot is working */}
       <div className="flex items-center justify-between px-5 py-3">
         <button
           onClick={() => dispatch({ type: "toggleSettings" })}
           className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-raised/50"
           title={polish ? "Ustawienia bota" : "Bot settings"}
         >
-          <MausAvatar
-            color={bot.color}
-            shape={bot.mascotShape}
-            state={stateForBot(bot)}
-            size={28}
-            motion={mascotMotion?.kind ?? "none"}
-            motionKey={mascotMotion?.nonce ?? 0}
-          />
+          <span className="relative inline-flex shrink-0 rounded-full">
+            <MausAvatar
+              color={bot.color}
+              shape={bot.mascotShape}
+              state={stateForBot(bot)}
+              size={46}
+              motion={bot.busy ? "working" : mascotMotion?.kind ?? "none"}
+              motionKey={bot.busy ? 1 : mascotMotion?.nonce ?? 0}
+              animated
+            />
+            {bot.busy && (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-0 -m-1.5 rounded-full border border-accent/35 animate-[header-avatar-ping_1.35s_ease-out_infinite] motion-reduce:animate-none"
+              />
+            )}
+          </span>
           <span className="text-[15px] font-semibold text-ink">{bot.name}</span>
-          {bot.busy && <Loader2 size={14} className="animate-spin text-ink-secondary" />}
         </button>
         <div className="flex items-center gap-2">
           {bot.busy && (
@@ -427,6 +469,18 @@ export function ChatView({ bot }: { bot: Bot }) {
             return (
               <Fragment key={m.id}>
                 {bot.firstUnreadId === m.id && <NewSeparator />}
+                {/* SKILL.md stays outside and above its message, on sender side. */}
+                {!!m.attachments?.some((f) => f.name.toLowerCase() === "skill.md") && (
+                  <div className={cn("flex w-full", m.role === "user" ? "justify-end" : "justify-start")}>
+                    <div className="mb-2 flex w-full max-w-[70%] flex-col gap-2">
+                      {m.attachments
+                        .filter((f) => f.name.toLowerCase() === "skill.md")
+                        .map((f) => (
+                          <MessageAttachment key={f.id} botId={bot.id} file={f} />
+                        ))}
+                    </div>
+                  </div>
+                )}
                 {child}
               </Fragment>
             );
@@ -439,22 +493,7 @@ export function ChatView({ bot }: { bot: Bot }) {
               </div>
             </div>
           )}
-          {streaming ? (
-            <StreamingBubble text={streaming} />
-          ) : (
-            bot.busy && (
-              <div className="flex justify-start">
-                <div className="flex items-center gap-2.5 rounded-2xl bg-raised px-4 py-3">
-                  <span className="flex items-center gap-1.5">
-                    <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:0ms]" />
-                    <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:150ms]" />
-                    <span className="size-1.5 animate-bounce rounded-full bg-ink-secondary [animation-delay:300ms]" />
-                  </span>
-                  <WorkingTimer since={[...bot.messages].reverse().find((m) => m.role === "user")?.at ?? Date.now()} />
-                </div>
-              </div>
-            )
-          )}
+          {streaming ? <StreamingBubble text={streaming} /> : null}
         </div>
       </div>
 
@@ -469,6 +508,25 @@ export function ChatView({ bot }: { bot: Bot }) {
       )}
 
       <Composer bot={bot} />
+
+      {/* desktop drag&drop overlay — any file dropped onto chat becomes an attachment */}
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-app/70 backdrop-blur-[2px]">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-accent/60 bg-card px-10 py-8 text-center shadow-2xl">
+            <span className="flex size-12 items-center justify-center rounded-full bg-accent/15 text-accent">
+              <Upload size={24} />
+            </span>
+            <div className="flex flex-col gap-1">
+              <span className="text-[15px] font-semibold text-ink">
+                {polish ? "Upuść pliki tutaj" : "Drop files here"}
+              </span>
+              <span className="flex items-center justify-center gap-1.5 text-[12px] text-ink-secondary">
+                <FileIcon size={12} /> {polish ? "Zostaną dodane jako załączniki" : "They'll be added as attachments"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

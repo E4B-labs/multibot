@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import {
   Bot as BotIcon,
   BellDot,
+  ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   Copy,
   EyeOff,
@@ -318,6 +320,172 @@ function GroupContextMenu({ menu, onClose }: { menu: GroupMenuState; onClose: ()
   );
 }
 
+// multibot: lokalne grupy agentów — kategoryzacja botów po imieniu, zwijane,
+// własna nazwa, clean UI. Trzymane w localStorage (brak backendu), per instalacja.
+interface LocalGroup {
+  id: string;
+  name: string;
+  botIds: string[];
+  collapsed?: boolean;
+}
+
+const LOCAL_GROUPS_KEY = "multibot-local-groups";
+
+function loadLocalGroups(): LocalGroup[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_GROUPS_KEY);
+    return raw ? (JSON.parse(raw) as LocalGroup[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalGroups(groups: LocalGroup[]) {
+  try {
+    localStorage.setItem(LOCAL_GROUPS_KEY, JSON.stringify(groups));
+  } catch {
+    /* storage full/blocked — grupy zostają tylko w pamięci tej sesji */
+  }
+}
+
+function LocalGroupsSection({
+  bots,
+  onMenu,
+  collapsed,
+}: {
+  bots: Bot[];
+  onMenu: (menu: MenuState) => void;
+  collapsed?: boolean;
+}) {
+  const { state } = useStore();
+  const polish = useLanguage() === "pl";
+  const [groups, setGroups] = useState<LocalGroup[]>(() => loadLocalGroups());
+  const [createOpen, setCreateOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  const persist = (next: LocalGroup[]) => {
+    setGroups(next);
+    saveLocalGroups(next);
+  };
+
+  const create = () => {
+    if (!name.trim() || picked.size === 0) return;
+    persist([...groups, { id: crypto.randomUUID(), name: name.trim(), botIds: [...picked] }]);
+    setName("");
+    setPicked(new Set());
+    setCreateOpen(false);
+  };
+
+  const toggleCollapsed = (id: string) =>
+    persist(groups.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g)));
+
+  const remove = (id: string) => persist(groups.filter((g) => g.id !== id));
+
+  return (
+    <div className={cn(!collapsed && "mb-2 border-b border-hairline/40", "pb-2")}>
+      {groups.map((group) => {
+        const members = group.botIds
+          .map((id) => state.bots.find((b) => b.id === id))
+          .filter((b): b is Bot => Boolean(b));
+        const open = !group.collapsed;
+        return (
+          <div key={group.id} className="mt-1">
+            <div
+              className={cn(
+                "flex w-full items-center rounded-xl text-left",
+                collapsed ? "justify-center px-0 py-1.5" : "gap-2 px-3 py-2 hover:bg-raised/50",
+              )}
+            >
+              <button onClick={() => toggleCollapsed(group.id)} className="flex min-w-0 flex-1 items-center gap-1.5">
+                {open ? <ChevronDown size={14} className="shrink-0 text-ink-secondary" /> : <ChevronRight size={14} className="shrink-0 text-ink-secondary" />}
+                {!collapsed && (
+                  <>
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{group.name}</span>
+                    <span className="shrink-0 text-[11px] text-ink-secondary">{members.length}</span>
+                  </>
+                )}
+              </button>
+              {!collapsed && (
+                <button
+                  onClick={() => remove(group.id)}
+                  className="shrink-0 rounded p-0.5 text-ink-secondary hover:text-danger"
+                  title={polish ? "Usuń grupę" : "Delete group"}
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+            {open && !collapsed && (
+              <div className="ml-4 flex flex-col gap-0.5 border-l border-hairline/40 pl-1">
+                {members.map((b) => (
+                  <BotListItem key={`${group.id}-${b.id}`} bot={b} onMenu={onMenu} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Create — przycisk + formularz */}
+      {createOpen && !collapsed ? (
+        <div className="mx-1 mt-2 flex flex-col gap-2 rounded-xl bg-card p-3">
+          <input
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            placeholder={polish ? "Nazwa grupy" : "Group name"}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+            {bots.map((b) => (
+              <label key={b.id} className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-[13px] text-ink hover:bg-raised/50">
+                <input
+                  type="checkbox"
+                  checked={picked.has(b.id)}
+                  onChange={() =>
+                    setPicked((cur) => {
+                      const next = new Set(cur);
+                      if (next.has(b.id)) next.delete(b.id);
+                      else next.add(b.id);
+                      return next;
+                    })
+                  }
+                  className="accent-accent"
+                />
+                <span className="truncate">{b.name}</span>
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={create}
+              disabled={!name.trim() || picked.size === 0}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {polish ? "Utwórz" : "Create"}
+            </button>
+            <button
+              onClick={() => { setCreateOpen(false); setName(""); setPicked(new Set()); }}
+              className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
+            >
+              {polish ? "Anuluj" : "Cancel"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        !collapsed && (
+          <button
+            onClick={() => setCreateOpen(true)}
+            className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-raised/50 hover:text-ink"
+          >
+            <Plus size={14} /> {polish ? "Nowa grupa" : "New group"}
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
 // multibot: F9-FE — grupy w sidebarze: każdy bot ma trwałą reprezentację
 // `mb-<threadId>` w transporcie grupowym, niezależnie od wybranego drivera.
 function GroupsSection({
@@ -551,7 +719,6 @@ export function Sidebar() {
   const visibleBots = state.bots
     .filter((b) => !b.hidden)
     .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
-
   // multibot: F9-FE — kandydaci do grup: cała flota, także ukryci. Kolejność
   // stabilna z listy botów; wybrany driver nie usuwa bota z grup.
   const groupBots = state.bots;
@@ -687,6 +854,7 @@ export function Sidebar() {
             collapsed={collapsed}
           />
         )}
+        <LocalGroupsSection bots={visibleBots} onMenu={setMenu} collapsed={collapsed} />
         <div className="flex flex-col gap-0.5">
           {visibleBots.map((b) => (
             <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />
