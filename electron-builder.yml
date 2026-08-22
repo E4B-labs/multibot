@@ -68,7 +68,9 @@ mac:
       arch: arm64
     - target: zip
       arch: arm64
-  icon: build/icon.icns
+  # multibot: ikona leży w repo (build/ jest w .gitignore, więc plik stamtąd
+  # ginął na każdej świeżej kasie i paczka wychodziła z domyślną ikoną Electrona).
+  icon: electron/resources/app-icon.png
   category: public.app-category.productivity
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -91,7 +93,7 @@ win:
   target:
     - target: nsis
       arch: x64
-  icon: build/icon.ico
+  icon: electron/resources/icon.ico
 
 nsis:
   oneClick: false
