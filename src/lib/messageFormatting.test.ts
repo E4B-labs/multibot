@@ -39,4 +39,15 @@ describe("skill references", () => {
       .map((node: any) => node.data.hProperties.dataSkillRef);
     expect(refs).toEqual(["Grill Me", "C++ Review"]);
   });
+  it("łapie nazwę w polskich cudzysłowach, tak jak bot ją pisze w zdaniu", () => {
+    // Zdanie prosto z czatu: „Umiejętność „Grill Me" została utworzona…".
+    // Cudzysłów typograficzny musi liczyć się jako granica słowa, inaczej
+    // pigułka nie powstaje dokładnie tam, gdzie użytkownik jej oczekuje.
+    const tree = root({ type: "text", value: "Umiejętność „Grill Me” została utworzona i będę jej używać." });
+    remarkSkillRefs({ skills: ["Grill Me"] })(tree);
+    const refs = children(tree)
+      .filter((node: any) => node.type === "skillRef")
+      .map((node: any) => node.data.hProperties.dataSkillRef);
+    expect(refs).toEqual(["Grill Me"]);
+  });
 });

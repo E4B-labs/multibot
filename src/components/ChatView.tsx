@@ -412,6 +412,10 @@ export function ChatView({ bot }: { bot: Bot }) {
         </div>
       )}
 
+      {/* multibot: nakładka przeciągania siedzi w tej samej ramce co lista
+          wiadomości, nie w całej kolumnie czatu — inaczej jej środek wypadał
+          między nagłówkiem a polem pisania i karta wyglądała na przesuniętą. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
       {/* Messages */}
       <div
         ref={scrollRef}
@@ -496,6 +500,25 @@ export function ChatView({ bot }: { bot: Bot }) {
           {streaming ? <StreamingBubble text={streaming} /> : null}
         </div>
       </div>
+        {/* desktop drag&drop overlay — any file dropped onto chat becomes an attachment */}
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-app/70 backdrop-blur-[2px]">
+            <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-accent/60 bg-card px-10 py-8 text-center shadow-2xl">
+              <span className="flex size-12 items-center justify-center rounded-full bg-accent/15 text-accent">
+                <Upload size={24} />
+              </span>
+              <div className="flex flex-col gap-1">
+                <span className="text-[15px] font-semibold text-ink">
+                  {polish ? "Upuść pliki tutaj" : "Drop files here"}
+                </span>
+                <span className="flex items-center justify-center gap-1.5 text-[12px] text-ink-secondary">
+                  <FileIcon size={12} /> {polish ? "Zostaną dodane jako załączniki" : "They'll be added as attachments"}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Reading scrollback while new content arrives — one tap back to live */}
       {!follow && (bot.busy || Boolean(streaming)) && (
@@ -509,24 +532,6 @@ export function ChatView({ bot }: { bot: Bot }) {
 
       <Composer bot={bot} />
 
-      {/* desktop drag&drop overlay — any file dropped onto chat becomes an attachment */}
-      {dragOver && (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-app/70 backdrop-blur-[2px]">
-          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-accent/60 bg-card px-10 py-8 text-center shadow-2xl">
-            <span className="flex size-12 items-center justify-center rounded-full bg-accent/15 text-accent">
-              <Upload size={24} />
-            </span>
-            <div className="flex flex-col gap-1">
-              <span className="text-[15px] font-semibold text-ink">
-                {polish ? "Upuść pliki tutaj" : "Drop files here"}
-              </span>
-              <span className="flex items-center justify-center gap-1.5 text-[12px] text-ink-secondary">
-                <FileIcon size={12} /> {polish ? "Zostaną dodane jako załączniki" : "They'll be added as attachments"}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
