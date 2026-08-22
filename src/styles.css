@@ -22,7 +22,8 @@
   --color-warning: #ff9800;
 
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Segoe UI", system-ui, sans-serif;
+    "Segoe UI", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
 
   /* multibot (U26/inspiracje.png): rogi mocno zaokrąglone 12–16 px */
   --radius-lg: 12px;
