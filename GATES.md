@@ -1,38 +1,40 @@
-# Gates: 5 feature pack (plugins, spacing, pinning, groups, room chat)
+# Gates: UI/UX paczka 0.1.44 (avatar, powłoka, grupy, kolejka, composer, pokój, prompt)
 
-Scope: Verify all 5 features landed and build passes.
+Scope: wszystkie 7 pozycji celu + wydanie desktop 0.1.44.
 
-- [x] G1: PluginsPanel has Marketplace/Yours tabs + Featured/Agent Orchestration sections
-  CHECK: findstr /C:"Marketplace" src\components\PluginsPanel.tsx
-  EXPECT: Marketplace
-  EVIDENCE: ["marketplace", polish ? "Marketplace" : "Marketplace"], | /* ── Marketplace — sekcje z Show more, 2-kolumnowa siatka ── */
-
-- [x] G2: PluginsPanel has Show more toggles
-  CHECK: findstr /C:"Show" src\components\PluginsPanel.tsx
-  EXPECT: Show
-  EVIDENCE: /* ── Marketplace — sekcje z Show more, 2-kolumnowa siatka ── */ | {polish ? `Pokaż ${hidden} więcej` : `Show ${hidden} more`}
-
-- [x] G3: Sidebar has pinned tray above agents under search (key `pin-` prefix)
-  CHECK: findstr /C:"pin-" src\components\Sidebar.tsx
-  EXPECT: pin-
-  EVIDENCE: <BotListItem key={`pin-${b.id}`} bot={b} onMenu={setMenu} collapsed={collapsed} />
-
-- [x] G4: Sidebar has LocalGroupsSection with collapse
-  CHECK: findstr /C:"LocalGroupsSection" src\components\Sidebar.tsx
-  EXPECT: LocalGroupsSection
-  EVIDENCE: function LocalGroupsSection({ | <LocalGroupsSection bots={groupBots} onMenu={setMenu} collapsed={collapsed} />
-
-- [x] G5: RoomPanel has clickable bot name pill
-  CHECK: findstr /C:"openBot" src\components\RoomPanel.tsx
-  EXPECT: openBot
-  EVIDENCE: const openBot = (botId: string) => { | onClick={() => openBot(entry.from)}
-
-- [x] G6: Composer avatar larger no border higher position
-  CHECK: findstr /C:"-top-11" src\components\Composer.tsx
-  EXPECT: -top-11
-  EVIDENCE: <div className="absolute -top-11 left-2 z-20 flex size-11 items-center justify-center" title={bot.name}>
-
-- [x] G7: Build passes after all changes
-  CHECK: npm run build --silent
-  EXPECT: built in
-  EVIDENCE: - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks | - Adjust chunk size limit for this warning via build.chunkSizeWarni
+- [x] G1: Avatar agenta nad composereem mniejszy (77→60px, mt dopasowane)
+  CHECK: rg -n "size-\[60px\]|size=\{60\}|md:mt-\[68px\]" src/components/Composer.tsx
+  EXPECT: 3 trafienia, zero "size-\[77px\]"
+- [x] G2: Niebieska powłoka zniknęła — brak pingu accent wokół avatara w nagłówku czatu
+  CHECK: rg -n "header-avatar-ping|border-accent/35" src/components/ChatView.tsx
+  EXPECT: brak trafień
+- [x] G3: Przycisk Stop/kwadrat usunięty z nagłówka i composera
+  CHECK: rg -n "Square" src/components/ChatView.tsx src/components/Composer.tsx
+  EXPECT: brak trafień
+- [x] G4: Przycisk Send dodany po prawej, voice+effort na lewo od niego
+  CHECK: rg -n "ArrowUp|Wyślij|Send\"" src/components/Composer.tsx
+  EXPECT: przycisk Send za mikiem w JSX
+- [x] G5: Kolejka wiadomości: POST przy zajęcym bocie zapisuje bubel + kolejkę; drain skleja i odpala jedną turę
+  CHECK: npx vitest run server/queued-turns.test.ts
+  EXPECT: testy przechodzą (combine + FIFO clear)
+- [x] G6: Drain podłączony we wszystkich 3 miejscach końca tury
+  CHECK: rg -n "drainQueuedUserMessages" server/index.ts
+  EXPECT: >=4 trafienia (def + turn.completed + error + interrupt)
+- [x] G7: "New group" usunięte z menu +; pusty klik LPM w sidebar otwiera formularz grupy
+  CHECK: rg -n "Nowa grupa|New group" src/components/Sidebar.tsx
+  EXPECT: tylko etykiety wewnątrz formularza/create, zero przycisków otwierających
+- [x] G8: Wiersz grupy lokalnej: pigułka + chevron + nazwa + kółka-inicjały bez łapki/żółtego; kosz na hover
+  CHECK: rg -n "group-hover:opacity-100|rounded-full bg-raised/50" src/components/Sidebar.tsx
+  EXPECT: trafienia w LocalGroupsSection
+- [x] G9: Nagłówek pokoju bot-vs-bot: [avatar] NazwaA ⇄ [avatar] NazwaB; nieznany id ≠ surowy UUID
+  CHECK: rg -n "ArrowLeftRight|deleted bot|usunięty bot" src/components/RoomPanel.tsx
+  EXPECT: trafienia; brak nameOf fallbacku zwracającego botId
+- [x] G10: System prompt silnika mówi wprost o tworzeniu agentów (create_agent)
+  CHECK: rg -n "create_agent" engine/server/bots.py
+  EXPECT: >=1 trafienie w bloku tożsamości
+- [x] G11: Bramki repo: tsc -b czysto, vitest całość, vite build, tsc server.build
+  CHECK: npx tsc -b; npx vitest run; npx vite build; npx tsc -p tsconfig.server.build.json
+  EXPECT: exit 0 wszędzie, vitest 0 fail
+- [x] G12: Wydanie desktop 0.1.44 na GitHub Releases (exe + blockmap + latest.yml, Latest)
+  CHECK: gh release view v0.1.44 --repo E4B-labs/multibot --json tagName,assets
+  EXPECT: tag v0.1.44, 3 assety

@@ -348,19 +348,35 @@ function saveLocalGroups(groups: LocalGroup[]) {
   }
 }
 
+// multibot 0.1.44: kółko-inicjał członka grupy — neutralny szary, bez maskotki
+// (żadnej łapki) i bez kolorów botów (bez żółtego), jak na screenie właściciela.
+function MemberDot({ bot }: { bot: Bot }) {
+  return (
+    <span
+      className="flex size-5 shrink-0 items-center justify-center rounded-full bg-raised-hover text-[9px] font-semibold uppercase text-ink-secondary ring-2 ring-panel"
+      title={bot.name}
+    >
+      {bot.name.trim().charAt(0) || "?"}
+    </span>
+  );
+}
+
 function LocalGroupsSection({
   bots,
   onMenu,
   collapsed,
+  createOpen,
+  onCreateOpenChange,
 }: {
   bots: Bot[];
   onMenu: (menu: MenuState) => void;
   collapsed?: boolean;
+  createOpen: boolean;
+  onCreateOpenChange: (open: boolean) => void;
 }) {
   const { state } = useStore();
   const polish = useLanguage() === "pl";
   const [groups, setGroups] = useState<LocalGroup[]>(() => loadLocalGroups());
-  const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
 
@@ -374,7 +390,7 @@ function LocalGroupsSection({
     persist([...groups, { id: crypto.randomUUID(), name: name.trim(), botIds: [...picked] }]);
     setName("");
     setPicked(new Set());
-    setCreateOpen(false);
+    onCreateOpenChange(false);
   };
 
   const toggleCollapsed = (id: string) =>
@@ -383,7 +399,13 @@ function LocalGroupsSection({
   const remove = (id: string) => persist(groups.filter((g) => g.id !== id));
 
   return (
-    <div className={cn(!collapsed && "mb-2 border-b border-hairline/40", "pb-2")}>
+    <div
+      className={cn(!collapsed && "mb-2 border-b border-hairline/40", "pb-2")}
+      onClick={(e) => {
+        // multibot 0.1.44: LPM w pustą część sidebara otwiera formularz grupy
+        if (!collapsed && e.target === e.currentTarget) onCreateOpenChange(true);
+      }}
+    >
       {groups.map((group) => {
         const members = group.botIds
           .map((id) => state.bots.find((b) => b.id === id))
@@ -393,27 +415,33 @@ function LocalGroupsSection({
           <div key={group.id} className="mt-1">
             <div
               className={cn(
-                "flex w-full items-center rounded-xl text-left",
-                collapsed ? "justify-center px-0 py-1.5" : "gap-2 px-3 py-2 hover:bg-raised/50",
+                // multibot 0.1.44: pigułka jak na screenie — chevron + nazwa +
+                // kółka-inicjały składu (bez łapki i żółtego), kosz tylko na hover
+                "flex w-full items-center rounded-full text-left",
+                collapsed ? "justify-center px-0 py-1.5" : "group gap-2 bg-raised/50 py-1.5 pl-3 pr-2 hover:bg-raised/70",
               )}
             >
               <button onClick={() => toggleCollapsed(group.id)} className="flex min-w-0 flex-1 items-center gap-1.5">
                 {open ? <ChevronDown size={14} className="shrink-0 text-ink-secondary" /> : <ChevronRight size={14} className="shrink-0 text-ink-secondary" />}
                 {!collapsed && (
-                  <>
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{group.name}</span>
-                    <span className="shrink-0 text-[11px] text-ink-secondary">{members.length}</span>
-                  </>
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{group.name}</span>
                 )}
               </button>
               {!collapsed && (
-                <button
-                  onClick={() => remove(group.id)}
-                  className="shrink-0 rounded p-0.5 text-ink-secondary hover:text-danger"
-                  title={polish ? "Usuń grupę" : "Delete group"}
-                >
-                  <Trash2 size={12} />
-                </button>
+                <>
+                  <span className="flex shrink-0 -space-x-1.5">
+                    {members.slice(0, 3).map((b) => (
+                      <MemberDot key={b.id} bot={b} />
+                    ))}
+                  </span>
+                  <button
+                    onClick={() => remove(group.id)}
+                    className="shrink-0 rounded p-0.5 text-ink-secondary opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                    title={polish ? "Usuń grupę" : "Delete group"}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </>
               )}
             </div>
             {open && !collapsed && (
@@ -465,23 +493,14 @@ function LocalGroupsSection({
               {polish ? "Utwórz" : "Create"}
             </button>
             <button
-              onClick={() => { setCreateOpen(false); setName(""); setPicked(new Set()); }}
+              onClick={() => { onCreateOpenChange(false); setName(""); setPicked(new Set()); }}
               className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
             >
               {polish ? "Anuluj" : "Cancel"}
             </button>
           </div>
         </div>
-      ) : (
-        !collapsed && (
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-raised/50 hover:text-ink"
-          >
-            <Plus size={14} /> {polish ? "Nowa grupa" : "New group"}
-          </button>
-        )
-      )}
+      ) : null}
     </div>
   );
 }
@@ -494,12 +513,14 @@ function GroupsSection({
   onCreateOpenChange,
   onMenu,
   collapsed,
+  onEmptyClick,
 }: {
   bots: Bot[];
   createOpen: boolean;
   onCreateOpenChange: (open: boolean) => void;
   onMenu: (menu: GroupMenuState) => void;
   collapsed?: boolean;
+  onEmptyClick?: () => void;
 }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
@@ -561,7 +582,13 @@ function GroupsSection({
   };
 
   return (
-    <div className="border-b border-hairline/40 px-2 pb-2 pt-1">
+    <div
+      className="border-b border-hairline/40 px-2 pb-2 pt-1"
+      onClick={(e) => {
+        // multibot 0.1.44: klik w puste miejsce sekcji = formularz grupy
+        if (!collapsed && e.target === e.currentTarget) onEmptyClick?.();
+      }}
+    >
 
       {(groups ?? []).map((g) => (
         <button
@@ -580,10 +607,10 @@ function GroupsSection({
             state.groupOpen?.id === g.id ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
-          <span className="flex -space-x-2 shrink-0">
+          <span className="flex shrink-0 -space-x-1.5">
             {g.bot_ids.slice(0, 3).map((engineId) => {
               const member = bots.find((b) => `mb-${b.threadId}` === engineId);
-              return member ? <MausAvatar key={engineId} color={member.color} shape={member.mascotShape} state={stateForBot(member)} size={24} animated={false} /> : <Users key={engineId} size={18} className="text-ink-secondary" />;
+              return member ? <MemberDot key={engineId} bot={member} /> : <Users key={engineId} size={14} className="text-ink-secondary" />;
             })}
           </span>
           {!collapsed && (
@@ -655,6 +682,12 @@ export function Sidebar() {
   const [groupMenu, setGroupMenu] = useState<GroupMenuState | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
+  // multibot 0.1.44: formularz grupy LOKALNEJ otwiera klik w pustą część listy
+  const [localCreateOpen, setLocalCreateOpen] = useState(false);
+  const openGroupCreate = () => {
+    setAddMenuOpen(false);
+    setLocalCreateOpen(true);
+  };
   // multibot: `matchMedia` zamiast nasłuchu `resize` — budzi się na przejściu
   // progu, nie na każdym pikselu ciągnięcia ramki okna.
   const [autoRail, setAutoRail] = useState(() => window.matchMedia(RAIL_QUERY).matches);
@@ -804,17 +837,6 @@ export function Sidebar() {
                 <BotIcon size={15} className="text-ink-secondary" />
                 {polish ? "Nowy bot" : "New bot"}
               </button>
-              <button
-                onClick={() => {
-                  setAddMenuOpen(false);
-                  setGroupCreateOpen(true);
-                }}
-                disabled={groupBots.length === 0}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Users size={15} className="text-ink-secondary" />
-                {polish ? "Nowa grupa" : "New group"}
-              </button>
             </div>
           )}
         </div>
@@ -844,7 +866,14 @@ export function Sidebar() {
       )}
 
       {/* Unified conversation list: group rows sit with bots, above plugins. */}
-      <div className={cn("flex-1 overflow-y-auto", collapsed ? "px-1 pt-2" : "px-2")}>
+      <div
+        className={cn("flex-1 overflow-y-auto", collapsed ? "px-1 pt-2" : "px-2")}
+        onClick={(e) => {
+          // multibot 0.1.44: LPM w pustą część sidebara (poza wierszami) otwiera
+          // formularz tworzenia grupy
+          if (!collapsed && e.target === e.currentTarget) openGroupCreate();
+        }}
+      >
         {groupBots.length > 0 && (
           <GroupsSection
             bots={groupBots}
@@ -852,9 +881,16 @@ export function Sidebar() {
             onCreateOpenChange={setGroupCreateOpen}
             onMenu={setGroupMenu}
             collapsed={collapsed}
+            onEmptyClick={openGroupCreate}
           />
         )}
-        <LocalGroupsSection bots={visibleBots} onMenu={setMenu} collapsed={collapsed} />
+        <LocalGroupsSection
+          bots={visibleBots}
+          onMenu={setMenu}
+          collapsed={collapsed}
+          createOpen={localCreateOpen}
+          onCreateOpenChange={setLocalCreateOpen}
+        />
         <div className="flex flex-col gap-0.5">
           {visibleBots.map((b) => (
             <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />

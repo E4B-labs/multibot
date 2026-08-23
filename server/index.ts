@@ -76,6 +76,7 @@ import { canUseIntegration, clearTurnPolicy, rememberApprovalRule, setTurnPolicy
 // multibot (F12): jednorazowy wybór modelu dla bieżącego zadania (natural
 // language) — rozpoznawanie frazy + wycinanie jej z treści wiadomości.
 import { detectOneShotModelRequest, stripModelRequest } from "./model-request.ts";
+import { combineQueuedMessages, QueuedUserMessages } from "./queued-turns.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const HOST = process.env.OMB_HOST?.trim() || "127.0.0.1";
@@ -489,6 +490,23 @@ const attachments = new AttachmentStore();
 // `send_file` tool land here, keyed by thread, and ride the bot's next chat
 // message (see the item.completed / assistant_text handler below).
 const pendingBotAttachments = new Map<string, ReturnType<AttachmentStore["add"]>[]>();
+// multibot 0.1.44: wiadomości wysłane w trakcie tury bota. Zamiast 409 każda
+// ląduje w wątku i w kolejce; koniec tury odpala drain — bot dostaje je wszystkie
+// naraz i odpowiada JEDNĄ odpowiedzią na wszystko.
+const queuedUserMessages = new QueuedUserMessages();
+
+function drainQueuedUserMessages(botId: string) {
+  const queued = queuedUserMessages.take(botId);
+  if (!queued) return;
+  const bot = store.bot(botId);
+  if (!bot) return; // bot usunięty w międzyczasie — kolejka gaśnie z nim
+  if (bot.busy || bot.temporary) {
+    // z powrotem do kolejki — tura ruszyła równolegle
+    for (const text of [...queued].reverse()) queuedUserMessages.push(botId, text);
+    return;
+  }
+  startTurn(botId, combineQueuedMessages(queued), { userMessagePosted: true }).catch(() => {});
+}
 const bootFleet = await registry.describe();
 bootSelection = await defaultSelection(bootFleet);
 // multibot (G1): legacy bots selected the removed `slafy` default instance.
@@ -780,6 +798,7 @@ bus.subscribe((event: RuntimeEvent) => {
       activeCommsDepth.delete(bot.id); // multibot (F9): tura skończona — licznik też
       turnModelByThread.delete(event.threadId); // multibot (F12): sprzątanie badge
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
+      drainQueuedUserMessages(bot.id); // multibot 0.1.44: spam użytkownika z trakcie tury
       if (bot.temporary) {
         // Chwilowy podagent kończy życie po swoim zadaniu, nie dopiero po
         // restarcie serwera; inaczej zaśmieca listę i pliki transkryptu.
@@ -1468,6 +1487,7 @@ opts?: {
         clearTurnPolicy(bot.threadId);
         activeCommsDepth.delete(bot.id); // multibot (F9): tura padła — licznik też
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
+        drainQueuedUserMessages(bot.id);
       }
     }
   })();
@@ -2523,6 +2543,16 @@ const server = createServer(async (req, res) => {
         );
         return json(res, 202, { ok: true, room: collab.room.id });
       }
+      // multibot 0.1.44: bot zajęty → wiadomość NIE jest odrzucana (409).
+      // Bubel w wątku jak zwykle, treść do kolejki; koniec tury sklei wszystko
+      // i odpali jedną turą odpowiedzi na wszystkie wiadomości naraz.
+      const busyBot = store.bot(m[1]);
+      if (busyBot?.busy) {
+        const userMessage = store.appendMessage(busyBot.threadId, { role: "user", kind: "text", text });
+        broadcast({ kind: "message", threadId: busyBot.threadId, message: userMessage });
+        queuedUserMessages.push(busyBot.id, taskText);
+        return json(res, 202, { ok: true, queued: true });
+      }
       await startTurn(m[1], taskText, { reasoning, attachments: turnAttachments });
       return json(res, 202, { ok: true });
     }
@@ -2569,6 +2599,7 @@ const server = createServer(async (req, res) => {
       stopScreenPoller(bot.id);
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
       await instance?.adapter.interruptTurn(bot.threadId);
+      drainQueuedUserMessages(bot.id);
       return json(res, 200, { ok: true });
     }
 

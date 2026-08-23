@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, Square, Upload, Wand2 } from "lucide-react";
+import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, Upload, Wand2 } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
 import { SkillPill } from "./SkillPill";
@@ -347,26 +347,10 @@ export function ChatView({ bot }: { bot: Bot }) {
               motionKey={bot.busy ? 1 : mascotMotion?.nonce ?? 0}
               animated
             />
-            {bot.busy && (
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-0 -m-1.5 rounded-full border border-accent/35 animate-[header-avatar-ping_1.35s_ease-out_infinite] motion-reduce:animate-none"
-              />
-            )}
           </span>
           <span className="text-[15px] font-semibold text-ink">{bot.name}</span>
         </button>
         <div className="flex items-center gap-2">
-          {bot.busy && (
-            <button
-              onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
-              className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
-              title={polish ? "Zatrzymaj turę" : "Stop this turn"}
-            >
-              <Square size={12} className="fill-current" />
-              {polish ? "Zatrzymaj" : "Stop"}
-            </button>
-          )}
           <ModelPicker bot={bot} />
           <button
             onClick={() => dispatch({ type: "toggleComputer" })}

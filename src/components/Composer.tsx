@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Brain, CalendarClock, Camera, File as FileIcon, Images, Loader2, Mic, Plus, Puzzle, SlidersHorizontal, Square, Wand2, Wrench, X } from "lucide-react";
+import { ArrowUp, Brain, CalendarClock, Camera, File as FileIcon, Images, Loader2, Mic, Plus, Puzzle, SlidersHorizontal, Wand2, Wrench, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
@@ -493,7 +493,9 @@ export function Composer({ bot }: { bot: Bot }) {
   }));
 
   const send = async () => {
-    if ((!text.trim() && !attachments.length) || bot.busy || uploading) return;
+    // multibot 0.1.44: brak blokady `bot.busy` — wiadomości w trakcie tury
+    // kolejkują się po stronie serwera i bot odpowiada raz na wszystkie.
+    if ((!text.trim() && !attachments.length) || uploading) return;
     setUploading(true);
     setAttachmentError(null);
     try {
@@ -691,10 +693,10 @@ setText("");
             ))}
           </div>
         )}
-        <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5 md:mt-[85px]">
-        {/* Desktop agent avatar: 77 px, no frame, anchored above Attach. */}
-        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[77px] items-center justify-center md:flex" title={bot.name}>
-          <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={77} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
+        <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5 md:mt-[68px]">
+        {/* Desktop agent avatar: 60 px, no frame, anchored above Attach. */}
+        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[60px] items-center justify-center md:flex" title={bot.name}>
+          <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={60} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
         </div>
         <button
           type="button"
@@ -807,28 +809,29 @@ setText("");
             </div>
           )}
         </div>
-        {bot.busy ? (
-          <button
-            onClick={() => dispatch({ type: "interrupt", botId: bot.id })}
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
-            title={polish ? "Zatrzymaj" : "Stop"}
-          >
-            <Square size={14} className="fill-current" />
-          </button>
-        ) : (
-          <button
-            onClick={toggleMic}
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full",
-              recording
-                ? "animate-pulse bg-danger/20 text-danger"
-                : "text-ink-secondary hover:bg-raised hover:text-ink",
-            )}
-            title={recording ? polish ? "Zatrzymaj dyktowanie (Esc)" : "Stop dictation (Esc)" : polish ? "Dyktuj" : "Dictate"}
-          >
-            <Mic size={18} />
-          </button>
-        )}
+        <button
+          onClick={toggleMic}
+          className={cn(
+            "flex size-8 shrink-0 items-center justify-center rounded-full",
+            recording
+              ? "animate-pulse bg-danger/20 text-danger"
+              : "text-ink-secondary hover:bg-raised hover:text-ink",
+          )}
+          title={recording ? polish ? "Zatrzymaj dyktowanie (Esc)" : "Stop dictation (Esc)" : polish ? "Dyktuj" : "Dictate"}
+        >
+          <Mic size={18} />
+        </button>
+        {/* multibot 0.1.44: Send zawsze widoczny po prawej; stop/kwadrat wyleciały —
+            przerywanie tury robi panel komputera i zatwierdzenia, nie composer. */}
+        <button
+          onClick={() => void send()}
+          disabled={uploading || (!text.trim() && !attachments.length)}
+          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-opacity hover:opacity-90 active:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+          title={polish ? "Wyślij" : "Send"}
+          aria-label={polish ? "Wyślij" : "Send"}
+        >
+          <ArrowUp size={16} />
+        </button>
         </div>
       </div>
     </div>
