@@ -293,26 +293,42 @@ function collabPrompt(room: RoomRecord, bot: { id: string; name: string }, fresh
     .filter((id) => id !== bot.id)
     .map((id) => store.bot(id)?.name ?? id);
   const header = peers.length
-    ? `You are @${bot.name} in a collaboration room with ${peers.join(" and ")}.`
+    ? `You are @${bot.name} in a collaboration room with ${peers.map((n) => `@${n}`).join(" and ")}.`
     : `You are @${bot.name} in a collaboration room.`;
+  // multibot: skład drużyny Z OPISAMI — boty wiedzą, kto się czym zajmuje,
+  // i adresują pracę do właściwego specjalisty zamiast zgadywać.
+  const roster = room.bot_ids
+    .filter((id) => id !== bot.id)
+    .map((id) => {
+      const peer = store.bot(id);
+      if (!peer) return null;
+      return `@${peer.name}${peer.description ? ` — ${peer.description}` : ""}`;
+    })
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
   return [
     header,
+    roster ? `Team roster (who specialises in what):\n${roster}` : "",
     `The user's task: ${room.task}`,
     freshFromPeers
-      ? `Messages from the other bots so far:\n\n${freshFromPeers}`
+      ? `Messages addressed to you (or to the whole team):\n\n${freshFromPeers}`
       : "No messages from the other bots yet — you go first.",
+    "Delivery is PRIVATE: a message that @mentions a bot goes ONLY to that bot — nobody else sees it. An unaddressed message reaches the whole team. Start your message with @Name of the bot you are answering, and write unaddressed only when it truly concerns everyone.",
     "Work on this task together with the other bots. Build on what the others wrote, answer their points, do your part.",
+    "Keep each contribution SHORT — a few sentences, no restating the whole discussion — and end the room as soon as the task is resolved instead of exchanging pleasantries.",
     `Write your contribution now. When the task is fully resolved, end your message with the exact line: ${ROOM_DONE_MARKER}`,
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /** Follow-up round prompt: only what arrived since this bot's previous turn. */
 function collabRoundPrompt(freshFromPeers: string): string {
   return [
     freshFromPeers
-      ? `New messages from the other bots:\n\n${freshFromPeers}`
+      ? `New messages addressed to you (or to the whole team):\n\n${freshFromPeers}`
       : "No new messages from the other bots.",
-    `Continue your part. When the task is fully resolved, end your message with the exact line: ${ROOM_DONE_MARKER}`,
+    `Continue your part. Address the bot you answer with @Name. When the task is fully resolved, end your message with the exact line: ${ROOM_DONE_MARKER}`,
   ].join("\n\n");
 }
 
@@ -344,9 +360,21 @@ async function runCollab(roomId: string): Promise<void> {
       const live = rooms.get(roomId);
       if (!live || live.status !== "running") break;
       const since = seen.get(botId) ?? 0;
+      // multibot: prywatne doręczanie — wiadomość z @wzmianką widzi TYLKO
+      // adresat (i nie dostaje jej nawet w późniejszych rundach, bo wskaźnik
+      // `seen` przeszedł obok niej); bez wzmianki trafia do wszystkich.
+      // To też jest główna dźwignia czasu: bot nieadresowany nie budzi się na
+      // kolejną turę, więc pokój nie kręci pustych rund grzecznościowych.
+      const peers = live.bot_ids
+        .map((id) => store.bot(id))
+        .filter((b): b is NonNullable<ReturnType<typeof store.bot>> => b !== null && b.id !== botId);
       const fresh = live.transcript
         .slice(since)
         .filter((m) => m.from !== botId)
+        .filter((m) => {
+          const targets = mentionedBots(m.text, peers);
+          return targets.length === 0 || targets.some((t) => t.id === botId);
+        })
         .map((m) => `@${store.bot(m.from)?.name ?? m.from}: ${m.text}`)
         .join("\n\n");
       seen.set(botId, live.transcript.length);
@@ -1800,6 +1828,31 @@ async function createGroupRecord(name: string, engineIds: string[]): Promise<{ s
   return { status: 201, body: group };
 }
 
+// multibot 0.1.46: dodanie bota do istniejącej grupy (drag & drop w sidebarze).
+// Skład mieszka w groupStore (harness jest autorytatywny dla UI), a silnik
+// dostaje PUT najlepiej wysiłkowo — jak przy tworzeniu i usuwaniu grupy.
+async function addGroupMemberRecord(id: string, botId: string): Promise<{ status: number; body: unknown }> {
+  const group = groupStore.get(id);
+  const bot = store.bot(botId);
+  if (!group || !bot) return { status: 404, body: { error: "no such group or bot" } };
+  const engineId = engineBotIdFor(bot.threadId);
+  if (group.bot_ids.includes(engineId)) return { status: 200, body: group };
+  const engineIds = [...group.bot_ids, engineId];
+  if (!engineDisabled()) {
+    try {
+      const base = await ensureEngine();
+      await fetch(`${base}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: engineId, name: bot.name }) });
+      const updated = await fetch(`${base}/api/groups/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ bot_ids: engineIds }) });
+      if (!updated.ok) return { status: updated.status, body: await updated.json().catch(() => ({})) };
+    } catch {
+      // silnik offline — skład i tak zostaje w harnessie (wzorzec createGroupRecord)
+    }
+  }
+  const updated = groupStore.upsert({ id: group.id, name: group.name, bot_ids: engineIds });
+  broadcast({ kind: "group", group: updated });
+  return { status: 200, body: updated };
+}
+
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -2218,6 +2271,12 @@ const server = createServer(async (req, res) => {
       } catch (error) {
         return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
       }
+    }
+    m = path.match(/^\/api\/groups\/([\w-]+)\/members$/);
+    if (m && method === "PATCH") {
+      const body = await readBody(req);
+      const result = await addGroupMemberRecord(m[1], String(body.botId ?? ""));
+      return json(res, result.status, result.body);
     }
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
     if (m && method === "GET") {

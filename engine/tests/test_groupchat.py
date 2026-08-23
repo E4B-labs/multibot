@@ -174,3 +174,27 @@ def test_api_bot_interbot_lists_threads(monkeypatch, tmp_path):
         assert r.status_code == 200
         assert [t["id"] for t in r.json()] == [out["thread_id"]]
         assert c.get("/api/bots/ghost/interbot").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# set_members (multibot 0.1.46: drag & drop skladu grupy)
+# --------------------------------------------------------------------------- #
+def test_set_members_replaces_roster(monkeypatch, tmp_path):
+    monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(bots, "get_bot", lambda bid: {"id": bid})
+    g = groups.create("room", ["a"])
+    updated = groups.set_members(g["id"], ["a", "b"])
+    assert updated["bot_ids"] == ["a", "b"]
+    assert groups.get(g["id"])["bot_ids"] == ["a", "b"]  # utrwalone na dysku
+
+
+def test_set_members_rejects_unknown_group_and_bot(monkeypatch, tmp_path):
+    monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(bots, "get_bot", lambda bid: {"id": bid} if bid == "a" else None)
+    with pytest.raises(KeyError):
+        groups.set_members("brak", ["a"])
+    g = groups.create("room", ["a"])
+    with pytest.raises(ValueError):
+        groups.set_members(g["id"], [])  # pusty sklad
+    with pytest.raises(ValueError):
+        groups.set_members(g["id"], ["a", "duch"])  # nieznany bot

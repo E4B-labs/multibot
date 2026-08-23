@@ -151,6 +151,10 @@ class GroupCreate(BaseModel):
     bot_ids: list[str]
 
 
+class GroupUpdate(BaseModel):
+    bot_ids: list[str]
+
+
 class PluginIn(BaseModel):
     name: str
     # F7: własny serwer MCP użytkownika — spec zamiast wpisu z katalogu.
@@ -810,6 +814,12 @@ def get_group(group_id: str) -> dict:
     if group is None:
         raise KeyError(f"no such group: {group_id}")  # → 404
     return group
+
+
+@app.put("/api/groups/{group_id}")
+def update_group_members(group_id: str, body: GroupUpdate) -> dict:
+    """Podmień skład pokoju (multibot: drag & drop bota na grupę w UI)."""
+    return groups.set_members(group_id, body.bot_ids)
 
 
 @app.delete("/api/groups/{group_id}", status_code=204)

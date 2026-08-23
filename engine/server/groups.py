@@ -63,6 +63,23 @@ def get(group_id: str) -> dict | None:
     return _load().get(group_id)
 
 
+def set_members(group_id: str, bot_ids: list[str]) -> dict:
+    """Podmień skład pokoju (multibot 0.1.46: drag & drop bota na grupę).
+    Nieznany pokój → KeyError (→ 404), pusta lista albo nieznany bot →
+    ValueError (→ 422). Zwraca zaktualizowany pokój."""
+    groups = _load()
+    if group_id not in groups:
+        raise KeyError(f"no such group: {group_id}")
+    if not bot_ids:
+        raise ValueError("group needs at least one bot")
+    for bid in bot_ids:
+        if bots.get_bot(bid) is None:
+            raise ValueError(f"unknown bot: {bid}")
+    groups[group_id]["bot_ids"] = [*bot_ids]
+    _save(groups)
+    return groups[group_id]
+
+
 def delete(group_id: str) -> bool:
     groups = _load()
     if group_id not in groups:
