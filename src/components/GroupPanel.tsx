@@ -179,9 +179,6 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
                   <div className="min-w-0 max-w-[85%]">
                     <div className="mb-1 flex flex-wrap items-baseline gap-2">
                       <span className="text-[13px] font-semibold text-ink">{nameOf(e.from)}</span>
-                      {entryBot?.title && (
-                        <span className="rounded-full bg-raised px-2 py-0.5 text-[10px] text-ink-secondary">{entryBot.title}</span>
-                      )}
                       <span className="text-[11px] text-ink-secondary">{formatTime(e.at)}</span>
                     </div>
                     <div className="rounded-2xl bg-card px-3.5 py-2 text-[14px] leading-relaxed text-ink">

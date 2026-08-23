@@ -107,11 +107,6 @@ export function RoomPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 pb-3">
-        <div className="mb-3 flex items-start gap-2 rounded-xl border border-hairline/40 bg-panel p-3 text-[13px]">
-          <span className="mt-0.5 shrink-0 text-ink-secondary">{polish ? "Zadanie:" : "Task:"}</span>
-          <span className="text-ink">{room.task}</span>
-        </div>
-
         {gone ? (
           <div className="mt-8 flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
             <Users size={22} />
@@ -144,11 +139,6 @@ export function RoomPanel() {
                         )}
                         <span className="text-[12.5px] font-semibold text-accent">{nameOf(entry.from)}</span>
                       </button>
-                      {entryBot?.title && (
-                        <span className="shrink-0 rounded-full bg-raised px-2 py-0.5 text-[10.5px] font-medium text-ink-secondary">
-                          {entryBot.title}
-                        </span>
-                      )}
                       <span className="text-[11px] text-ink-secondary">{formatTime(entry.at)}</span>
                     </div>
                     <div className="rounded-2xl rounded-tl-md bg-card px-3.5 py-2 text-[14px] leading-relaxed text-ink">
