@@ -51,6 +51,10 @@ interface SlashSkill {
   description: string;
 }
 
+/** multibot: wiersz pickera @mention — boty (tag przez ask_bot) i skille
+ *  (wstawienie `/komendy` do wiadomości, jak z palety "/"). */
+type MentionRow = { type: "bot"; peer: Bot } | { type: "skill"; skill: SlashSkill };
+
 // multibot: paleta "/" nie kończy się na skillach silnika — pokazuje też akcje
 // harnessu, wtyczki, agentów i rutyny. Wzór wiersza z Grok Bota: nazwa, podpis
 // kontekstowy i etykieta typu przy prawej krawędzi. Skille i `/model` nadal
@@ -210,46 +214,70 @@ export function Composer({ bot }: { bot: Bot }) {
     };
   }, [recording, WebSpeech]);
 
-  // ── @mention picker (tag another bot; the agent reaches it via ask_bot) ──
+  // ── @mention picker (boty do ztagowania + skille do wstawienia) ──
   const mention = mentionQueryAt(text, caret);
-  const candidates = useMemo(() => {
+
+  useEffect(() => setHighlight(0), [mention?.start, mention?.query]);
+
+  // multibot: F8 — picker skilli po "/" i po "@": mechanika 1:1 z @mention
+  // (strzałki, Enter/Tab wstawia, Esc chowa do następnej zmiany tekstu).
+  // ŹRÓDŁO SKILLI: harness per bot (`/api/bots/{id}/skills`) — ten sam, z którego
+  // czyta panel Umiejętności. Wcześniejszy odczyt z /api/engine/skills pod
+  // bramką slafyDriver zostawiał paletę i "@" puste, choć bot miał skille
+  // (harness trzyma je per bot i wstrzykuje w każdą turę, niezależnie od silnika).
+  // multibot: rutyny są per bot, więc cache trzyma id bota — bez tego
+  // przełączenie bota zostawiłoby w palecie cudzą listę.
+  const [slashSkills, setSlashSkills] = useState<{ botId: string; rows: SlashSkill[] } | null>(
+    null,
+  );
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const [slashHighlight, setSlashHighlight] = useState(0);
+  // `/model` belongs to harness, so it works for every provider.
+  const slashQ = slashQuery(text);
+  // multibot: listę skilli doładujemy też dla @mention — picker "@" pokazuje
+  // boty ORAZ skille.
+  const skillsWanted = slashQ !== null || mention !== null;
+  useEffect(() => {
+    if (!skillsWanted || slashSkills?.botId === bot.id) return;
+    let alive = true;
+    authFetch(`/api/bots/${bot.id}/skills`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((ss: SlashSkill[]) =>
+        alive && setSlashSkills({ botId: bot.id, rows: Array.isArray(ss) ? ss : [] }),
+      )
+      .catch(() => alive && setSlashSkills({ botId: bot.id, rows: [] }));
+    return () => {
+      alive = false;
+    };
+  }, [skillsWanted, slashSkills, bot.id]);
+
+  // Kandydaci @mention stoją za deklaracją `slashSkills` — skille są częścią
+  // tej samej listy. Boty zostają na górze, skille za nimi (max 4).
+  const candidates = useMemo<MentionRow[]>(() => {
     if (!mention || mention.start === dismissedAt) return [];
     const peers = state.bots.filter((b) => b.id !== bot.id && !b.hidden);
     const q = mention.query.trim().toLowerCase();
     // "@Scout " — the full name plus a space — is a COMPLETED tag, not a
     // search: keep the picker closed so Enter sends instead of re-picking
     if (mention.query.endsWith(" ") && peers.some((b) => b.name.toLowerCase() === q)) return [];
-    return peers.filter((b) => !q || b.name.toLowerCase().includes(q)).slice(0, 6);
-  }, [mention, dismissedAt, state.bots, bot.id]);
+    // multibot: boty zostają na górze listy, skille za nimi — filtr po nazwie
+    // i komendzie, maksymalnie cztery, żeby dropdown się nie rozjeżdżał.
+    const botRows: MentionRow[] = peers
+      .filter((b) => !q || b.name.toLowerCase().includes(q))
+      .slice(0, 6)
+      .map((peer) => ({ type: "bot", peer }));
+    const skillRows: MentionRow[] = (slashSkills?.botId === bot.id ? slashSkills.rows : [])
+      .filter(
+        (s) =>
+          !q ||
+          s.name.toLowerCase().includes(q) ||
+          s.command.toLowerCase().includes(q),
+      )
+      .slice(0, 4)
+      .map((skill) => ({ type: "skill", skill }));
+    return [...botRows, ...skillRows];
+  }, [mention, dismissedAt, state.bots, bot.id, slashSkills]);
   const pickerOpen = candidates.length > 0;
-
-  useEffect(() => setHighlight(0), [mention?.start, mention?.query]);
-
-  // multibot: F8 — picker skilli po "/": mechanika 1:1 z @mention (strzałki,
-  // Enter/Tab wstawia, Esc chowa do następnej zmiany tekstu). Listę bierzemy
-  // leniwie przy pierwszym "/" — tylko dla botów na driverze slafy; silnik
-  // offline = brak listy = brak pickera, wiadomość idzie jak zwykły tekst.
-  const slafyDriver =
-    state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)?.driverKind ===
-    "slafy";
-  const [slashSkills, setSlashSkills] = useState<SlashSkill[] | null>(null);
-  const [slashDismissed, setSlashDismissed] = useState(false);
-  const [slashHighlight, setSlashHighlight] = useState(0);
-  // `/model` belongs to harness, so it works for every provider. Skill
-  // commands remain engine-backed and only load for local engine bots.
-  const slashQ = slashQuery(text);
-  const engineSlashQ = slafyDriver ? slashQ : null;
-  useEffect(() => {
-    if (engineSlashQ === null || slashSkills !== null) return;
-    let alive = true;
-    authFetch("/api/engine/skills")
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((ss: SlashSkill[]) => alive && setSlashSkills(ss))
-      .catch(() => alive && setSlashSkills([]));
-    return () => {
-      alive = false;
-    };
-  }, [engineSlashQ, slashSkills]);
   // multibot: wtyczki z tego samego katalogu, z którego żyje panel wtyczek;
   // status połączenia to druga runda, dokładnie jak w PluginsPanel. W palecie
   // pokazujemy tylko realnie podpięte: własne serwery MCP i połączone karty
@@ -316,9 +344,9 @@ export function Composer({ bot }: { bot: Bot }) {
       { id: "a-plugins", label: polish ? "Wtyczki" : "Plugins", hint: app, kind: "action", run: () => dispatch({ type: "togglePlugins", open: true }) },
       { id: "a-app", label: polish ? "Ustawienia aplikacji" : "App settings", hint: app, kind: "action", run: () => dispatch({ type: "toggleAppSettings", open: true }) },
       { id: "a-new-bot", label: polish ? "Nowy bot" : "New bot", hint: polish ? "Panel boczny" : "Sidebar", kind: "action", run: () => dispatch({ type: "newBot" }) },
-      ...(slafyDriver && slashSkills ? slashSkills : []).map((skill) => ({
+      ...(slashSkills?.botId === bot.id ? slashSkills.rows : []).map((skill) => ({
         id: `s-${skill.name}`,
-        label: skill.command,
+        label: skill.command ?? `/${skill.name}`,
         hint: skill.description,
         kind: "skill" as const,
       })),
@@ -347,7 +375,7 @@ export function Composer({ bot }: { bot: Bot }) {
       })),
     ];
     return slashVisible(rows, slashQ);
-  }, [slashQ, slashDismissed, slashSkills, slafyDriver, slashPlugins, slashRoutines, state.bots, bot.id, dispatch, polish]);
+  }, [slashQ, slashDismissed, slashSkills, slashPlugins, slashRoutines, state.bots, bot.id, dispatch, polish]);
   const slashOpen = slashCandidates.length > 0;
   // multibot: lista dojeżdża asynchronicznie (wtyczki, rutyny), więc reset
   // podświetlenia idzie też po zmianie jej długości
@@ -404,12 +432,16 @@ export function Composer({ bot }: { bot: Bot }) {
     return () => window.removeEventListener("mb:composer:insert", onInsert);
   }, []);
 
-  const pickMention = (peer: Bot) => {
-    if (!mention) return;
+  const pickMention = (row: MentionRow | undefined) => {
+    // lista mogła się skrócić, zanim Enter doszedł (jak w `pickSlash`)
+    if (!mention || !row) return;
+    // Bot dopełnia tag (@Imię ), skill wstawia komendę — oba od miejsca,
+    // gdzie zaczynało się zapytanie po "@"; reszta treści zostaje.
+    const insert = row.type === "bot" ? `@${row.peer.name} ` : `${row.skill.command ?? `/${row.skill.name}`} `;
     const after = text.slice(caret);
-    const next = `${text.slice(0, mention.start)}@${peer.name} ${after}`;
+    const next = `${text.slice(0, mention.start)}${insert}${after}`;
     setText(next);
-    const newCaret = mention.start + peer.name.length + 2;
+    const newCaret = mention.start + insert.length;
     setCaret(newCaret);
     // picking completes this tag — close the popup so the next Enter sends
     setDismissedAt(mention.start);
@@ -639,19 +671,41 @@ setText("");
         )}
         {pickerOpen && (
           <div className="absolute bottom-full left-10 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg">
-            {candidates.map((peer, i) => (
+            {candidates.map((row, i) => (
               <button
-                key={peer.id}
-                onClick={() => pickMention(peer)}
+                key={row.type === "bot" ? row.peer.id : `s-${row.skill.name}`}
+                onClick={() => pickMention(row)}
                 onMouseEnter={() => setHighlight(i)}
                 className={cn(
                   "flex w-full items-center gap-2.5 px-3 py-2 text-left",
                   i === highlight ? "bg-raised-hover" : "",
                 )}
               >
-                <MausAvatar color={peer.color} shape={peer.mascotShape} state={normalizeState(peer.mascotExpression) ?? "happy"} size={24} />
-                <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{peer.name}</span>
-                <span className="shrink-0 text-xs text-ink-secondary">{polish ? "Bot" : "Agent"}</span>
+                {row.type === "bot" ? (
+                  <>
+                    <MausAvatar color={row.peer.color} shape={row.peer.mascotShape} state={normalizeState(row.peer.mascotExpression) ?? "happy"} size={24} />
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{row.peer.name}</span>
+                    <span className="shrink-0 text-xs text-ink-secondary">{polish ? "Bot" : "Agent"}</span>
+                  </>
+                ) : (
+                  <>
+                    {/* multibot: skill wyróżnia się kolorem akcentu — ikona i
+                        komenda, żeby na liście obok botów od razu rzucał się
+                        w oczy jak przy tworzeniu umiejętności */}
+                    <span className="flex size-6 shrink-0 items-center justify-center">
+                      <Wand2 size={15} className="text-accent" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14px] font-medium text-accent">{row.skill.command ?? `/${row.skill.name}`}</span>
+                      {row.skill.description && (
+                        <span className="block truncate text-xs text-ink-secondary">{row.skill.description}</span>
+                      )}
+                    </span>
+                    <span className="shrink-0 rounded-full bg-raised px-2 py-0.5 text-[10px] text-ink-secondary">
+                      {polish ? "Umiejętność" : "Skill"}
+                    </span>
+                  </>
+                )}
               </button>
             ))}
           </div>

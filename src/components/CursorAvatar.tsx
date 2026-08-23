@@ -1326,6 +1326,9 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       expression: 0,
       morph: 1,
       velocity: 0,
+      // Statyczne awatary (paused) przestają rysować dopiero po dokończonym
+      // morphingu — flaga stawiana w `step`, kasowana w `selectExpression`.
+      pausedSettled: false,
       blinkStart: null as number | null,
       spinStart: null as number | null,
       spinDuration: 900,
@@ -1374,6 +1377,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       e.expression = i
       e.morph = 0
       e.velocity = 0
+      e.pausedSettled = false
     }
 
     React.useImperativeHandle(
@@ -1532,7 +1536,11 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         const p = e.props
         const dt = Math.min((now - e.last) / 1000, 0.1)
         e.last = now
-        if (p.paused) return
+        // Pauza nie może pomijać pierwszego narysowania twarzy: przy
+        // `paused` pętla wcześniej wychodziła przed pierwszym `draw()`, więc
+        // statyczne awatary (`animated={false}`) pokazywały samo ciało bez
+        // oczu i ust. Rysujemy, dopóki wyraz się nie ustali, potem stoimy.
+        if (p.paused && e.pausedSettled) return
 
         const f = p.spring ?? 7
         e.velocity += (-2 * f * e.velocity - f * f * (e.morph - 1)) * dt
@@ -1550,6 +1558,11 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         }
 
         draw(e, now, spinTurn)
+
+        // Dopiero po dokończonym morphingu pauza może zamrozić klatkę.
+        if (p.paused) {
+          e.pausedSettled = Math.abs(e.morph - 1) < 0.005 && Math.abs(e.velocity) < 0.01
+        }
       }
 
       frame = requestAnimationFrame(step)

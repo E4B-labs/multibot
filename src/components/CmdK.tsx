@@ -36,7 +36,7 @@ interface Command {
   badge?: string;
 }
 
-/** Kształt z GET /api/engine/skills — ten sam, którego używa picker "/" w Composerze. */
+/** Kształt z GET /api/bots/{id}/skills — to samo źródło, z którego korzystają panel Umiejętności i picker "/" w Composerze. */
 interface PaletteSkill {
   name: string;
   command: string;
@@ -97,7 +97,6 @@ export function CmdK() {
   // jest jedyną listą botów w aplikacji, więc „Ukryj" było jednokierunkowe.
   // Paleta jest tu naturalnym miejscem: tryb zamiast osobnego panelu.
   const [showHidden, setShowHidden] = useState(false);
-  const [skills, setSkills] = useState<PaletteSkill[] | null>(null);
 
   // Meta+K on macOS, Ctrl+K everywhere. preventDefault is mandatory —
   // Chrome otherwise steals Ctrl+K for the address bar.
@@ -151,25 +150,24 @@ export function CmdK() {
 
   const current = state.bots.find((b) => b.id === state.selectedId);
 
-  // multibot: skille są własnością silnika, więc pokazujemy je tylko wtedy, gdy
-  // bieżący bot na nim jedzie — dokładnie ta sama bramka co przy pickerze "/" w
-  // Composerze. Otwarta grupa też je gasi: wstawiamy komendę do composera czatu
-  // bota, a przy grupie to nie jest ten sam composer.
-  const slafyBot =
-    !state.groupOpen &&
-    current != null &&
-    state.instances.find((i) => i.instanceId === current.modelSelection.instanceId)?.driverKind === "slafy";
+  // multibot: skille żyją w harnessie per bot (`/api/bots/{id}/skills`, to samo
+  // źródło co panel Umiejętności i picker "/" w Composerze). Otwarta grupa je
+  // gasi: wstawiamy komendę do composera czatu bota, a przy grupie to nie jest
+  // ten sam composer. Cache trzyma id bota — przełączenie bota odświeża listę.
+  const [skills, setSkills] = useState<{ botId: string; rows: PaletteSkill[] } | null>(null);
   useEffect(() => {
-    if (!open || !slafyBot || skills !== null) return;
+    if (!open || state.groupOpen || current == null || skills?.botId === current.id) return;
     let alive = true;
-    void authFetch("/api/engine/skills")
+    void authFetch(`/api/bots/${current.id}/skills`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-      .then((rows: PaletteSkill[]) => alive && setSkills(rows))
-      .catch(() => alive && setSkills([]));
+      .then((rows: PaletteSkill[]) =>
+        alive && setSkills({ botId: current.id, rows: Array.isArray(rows) ? rows : [] }),
+      )
+      .catch(() => alive && setSkills({ botId: current.id, rows: [] }));
     return () => {
       alive = false;
     };
-  }, [open, slafyBot, skills]);
+  }, [open, state.groupOpen, current, skills]);
 
   const commands = useMemo<Command[]>(() => {
     const close = (fn: () => void) => () => {
@@ -266,7 +264,7 @@ export function CmdK() {
     // Skille NIE uruchamiają się z palety — wstawiają komendę do composera, tak
     // samo jak picker "/". Skill bywa akcją ze skutkami ubocznymi i nie może
     // wystartować od jednego Entera w wyszukiwarce.
-    for (const skill of skills ?? []) {
+    for (const skill of (skills != null && skills.botId === current?.id ? skills.rows : [])) {
       const command = skill.command || `/${skill.name}`;
       cmds.push({
         id: `skill:${skill.name}`,

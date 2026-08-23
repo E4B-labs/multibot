@@ -351,18 +351,6 @@ function saveLocalGroups(groups: LocalGroup[]) {
   }
 }
 
-// multibot 0.1.44: kółko-inicjał członka grupy — neutralny szary, bez maskotki
-// (żadnej łapki) i bez kolorów botów (bez żółtego), jak na screenie właściciela.
-function MemberDot({ bot }: { bot: Bot }) {
-  return (
-    <span
-      className="flex size-5 shrink-0 items-center justify-center rounded-full bg-raised-hover text-[9px] font-semibold uppercase text-ink-secondary ring-2 ring-panel"
-      title={bot.name}
-    >
-      {bot.name.trim().charAt(0) || "?"}
-    </span>
-  );
-}
 
 function LocalGroupsSection({
   onMenu,
@@ -675,10 +663,19 @@ function GroupsSection({
             dragOverId === g.id ? "bg-raised ring-1 ring-accent" : state.groupOpen?.id === g.id ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
-          <span className="flex shrink-0 -space-x-1.5">
+          {/* multibot: skład grupy jako nachodzące maskotki (port z aplikacji
+              mobilnej, styl Groka) — kolor i kształt mówią od razu, kto siedzi
+              w grupie; szare inicjały (`MemberDot`) tego nie mówiły. Bez
+              pierścienia-oddzielnika: obwódka wychodzi ciemnym okręgiem na
+              podświetlonym wierszu. Fallback Users dla botów nierozpoznanych. */}
+          <span className="flex shrink-0 items-center -space-x-1.5">
             {g.bot_ids.slice(0, 3).map((engineId) => {
               const member = bots.find((b) => `mb-${b.threadId}` === engineId);
-              return member ? <MemberDot key={engineId} bot={member} /> : <Users key={engineId} size={14} className="text-ink-secondary" />;
+              return member ? (
+                <MausAvatar key={engineId} color={member.color} shape={member.mascotShape} state={stateForBot(member)} size={20} />
+              ) : (
+                <Users key={engineId} size={14} className="shrink-0 text-ink-secondary" />
+              );
             })}
           </span>
           {!collapsed && (
