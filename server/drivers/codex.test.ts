@@ -106,9 +106,13 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(seen.env.OPENAI_API_KEY).toBeUndefined();
     const methods = seen.calls.map((c: { method: string }) => c.method);
     expect(methods).toEqual(["initialize", "initialized", "thread/start", "turn/start"]);
-    // persona rides in front of the prompt text — codex has no system slot
+    // persona rides as thread instructions (when available) + as labeled SYSTEM input
+    const threadStart = seen.calls.find((c: { method: string }) => c.method === "thread/start");
+    expect(threadStart.params.instructions).toBe("You are Testy.");
     const turnStart = seen.calls.at(-1);
-    expect(turnStart.params.input[0].text).toBe("You are Testy.\n\nlist files");
+    expect(turnStart.params.input[0].text).toContain("You are Testy.");
+    expect(turnStart.params.input[0].text).toContain("SYSTEM — MultiBot identity");
+    expect(turnStart.params.input[1].text).toBe("list files");
   });
 
   it("streams agentMessage deltas without re-emitting the settled text", async () => {

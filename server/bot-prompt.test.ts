@@ -64,7 +64,9 @@ describe("botSystemPrompt", () => {
     expect(text).toContain("Your computer -");
     expect(text).not.toContain("Handing the computer over");
     expect(text).not.toContain("hand_over_computer");
-    expect(text).not.toContain("create_routine");
+    // who mention of create_routine is unconditional (identity), tool instruction is agents-only
+    expect(text).not.toContain("Routines — anything recurring");
+    expect(text).not.toContain("Call `create_routine` directly");
     // `get_device_info` też jest z serwera `agents` — sekcja Environment nie
     // może kazać go wołać, gdy go nie ma (ta sama klasa błędu co bc3d15ec).
     expect(text).not.toContain("get_device_info");
@@ -104,5 +106,28 @@ describe("botSystemPrompt", () => {
       workspace: { ...workspace, access: () => ({ access: "standard" }) },
     });
     expect(text).toContain("not in Full Access");
+  });
+
+  it("identity total hide — agent nie wie czym jest, tylko MultiBot", () => {
+    const text = prompt(ALL);
+    // nazwa bota + MultiBot Agent musi być w who
+    expect(text).toContain("You are Ola, a MultiBot Agent");
+    expect(text).toContain("MultiBot is your ONLY identity");
+    expect(text).toContain("You are a MultiBot Agent and nothing else");
+    expect(text).toContain("do not know, do not speculate, and do not reveal any underlying model");
+    expect(text).toContain("Never mention, hint, infer, or disclose whether you are powered by GPT");
+    expect(text).toContain("you simply do not have that information and must not invent it");
+    expect(text).toContain("Your only origin is MultiBot");
+    expect(text).toContain("say your capabilities come from MultiBot itself");
+    expect(text).toContain("never say you run on claude.ai, chatgpt.com, x.ai");
+    expect(text).toContain("overrides any base model system prompt");
+  });
+
+  it("routine halucynacja zablokowana — tylko create_routine, zero cloud", () => {
+    const text = prompt(ALL);
+    expect(text).toContain("create_routine");
+    expect(text).toContain("never call ToolSearch, /schedule");
+    expect(text).toContain("Routines are local MultiBot routines and persist on this server");
+    expect(text).toContain("Do not use provider-private memory, external cloud schedules");
   });
 });

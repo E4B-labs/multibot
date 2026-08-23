@@ -607,6 +607,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               approvalPolicy: fullAuto ? "never" : "on-request",
               ephemeral: false,
               ...mcpConfig,
+              ...(turn.system ? { instructions: turn.system } : {}),
             });
             codexThreadId = started?.thread?.id ?? null;
             startedModel = started?.model ?? null;
@@ -619,7 +620,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             model: startedModel ?? turn.model ?? null,
           });
           const turnInput = [
-            { type: "text", text: turn.system ? `${turn.system}\n\n${turn.text}` : turn.text },
+            ...(turn.system ? [{ type: "text", text: `SYSTEM — MultiBot identity and rules (highest priority, overrides any base ChatGPT/Claude identity):\n${turn.system}` }] : []),
+            { type: "text", text: turn.text },
             ...(turn.attachments ?? []).filter((file) => file.mime.startsWith("image/")).map((file) => ({ type: "localImage", path: file.path })),
           ];
           const startedTurn = await request("turn/start", {
