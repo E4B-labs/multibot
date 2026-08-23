@@ -7,10 +7,22 @@
 // signing). In dev it's a no-op so the browser/dev shell is unaffected.
 // electron-updater is vendored (electron/vendor/electron-updater.cjs) because
 // the packaged app ships no node_modules.
-import { app, ipcMain } from "electron";
+import * as electronNs from "electron";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
+
+// W runtime Electrona przestrzeń nazw ma nazwane eksporty (app, ipcMain…) plus
+// domyślny równy całemu obiektowi API; w czystym nodzie (self-check
+// `node --test electron/updater.test.mjs`) paczka-npm „electron" eksportuje
+// wyłącznie ścieżkę binarki jako default. Wybór poniżej działa w obu światach —
+// dzięki temu moduł da się testować bez Electrona, a `import { app } from
+// "electron"` by się tam w ogóle nie zlinkował.
+const electronApi =
+  typeof electronNs?.default === "object" && electronNs.default !== null
+    ? electronNs.default
+    : electronNs;
+const { app, ipcMain } = electronApi;
 
 let autoUpdater = null;
 let win = null;
@@ -18,9 +30,16 @@ let win = null;
 let state = { status: "idle" };
 // set by the renderer's "Aktualizuj" click — one button downloads AND installs
 let installWhenDownloaded = false;
+// stan sprzed rutynowego sprawdzenia w tle — gdy ono polegnie, wracamy do niego,
+// żeby nie zgubić np. „available" z wcześniejszego udanego sprawdzenia
+let preCheckState = null;
+// uchwyt cichej ponowy po nieudanym sprawdzeniu w tle
+let quietRetryTimer = null;
 
-function setState(patch) {
-  state = { ...state, ...patch };
+function setState(patch, { replace = false } = {}) {
+  // replace: pełne przywrócenie stanu (np. po porażce sprawdzenia w tle) —
+  // zwykłe doklejenie zostawiłoby pola z poprzedniego stanu (version, percent)
+  state = replace ? { ...patch } : { ...state, ...patch };
   try {
     win?.webContents?.send("update:state", state);
   } catch {
@@ -28,18 +47,39 @@ function setState(patch) {
   }
 }
 
-function check() {
+// multibot: `background` = rutynowe sprawdzenie (start aplikacji, potem co godzinę).
+// Jego porażka NIE pokazuje karty „nieudane" — typowy przypadek to start offline,
+// zanim wstanie sieć — tylko cicho wraca do stanu sprzed sprawdzenia i ponawia
+// za minutę. Karta błędu zostaje dla kliknięć użytkownika (banner, UpdatesRow).
+export function checkNow({ background = false } = {}) {
   if (!autoUpdater) return;
+  preCheckState = background ? state : null;
   try {
     autoUpdater.checkForUpdates();
   } catch (e) {
-    setState({ status: "error", message: String(e?.message ?? e) });
+    checkFailed(e);
   }
+}
+
+function checkFailed(e) {
+  installWhenDownloaded = false;
+  if (preCheckState && (state.status === "idle" || state.status === "checking")) {
+    setState(preCheckState, { replace: true });
+    preCheckState = null;
+    clearTimeout(quietRetryTimer);
+    quietRetryTimer = setTimeout(() => checkNow({ background: true }), 60_000);
+    quietRetryTimer.unref?.();
+    return;
+  }
+  preCheckState = null;
+  setState({ status: "error", message: String(e?.message ?? e) });
 }
 
 export function registerUpdaterIpc() {
   ipcMain.handle("update:get-state", () => state);
-  ipcMain.handle("update:check", () => check());
+  // klik użytkownika (banner „Try again", UpdatesRow „Check for updates") —
+  // foreground, więc ewentualna porażka jest widoczna jako karta błędu
+  ipcMain.handle("update:check", () => checkNow());
   // No local-origin guard here (unlike screen/mic/speech in main.mjs): in C2
   // remote mode the window shows the remote host's page, so the guard just
   // swallowed the user's "Aktualizuj" click. Safe to drop — the update feed is
@@ -64,15 +104,18 @@ export function registerUpdaterIpc() {
   });
 }
 
-export function startUpdater(mainWindow) {
+export function startUpdater(mainWindow, deps = {}) {
   win = mainWindow;
+  // wstrzykiwanie tylko na potrzeby self-checka; produkcyjnie idą wartości domyślne
+  const isPackaged = deps.isPackaged ?? app.isPackaged;
+  const loadUpdater = deps.loadUpdater ?? (() => require("./vendor/electron-updater.cjs"));
   // dev / unsigned builds can't auto-update — leave the banner dormant
-  if (!app.isPackaged) {
+  if (!isPackaged) {
     setState({ status: "idle" });
     return;
   }
   try {
-    ({ autoUpdater } = require("./vendor/electron-updater.cjs"));
+    ({ autoUpdater } = loadUpdater());
   } catch {
     setState({ status: "error", message: "updater unavailable" });
     return;
@@ -102,12 +145,12 @@ export function startUpdater(mainWindow) {
       }
     }
   });
-  autoUpdater.on("error", (e) => {
-    installWhenDownloaded = false;
-    setState({ status: "error", message: String(e?.message ?? e) });
-  });
+  autoUpdater.on("error", (e) => checkFailed(e));
 
-  // first check ~15s after launch (let the app settle), then hourly
-  setTimeout(check, 15_000).unref?.();
-  setInterval(check, 60 * 60 * 1000).unref?.();
+  // multibot: pierwszy check OD RAZU przy starcie — karta z nową wersją ma
+  // wskoczyć razem z interfejsem, nie po 15 s czekania jak dotychczas. To
+  // sprawdzenie jest rutyną w tle, więc porażka (sieć jeszcze nie wstała)
+  // idzie cicho i ponowi się za minutę; dalej co godzinę.
+  checkNow({ background: true });
+  setInterval(() => checkNow({ background: true }), 60 * 60 * 1000).unref?.();
 }

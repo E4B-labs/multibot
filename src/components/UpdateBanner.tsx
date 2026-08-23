@@ -74,7 +74,7 @@ export function UpdateBanner() {
           {s.status === "available" && (
             <button
               onClick={() => void updater.download()}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-white"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 active:opacity-70"
             >
               <ArrowDownToLine size={13} /> {polish ? "Aktualizuj" : "Update"}
             </button>
@@ -82,7 +82,7 @@ export function UpdateBanner() {
           {s.status === "downloaded" && (
             <button
               onClick={() => void updater.install()}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-white"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 active:opacity-70"
             >
               <RefreshCw size={13} /> {polish ? "Uruchom ponownie i zaktualizuj" : "Restart to update"}
             </button>
