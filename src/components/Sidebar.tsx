@@ -193,14 +193,16 @@ function BotHoverCard({ bot, top, left }: { bot: Bot; top: number; left: number 
     >
       <div className="flex items-center gap-2">
         <MausAvatar color={bot.color} shape={bot.mascotShape} state={stateForBot(bot)} size={28} />
-        <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{bot.name}</span>
+        {/* godzina na wysokości nazwy; flex-1 na nazwie trzyma ją przy prawej
+            krawędzi kafelka (ta sama oś X co wcześniej) */}
+        <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{bot.name}</span>
+        {last && <span className="shrink-0 text-[11px] text-ink-secondary">{formatTime(last.at)}</span>}
       </div>
-      <div className="mt-1.5 flex items-end justify-between gap-3">
+      <div className="mt-1.5">
         {/* opis ma pierwszeństwo; bez opisu — ostatnie zadanie/wiadomość (preview) */}
-        <span className="line-clamp-2 min-w-0 flex-1 text-[12.5px] leading-snug text-ink-secondary">
+        <span className="line-clamp-2 text-[12.5px] leading-snug text-ink-secondary">
           {bot.description?.trim() || preview(bot)}
         </span>
-        {last && <span className="shrink-0 text-[11px] text-ink-secondary">{formatTime(last.at)}</span>}
       </div>
     </div>
   );
