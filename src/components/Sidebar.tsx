@@ -489,7 +489,7 @@ function LocalGroupsSection({
 
   return (
     <div
-      className={cn(!collapsed && "mb-2 border-b border-hairline/40", "pb-2")}
+      className={cn("flex flex-col gap-0.5")}
       onContextMenu={(e) => {
         // multibot 0.1.46: PPM w pustą część sekcji otwiera formularz grupy
         // lokalnej; LPM w tło nic nie otwiera.
@@ -745,7 +745,7 @@ function GroupsSection({
   };
 
   return (
-    <div className="border-b border-hairline/40 px-2 pb-2 pt-1">
+    <div className="flex flex-col gap-0.5">
 
       {(groups ?? []).map((g) => (
         <button
@@ -770,8 +770,8 @@ function GroupsSection({
           // musi wrócić jako tooltip.
           title={collapsed ? g.name || g.id : undefined}
           className={cn(
-            "flex w-full items-center rounded-xl py-2 text-left",
-            collapsed ? "justify-center px-0" : "gap-2.5 px-3",
+            "flex w-full items-center rounded-xl text-left",
+            collapsed ? "justify-center px-0 py-2" : "gap-3 px-3 py-2.5",
             dragOverId === g.id ? "bg-raised ring-1 ring-accent" : state.groupOpen?.id === g.id ? "bg-raised" : "hover:bg-raised/50",
           )}
         >

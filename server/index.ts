@@ -249,7 +249,7 @@ function askBotAndWait(
       if (e.threadId !== threadId) return;
       if (options?.onText && e.type === "content.delta" && e.streamKind === "assistant_text") {
         deltaBuf += e.delta;
-        if (!deltaTimer) deltaTimer = setTimeout(flushDelta, 1_000);
+        if (!deltaTimer) deltaTimer = setTimeout(flushDelta, 100);
       }
       if (e.type === "item.completed" && e.itemType === "assistant_text") {
         text += (text ? "\n" : "") + e.text;
@@ -2335,6 +2335,7 @@ const server = createServer(async (req, res) => {
     // their selected provider instead of being silently replaced by engine.
     m = path.match(/^\/api\/groups\/([\w-]+)\/chat$/);
     if (m && method === "POST") {
+      const gid = m[1];
       const body = await readBody(req);
       const message = String(body.message ?? "").trim();
       if (!message) return json(res, 422, { error: "message required" });
@@ -2345,37 +2346,41 @@ const server = createServer(async (req, res) => {
         // MULTIBOT_ENGINE=off.
         let group: { bot_ids?: unknown[]; name?: unknown };
         if (engineDisabled()) {
-          const stored = groupStore.get(m[1]);
+          const stored = groupStore.get(gid);
           if (!stored) return json(res, 404, { error: "no such group" });
           group = stored;
         } else {
           const base = await ensureEngine();
-          const groupResponse = await fetch(`${base}/api/groups/${encodeURIComponent(m[1])}`);
+          const groupResponse = await fetch(`${base}/api/groups/${encodeURIComponent(gid)}`);
           if (!groupResponse.ok) return json(res, groupResponse.status === 404 ? 404 : 502, { error: "no such group" });
           group = await groupResponse.json() as { bot_ids?: unknown[] };
         }
-        const durable = groupStore.get(m[1]) ?? groupStore.upsert({ id: m[1], name: String((group as { name?: unknown }).name ?? "Group"), bot_ids: (group.bot_ids ?? []).map(String) });
-        groupStore.append(m[1], { from: "you", text: message });
-        const turns: Array<{ bot_id: string; reply: string }> = [];
-        for (const rawId of group.bot_ids ?? []) {
-          const engineId = String(rawId);
-          const threadId = engineId.startsWith("mb-") ? engineId.slice(3) : engineId;
-          const bot = store.botByThread(threadId);
-          if (!bot) continue;
-          const transcript = (groupStore.get(m[1])?.messages ?? []).map((item) => ({
-            role: item.from === "you" ? ("user" as const) : ("assistant" as const),
-            text: item.text,
-          }));
-          // multibot: jw. — sekwencyjne tury pod wiszącą odpowiedzią HTTP,
-          // zostajemy przy domyślnych 4 minutach na turę.
-          const reply = await askBotAndWait(bot.id, message, 0, {
-            threadId: groupThreadId(m[1], bot.id),
-            transcript,
-          });
-          turns.push({ bot_id: bot.id, reply });
-          if (durable) groupStore.append(m[1], { from: bot.id, text: reply });
-        }
-        const current = groupStore.get(m[1]);
+        const durable = groupStore.get(gid) ?? groupStore.upsert({ id: gid, name: String((group as { name?: unknown }).name ?? "Group"), bot_ids: (group.bot_ids ?? []).map(String) });
+        groupStore.append(gid, { from: "you", text: message });
+        const botEntries = (group.bot_ids ?? [])
+          .map((rawId) => {
+            const engineId = String(rawId);
+            const threadId = engineId.startsWith("mb-") ? engineId.slice(3) : engineId;
+            const bot = store.botByThread(threadId);
+            return bot ? { bot } : null;
+          })
+          .filter((x): x is { bot: NonNullable<ReturnType<typeof store.bot>> } => Boolean(x));
+        const snapshot = (groupStore.get(gid)?.messages ?? []).map((item) => ({
+          role: item.from === "you" ? ("user" as const) : ("assistant" as const),
+          text: item.text,
+        }));
+        // multibot: równolegle — sekwencyjnie 2× TTFT = >10s dla hej, równolegle = max TTFT <2s warm
+        const turns = await Promise.all(
+          botEntries.map(async ({ bot }) => {
+            const reply = await askBotAndWait(bot.id, message, 0, {
+              threadId: groupThreadId(gid, bot.id),
+              transcript: snapshot,
+            });
+            return { bot_id: bot.id, reply };
+          }),
+        );
+        for (const t of turns) if (durable) groupStore.append(gid, { from: t.bot_id, text: t.reply });
+        const current = groupStore.get(gid);
         if (current) broadcast({ kind: "group", group: current });
         return json(res, 200, { turns, owner: turns[0]?.bot_id ?? null, messages: current?.messages ?? [] });
       } catch (error) {
