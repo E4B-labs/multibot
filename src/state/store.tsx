@@ -20,6 +20,9 @@ import { notifyBrowser } from "@/lib/notifications";
 export type { MausColor } from "@/lib/mascot";
 
 const SELECTED_BOT_KEY = "multibot.selectedBot";
+// multibot: ile pokoi współpracy trzymamy w stanie. Serwer sam wyrzuca pokoje
+// 30 minut po ostatniej wiadomości; ten sufit to tylko bezpiecznik pamięci.
+const MAX_KNOWN_ROOMS = 40;
 
 export interface OptionCardData {
   title: string;
@@ -148,6 +151,9 @@ interface AppState {
   groupOpen: EngineGroup | null;
   // multibot: otwarty read-only pokój współpracy botów (zastępuje widok czatu)
   roomOpen: Room | null;
+  /** multibot: znane pokoje współpracy (ostatnie N) — z nich wskaźnik
+   *  „boty rozmawiają między sobą" wybiera aktywnego partnera dla czatu. */
+  rooms: Room[];
   /** in-flight assistant text per threadId (content.delta fold) */
   streaming: Record<string, string>;
   /** latest live frame of a bot's computer, per botId */
@@ -205,6 +211,10 @@ type Action =
   | { type: "toggleGroup"; group: EngineGroup | null }
   // multibot: otwarcie read-only pokoju współpracy / zamknięcie (null)
   | { type: "toggleRoom"; room: Room | null }
+  /** multibot: pełna lista pokoi z GET /api/rooms (hydratacja po starcie) */
+  | { type: "roomsSet"; rooms: Room[] }
+  /** multibot: jeden pokój z kanału {kind:"room"} — wstaw lub odśwież */
+  | { type: "roomUpsert"; room: Room }
   | {
       type: "updateBot";
       botId: string;
@@ -538,6 +548,17 @@ function reducer(state: AppState, action: Action): AppState {
         skillsOpen: open ? false : state.skillsOpen,
       };
     }
+    // multibot: hydratacja listy pokoi — nadmiar obcinamy, bo wskaźnik rozmów
+    // czyta tylko "running", a done/failed potrzebne są chwilę (animacja wyjścia).
+    case "roomsSet":
+      return { ...state, rooms: action.rooms.slice(-MAX_KNOWN_ROOMS) };
+    case "roomUpsert": {
+      const others = state.rooms.filter((room) => room.id !== action.room.id);
+      return {
+        ...state,
+        rooms: [...others, action.room].slice(-MAX_KNOWN_ROOMS),
+      };
+    }
     case "updateBot": {
       const mascotChanged =
         Object.prototype.hasOwnProperty.call(action.patch, "color") ||
@@ -589,6 +610,7 @@ const initialState: AppState = {
   skillNames: [],
   groupOpen: null,
   roomOpen: null,
+  rooms: [],
   streaming: {},
   screens: {},
   provisioning: {},
@@ -797,6 +819,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/config")
         .then((config) => alive && rawDispatch({ type: "configStatus", config }))
         .catch(() => {});
+      // multibot: znane pokoje współpracy — bez tego wskaźnik rozmów botów
+      // zobaczyłby aktywność dopiero po pierwszej ramce SSE, nie po odświeżeniu.
+      api("/api/rooms")
+        .then(({ rooms }) => alive && rawDispatch({ type: "roomsSet", rooms: Array.isArray(rooms) ? rooms : [] }))
+        .catch(() => {});
     };
     loadAll();
 
@@ -826,8 +853,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "room": {
           // live transcript of the open collaboration room
           const room = frame.room as Room | undefined;
+          if (!room) break;
+          // multibot: każdy pokój ląduje w stanie (nie tylko otwarty) — z tej
+          // listy wskaźnik „boty rozmawiają między sobą" wybiera partnera.
+          rawDispatch({ type: "roomUpsert", room });
           const open = stateRef.current.roomOpen;
-          if (room && open?.id === room.id) rawDispatch({ type: "toggleRoom", room });
+          if (open?.id === room.id) rawDispatch({ type: "toggleRoom", room });
           break;
         }
         case "message.patch":

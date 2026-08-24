@@ -570,3 +570,101 @@ body {
 
   .maus-eyes { transform: none; }
 }
+
+/* ── multibot: wskaźnik rozmów bot-bot (PeerChatIndicator) ──────────────
+   Scena wchodzi łagodnie, wychodzi z fade/scale; partner wskakuje małym
+   wybuchem (iskry w kolorze peera, geometria w pudełku awatara ≤60px),
+   a szlaczki w dymkach rysują się od zera przy każdej zmianie (co ~15 s). */
+
+.peer-chat-enter {
+  animation: peer-chat-enter 260ms ease-out both;
+}
+
+@keyframes peer-chat-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.peer-chat-leave {
+  animation: peer-chat-leave 240ms ease-in both;
+}
+
+@keyframes peer-chat-leave {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(4px) scale(0.96); }
+}
+
+/* awatar partnera: podskok „wskoczenia" + pierścień wybuchu w kolorze peera */
+.peer-chat-burst {
+  position: relative;
+  animation: peer-chat-pop 420ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+.peer-chat-burst::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 2px solid var(--peer-color);
+  opacity: 0;
+  animation: peer-chat-ring 520ms ease-out 60ms both;
+  pointer-events: none;
+}
+
+@keyframes peer-chat-pop {
+  0% { transform: scale(0.3); opacity: 0; }
+  55% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes peer-chat-ring {
+  0% { opacity: 0.9; transform: scale(0.6); }
+  100% { opacity: 0; transform: scale(1.25); }
+}
+
+/* iskry wybuchu: kropki lecące promieniście od środka awatara; maksymalny
+   zasięg ~17px od środka, więc mieszczą się w połowie nawet wąskiego (44px)
+   pudełka na telefonie — wybuch nigdy nie jest większy niż awatar */
+.peer-chat-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 9999px;
+  opacity: 0;
+  transform: rotate(var(--spark-angle)) translateX(5px) scale(0.4);
+  animation: peer-chat-spark 520ms ease-out 80ms both;
+  pointer-events: none;
+}
+
+@keyframes peer-chat-spark {
+  0% { opacity: 0; transform: rotate(var(--spark-angle)) translateX(5px) scale(0.4); }
+  25% { opacity: 0.95; }
+  100% { opacity: 0; transform: rotate(var(--spark-angle)) translateX(15px) scale(1); }
+}
+
+/* szlaczek rysuje się od zera przy każdej rotacji (klucz z tickiem remountuje
+   path; pathLength=1 więc dashoffset liczy się w ułamkach długości) */
+.peer-chat-wave {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: peer-chat-wave 900ms ease-out both;
+}
+
+@keyframes peer-chat-wave {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .peer-chat-enter,
+  .peer-chat-leave,
+  .peer-chat-burst,
+  .peer-chat-spark,
+  .peer-chat-wave {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+  }
+}
