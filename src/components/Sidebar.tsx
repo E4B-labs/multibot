@@ -416,6 +416,7 @@ function LocalGroupsSection({
   const polish = useLanguage() === "pl";
   const [name, setName] = useState("");
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [groupDragOverId, setGroupDragOverId] = useState<string | null>(null);
 
   // Formularz tworzy tylko nazwę — skład buduje się przeciąganiem botów.
   const create = () => {
@@ -442,6 +443,19 @@ function LocalGroupsSection({
       })),
     );
 
+  const moveGroup = (sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return;
+    setGroups((prev) => {
+      const src = prev.findIndex((g) => g.id === sourceId);
+      const tgt = prev.findIndex((g) => g.id === targetId);
+      if (src === -1 || tgt === -1) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(src, 1);
+      next.splice(tgt, 0, moved);
+      return next;
+    });
+  };
+
   useEffect(() => {
     const hasBot = (e: DragEvent) =>
       !!e.dataTransfer && (e.dataTransfer.types.includes("text/mb-bot-id") || e.dataTransfer.types.includes("text/plain"));
@@ -459,7 +473,10 @@ function LocalGroupsSection({
       setDragOverId(null);
       setGroups((cur) => cur.map((g) => ({ ...g, botIds: g.botIds.filter((id) => id !== botId) })));
     };
-    const onDragEnd = () => setDragOverId(null);
+    const onDragEnd = () => {
+      setDragOverId(null);
+      setGroupDragOverId(null);
+    };
     document.addEventListener("dragover", onOver);
     document.addEventListener("drop", onDropDoc);
     document.addEventListener("dragend", onDragEnd);
@@ -489,24 +506,43 @@ function LocalGroupsSection({
             .filter((b): b is Bot => Boolean(b));
           const open = !group.collapsed;
           const isOver = dragOverId === group.id;
+          const isGroupOver = groupDragOverId === group.id;
           return (
             <div
               key={group.id}
               data-local-group={group.id}
-              className={cn("mt-1 rounded-2xl p-1", isOver && "ring-1 ring-accent")}
+              className={cn(
+                "mt-1 rounded-2xl p-1",
+                isOver && "ring-1 ring-accent",
+                isGroupOver && "ring-1 ring-accent/60",
+              )}
               onDragOver={(e) => {
                 const t = e.dataTransfer?.types ?? [];
-                if (!Array.from(t as unknown as string[]).some((x) => x === "text/mb-bot-id" || x === "text/plain")) return;
+                const a = Array.from(t as unknown as string[]);
+                const isBot = a.some((x) => x === "text/mb-bot-id" || x === "text/plain");
+                const isGroup = a.includes("text/mb-local-group-id");
+                if (!isBot && !isGroup) return;
                 e.preventDefault();
                 if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-                setDragOverId(group.id);
+                if (isGroup) setGroupDragOverId(group.id);
+                else setDragOverId(group.id);
               }}
               onDragLeave={(e) => {
                 const next = e.relatedTarget as HTMLElement | null;
                 if (next && (e.currentTarget as HTMLElement).contains(next)) return;
                 setDragOverId((cur) => (cur === group.id ? null : cur));
+                setGroupDragOverId((cur) => (cur === group.id ? null : cur));
               }}
               onDrop={(e) => {
+                const groupId = (e.dataTransfer?.getData("text/mb-local-group-id") || "").trim();
+                if (groupId) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setGroupDragOverId(null);
+                  setDragOverId(null);
+                  moveGroup(groupId, group.id);
+                  return;
+                }
                 const botId = (e.dataTransfer?.getData("text/mb-bot-id") || e.dataTransfer?.getData("text/plain") || "").trim();
                 if (!botId) return;
                 e.preventDefault();
@@ -516,11 +552,23 @@ function LocalGroupsSection({
               }}
             >
               <div
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("text/mb-local-group-id", group.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.stopPropagation();
+                }}
+                onDragEnd={() => {
+                  setGroupDragOverId(null);
+                  setDragOverId(null);
+                }}
                 className={cn(
                   // multibot 0.1.46: pasek grupy — nazwa po lewej, kosz na hover
                   // i strzałka zwijania po prawej; zero profilowych. Cel dropu (cały kafel, nie tylko pasek).
-                  "group flex w-full items-center gap-2 rounded-full py-1.5 pl-3 pr-2 hover:bg-raised/40",
+                  // draggable: złap pasek i puść na innym kafelku by zmienić kolejność.
+                  "group flex w-full cursor-grab items-center gap-2 rounded-full py-1.5 pl-3 pr-2 hover:bg-raised/40 active:cursor-grabbing",
                   isOver && "ring-1 ring-accent",
+                  isGroupOver && "ring-1 ring-accent/60",
                 )}
               >
                 <button
