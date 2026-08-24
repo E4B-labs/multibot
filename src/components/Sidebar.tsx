@@ -73,6 +73,15 @@ interface MenuState {
   y: number;
 }
 
+// multibot 0.1.49: kafelek po najechaniu na bota (styl Groka) — awatar + nazwa,
+// pod nimi opis albo ostatnie zadanie, obok godzina ostatniej wiadomości.
+// Fixed zamiast absolute: lista ma overflow-y-auto, które przycina absoluty.
+interface HoverState {
+  botId: string;
+  top: number;
+  left: number;
+}
+
 interface GroupMenuState {
   group: EngineGroup;
   x: number;
@@ -173,14 +182,42 @@ function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
   );
 }
 
+// Kafelek hovera: te same klasy co menu kontekstowe, ale pointer-events-none —
+// musnięcie kafelka nie może go zgasić. Pozycję liczy Sidebar (clamp do viewportu).
+function BotHoverCard({ bot, top, left }: { bot: Bot; top: number; left: number }) {
+  const last = bot.messages[bot.messages.length - 1];
+  return (
+    <div
+      style={{ top, left }}
+      className="pointer-events-none fixed z-50 w-72 rounded-xl border border-hairline/50 bg-card p-3 shadow-2xl shadow-black/60"
+    >
+      <div className="flex items-center gap-2">
+        <MausAvatar color={bot.color} shape={bot.mascotShape} state={stateForBot(bot)} size={28} />
+        <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{bot.name}</span>
+      </div>
+      <div className="mt-1.5 flex items-end justify-between gap-3">
+        {/* opis ma pierwszeństwo; bez opisu — ostatnie zadanie/wiadomość (preview) */}
+        <span className="line-clamp-2 min-w-0 flex-1 text-[12.5px] leading-snug text-ink-secondary">
+          {bot.description?.trim() || preview(bot)}
+        </span>
+        {last && <span className="shrink-0 text-[11px] text-ink-secondary">{formatTime(last.at)}</span>}
+      </div>
+    </div>
+  );
+}
+
 function BotListItem({
   bot,
   onMenu,
   collapsed,
+  onHover,
+  onUnhover,
 }: {
   bot: Bot;
   onMenu: (menu: MenuState) => void;
   collapsed?: boolean;
+  onHover?: (botId: string, rect: DOMRect) => void;
+  onUnhover?: () => void;
 }) {
   const { state, dispatch } = useStore();
   // U20: zaznaczenie ma być jedno — po otwarciu grupy bot przestaje być
@@ -201,9 +238,10 @@ function BotListItem({
         e.dataTransfer.setData("text/mb-bot-id", bot.id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      // multibot: w szynie zostaje sam awatar, więc nazwa musi wrócić jako
-      // tooltip — inaczej bot bez własnego koloru jest nie do odróżnienia.
-      title={collapsed ? bot.name : undefined}
+      // multibot 0.1.49: hover card (styl Groka) zamiast natywnego tooltipa —
+      // w szynie nazwa wraca w kafelku, nie w title.
+      onMouseEnter={(e) => onHover?.(bot.id, e.currentTarget.getBoundingClientRect())}
+      onMouseLeave={() => onUnhover?.()}
       className={cn(
         "flex w-full items-center rounded-xl text-left",
         collapsed ? "relative justify-center px-0 py-1.5" : "gap-3 px-3 py-2.5",
@@ -357,11 +395,15 @@ function LocalGroupsSection({
   collapsed,
   createOpen,
   onCreateOpenChange,
+  onHover,
+  onUnhover,
 }: {
   onMenu: (menu: MenuState) => void;
   collapsed?: boolean;
   createOpen: boolean;
   onCreateOpenChange: (open: boolean) => void;
+  onHover: (botId: string, rect: DOMRect) => void;
+  onUnhover: () => void;
 }) {
   const { state } = useStore();
   const polish = useLanguage() === "pl";
@@ -501,7 +543,13 @@ function LocalGroupsSection({
               {open && (
                 <div className="ml-4 flex flex-col gap-0.5 border-l border-hairline/40 pl-1">
                   {members.map((b) => (
-                    <BotListItem key={`${group.id}-${b.id}`} bot={b} onMenu={onMenu} />
+                    <BotListItem
+                      key={`${group.id}-${b.id}`}
+                      bot={b}
+                      onMenu={onMenu}
+                      onHover={onHover}
+                      onUnhover={onUnhover}
+                    />
                   ))}
                 </div>
               )}
@@ -749,6 +797,22 @@ export function Sidebar() {
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
   // multibot 0.1.46: formularz grupy LOKALNEJ otwiera PPM w pustą część listy
   const [localCreateOpen, setLocalCreateOpen] = useState(false);
+  // multibot 0.1.49: kafelek hovera — timer 350 ms gasi migotanie przy
+  // przejeżdżaniu myszką przez listę; wyjazd z wiersza kasuje go natychmiast.
+  const [hover, setHover] = useState<HoverState | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showHoverCard = (botId: string, rect: DOMRect) => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    // clamp do viewportu: szerokość w-72 (288 px), wysokość ~120 px
+    const top = Math.max(8, Math.min(rect.top - 4, window.innerHeight - 128));
+    const left = Math.min(rect.right + 10, window.innerWidth - 296);
+    hoverTimer.current = setTimeout(() => setHover({ botId, top, left }), 350);
+  };
+  const hideHoverCard = () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+    setHover(null);
+  };
   // multibot: `matchMedia` zamiast nasłuchu `resize` — budzi się na przejściu
   // progu, nie na każdym pikselu ciągnięcia ramki okna.
   const [autoRail, setAutoRail] = useState(() => window.matchMedia(RAIL_QUERY).matches);
@@ -963,10 +1027,19 @@ export function Sidebar() {
           collapsed={collapsed}
           createOpen={localCreateOpen}
           onCreateOpenChange={setLocalCreateOpen}
+          onHover={showHoverCard}
+          onUnhover={hideHoverCard}
         />
         <div className="flex flex-col gap-0.5">
           {visibleBots.map((b) => (
-            <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />
+            <BotListItem
+              key={b.id}
+              bot={b}
+              onMenu={setMenu}
+              collapsed={collapsed}
+              onHover={showHoverCard}
+              onUnhover={hideHoverCard}
+            />
           ))}
         </div>
       </div>
@@ -1030,6 +1103,10 @@ export function Sidebar() {
 
       {menu && <BotContextMenu menu={menu} onClose={() => setMenu(null)} />}
       {groupMenu && <GroupContextMenu menu={groupMenu} onClose={() => setGroupMenu(null)} />}
+      {hover && (() => {
+        const bot = state.bots.find((b) => b.id === hover.botId);
+        return bot ? <BotHoverCard bot={bot} top={hover.top} left={hover.left} /> : null;
+      })()}
     </aside>
   );
 }
