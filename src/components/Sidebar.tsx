@@ -493,7 +493,7 @@ function LocalGroupsSection({
             <div
               key={group.id}
               data-local-group={group.id}
-              className={cn("mt-1 rounded-2xl p-1", isOver && "bg-raised/40 ring-1 ring-accent")}
+              className={cn("mt-1 rounded-2xl p-1", isOver && "ring-1 ring-accent")}
               onDragOver={(e) => {
                 const t = e.dataTransfer?.types ?? [];
                 if (!Array.from(t as unknown as string[]).some((x) => x === "text/mb-bot-id" || x === "text/plain")) return;
@@ -519,7 +519,7 @@ function LocalGroupsSection({
                 className={cn(
                   // multibot 0.1.46: pasek grupy — nazwa po lewej, kosz na hover
                   // i strzałka zwijania po prawej; zero profilowych. Cel dropu (cały kafel, nie tylko pasek).
-                  "group flex w-full items-center gap-2 rounded-full bg-raised/50 py-1.5 pl-3 pr-2 hover:bg-raised/70",
+                  "group flex w-full items-center gap-2 rounded-full py-1.5 pl-3 pr-2 hover:bg-raised/40",
                   isOver && "ring-1 ring-accent",
                 )}
               >
