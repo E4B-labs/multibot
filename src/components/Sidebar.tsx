@@ -411,9 +411,6 @@ function LocalGroupsSection({
   const polish = useLanguage() === "pl";
   const [groups, setGroups] = useState<LocalGroup[]>(() => loadLocalGroups());
   const [name, setName] = useState("");
-  // multibot 0.1.46: bot trzymany w locie — czyta go drop na pasku grupy
-  // (dopisanie/przeniesienie) i globalny drop POZA grupą (= wyjęcie).
-  const dragging = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   const persist = (next: LocalGroup[]) => {
@@ -434,7 +431,7 @@ function LocalGroupsSection({
 
   const remove = (id: string) => persist(groups.filter((g) => g.id !== id));
 
-  /** Drop bota na pasek grupy = przeniesienie tam (usuwa z pozostałych). */
+  /** Drop bota na grupę = przeniesienie tam (usuwa z pozostałych). */
   const addToGroup = (groupId: string, botId: string) =>
     persist(
       groups.map((g) => ({
@@ -447,15 +444,18 @@ function LocalGroupsSection({
     );
 
   useEffect(() => {
+    const hasBot = (e: DragEvent) => e.dataTransfer?.types.includes("text/mb-bot-id");
     const onOver = (e: DragEvent) => {
-      if (dragging.current) e.preventDefault(); // pozwól upuścić wszędzie
+      if (hasBot(e)) e.preventDefault();
     };
-    // Pasek grupy robi stopPropagation, więc tu wpada tylko drop poza grupą.
+    // Drop poza grupą = wyjęcie bota ze wszystkich lokalnych grup.
+    // Pasek/listy grupy robią stopPropagation, więc tu wpada tylko tło.
     const onDropDoc = (e: DragEvent) => {
-      const botId = dragging.current;
+      const botId = e.dataTransfer?.getData("text/mb-bot-id") ?? "";
       if (!botId) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-local-group]")) return;
       e.preventDefault();
-      dragging.current = null;
       setDragOverId(null);
       setGroups((cur) => {
         const next = cur.map((g) => ({ ...g, botIds: g.botIds.filter((id) => id !== botId) }));
@@ -463,10 +463,7 @@ function LocalGroupsSection({
         return next;
       });
     };
-    const onDragEnd = () => {
-      dragging.current = null;
-      setDragOverId(null);
-    };
+    const onDragEnd = () => setDragOverId(null);
     document.addEventListener("dragover", onOver);
     document.addEventListener("drop", onDropDoc);
     document.addEventListener("dragend", onDragEnd);
@@ -495,31 +492,39 @@ function LocalGroupsSection({
             .map((id) => state.bots.find((b) => b.id === id))
             .filter((b): b is Bot => Boolean(b));
           const open = !group.collapsed;
+          const isOver = dragOverId === group.id;
           return (
-            <div key={group.id} className="mt-1">
+            <div
+              key={group.id}
+              data-local-group={group.id}
+              className={cn("mt-1 rounded-2xl p-1", isOver && "bg-raised/40 ring-1 ring-accent")}
+              onDragOver={(e) => {
+                if (!e.dataTransfer?.types.includes("text/mb-bot-id")) return;
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+                setDragOverId(group.id);
+              }}
+              onDragLeave={(e) => {
+                const next = e.relatedTarget as HTMLElement | null;
+                if (next && (e.currentTarget as HTMLElement).contains(next)) return;
+                setDragOverId((cur) => (cur === group.id ? null : cur));
+              }}
+              onDrop={(e) => {
+                const botId = e.dataTransfer?.getData("text/mb-bot-id") ?? "";
+                if (!botId) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOverId(null);
+                addToGroup(group.id, botId);
+              }}
+            >
               <div
                 className={cn(
                   // multibot 0.1.46: pasek grupy — nazwa po lewej, kosz na hover
-                  // i strzałka zwijania po prawej; zero profilowych. Cel dropu.
+                  // i strzałka zwijania po prawej; zero profilowych. Cel dropu (cały kafel, nie tylko pasek).
                   "group flex w-full items-center gap-2 rounded-full bg-raised/50 py-1.5 pl-3 pr-2 hover:bg-raised/70",
-                  dragOverId === group.id && "ring-1 ring-accent",
+                  isOver && "ring-1 ring-accent",
                 )}
-                onDragOver={(e) => {
-                  if (!dragging.current) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "move";
-                  setDragOverId(group.id);
-                }}
-                onDragLeave={() => setDragOverId((cur) => (cur === group.id ? null : cur))}
-                onDrop={(e) => {
-                  const botId = e.dataTransfer.getData("text/mb-bot-id") || dragging.current;
-                  if (!botId) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  dragging.current = null;
-                  setDragOverId(null);
-                  addToGroup(group.id, botId);
-                }}
               >
                 <button
                   onClick={() => toggleCollapsed(group.id)}
@@ -543,16 +548,27 @@ function LocalGroupsSection({
                 </button>
               </div>
               {open && (
-                <div className="ml-4 flex flex-col gap-0.5 border-l border-hairline/40 pl-1">
-                  {members.map((b) => (
-                    <BotListItem
-                      key={`${group.id}-${b.id}`}
-                      bot={b}
-                      onMenu={onMenu}
-                      onHover={onHover}
-                      onUnhover={onUnhover}
-                    />
-                  ))}
+                <div className="ml-4 mt-1 flex flex-col gap-0.5 border-l border-hairline/40 pl-1">
+                  {members.length === 0 ? (
+                    <div className="py-2 text-center text-[12px] text-ink-secondary">
+                      {polish ? "Przeciągnij bota tutaj" : "Drag a bot here"}
+                    </div>
+                  ) : (
+                    members.map((b) => (
+                      <BotListItem
+                        key={`${group.id}-${b.id}`}
+                        bot={b}
+                        onMenu={onMenu}
+                        onHover={onHover}
+                        onUnhover={onUnhover}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+              {!open && isOver && (
+                <div className="mt-1 rounded-lg border border-dashed border-accent/40 bg-accent/5 py-2 text-center text-[12px] text-accent">
+                  {polish ? "Upuść, by dodać" : "Drop to add"}
                 </div>
               )}
             </div>
