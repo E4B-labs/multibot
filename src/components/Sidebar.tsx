@@ -1,5 +1,5 @@
 import { track } from "@/lib/analytics";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot as BotIcon,
   BellDot,
@@ -394,6 +394,8 @@ function saveLocalGroups(groups: LocalGroup[]) {
 
 
 function LocalGroupsSection({
+  groups,
+  setGroups,
   onMenu,
   collapsed,
   createOpen,
@@ -401,6 +403,8 @@ function LocalGroupsSection({
   onHover,
   onUnhover,
 }: {
+  groups: LocalGroup[];
+  setGroups: React.Dispatch<React.SetStateAction<LocalGroup[]>>;
   onMenu: (menu: MenuState) => void;
   collapsed?: boolean;
   createOpen: boolean;
@@ -410,39 +414,33 @@ function LocalGroupsSection({
 }) {
   const { state } = useStore();
   const polish = useLanguage() === "pl";
-  const [groups, setGroups] = useState<LocalGroup[]>(() => loadLocalGroups());
   const [name, setName] = useState("");
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-
-  const persist = (next: LocalGroup[]) => {
-    setGroups(next);
-    saveLocalGroups(next);
-  };
 
   // Formularz tworzy tylko nazwę — skład buduje się przeciąganiem botów.
   const create = () => {
     if (!name.trim()) return;
-    persist([...groups, { id: crypto.randomUUID(), name: name.trim(), botIds: [] }]);
+    setGroups((prev) => [...prev, { id: crypto.randomUUID(), name: name.trim(), botIds: [] }]);
     setName("");
     onCreateOpenChange(false);
   };
 
   const toggleCollapsed = (id: string) =>
-    persist(groups.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g)));
+    setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g)));
 
-  const remove = (id: string) => persist(groups.filter((g) => g.id !== id));
+  const remove = (id: string) => setGroups((prev) => prev.filter((g) => g.id !== id));
 
   /** Drop bota na grupę = przeniesienie tam (usuwa z pozostałych). */
-  const addToGroup = (groupId: string, botId: string) => {
-    const next = groups.map((g) => ({
-      ...g,
-      botIds:
-        g.id === groupId
-          ? [...g.botIds.filter((id) => id !== botId), botId]
-          : g.botIds.filter((id) => id !== botId),
-    }));
-    persist(next);
-  };
+  const addToGroup = (groupId: string, botId: string) =>
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        botIds:
+          g.id === groupId
+            ? [...g.botIds.filter((id) => id !== botId), botId]
+            : g.botIds.filter((id) => id !== botId),
+      })),
+    );
 
   useEffect(() => {
     const hasBot = (e: DragEvent) =>
@@ -459,11 +457,7 @@ function LocalGroupsSection({
       if (target.closest("[data-local-group]")) return;
       e.preventDefault();
       setDragOverId(null);
-      setGroups((cur) => {
-        const next = cur.map((g) => ({ ...g, botIds: g.botIds.filter((id) => id !== botId) }));
-        saveLocalGroups(next);
-        return next;
-      });
+      setGroups((cur) => cur.map((g) => ({ ...g, botIds: g.botIds.filter((id) => id !== botId) })));
     };
     const onDragEnd = () => setDragOverId(null);
     document.addEventListener("dragover", onOver);
@@ -886,6 +880,11 @@ export function Sidebar() {
     };
   }, [hasLocalBot]);
 
+  const [localGroups, setLocalGroups] = useState<LocalGroup[]>(() => loadLocalGroups());
+  useEffect(() => {
+    saveLocalGroups(localGroups);
+  }, [localGroups]);
+
   // multibot: otwarty bot zostaje NA SWOIM MIEJSCU w liście pod wyszukiwarką.
   // Wcześniej dostawał osobny wiersz nad paskiem wyszukiwania i wypadał z listy,
   // więc samo wybranie bota wyrzucało go ponad wyszukiwarkę, a lista pod spodem
@@ -896,8 +895,10 @@ export function Sidebar() {
   // nieprzeczytanego bota spychało go w dół — czyli dokładnie ten ruch, który
   // miał zniknąć. Sort w JS jest stabilny, więc poza przypiętymi kolejność
   // zostaje taka, jaka przyszła z serwera, i nie zmienia się przy klikaniu.
+  // multibot 0.1.54: bot w lokalnej grupie znika z listy głównej — tylko w grupie, nie dwa razy.
+  const localGroupBotIds = useMemo(() => new Set(localGroups.flatMap((g) => g.botIds)), [localGroups]);
   const visibleBots = state.bots
-    .filter((b) => !b.hidden)
+    .filter((b) => !b.hidden && !localGroupBotIds.has(b.id))
     .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
   // multibot: F9-FE — kandydaci do grup: cała flota, także ukryci. Kolejność
   // stabilna z listy botów; wybrany driver nie usuwa bota z grup.
@@ -1045,6 +1046,8 @@ export function Sidebar() {
           />
         )}
         <LocalGroupsSection
+          groups={localGroups}
+          setGroups={setLocalGroups}
           onMenu={setMenu}
           collapsed={collapsed}
           createOpen={localCreateOpen}
