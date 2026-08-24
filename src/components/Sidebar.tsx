@@ -238,6 +238,7 @@ function BotListItem({
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/mb-bot-id", bot.id);
+        e.dataTransfer.setData("text/plain", bot.id);
         e.dataTransfer.effectAllowed = "move";
       }}
       // multibot 0.1.49: hover card (styl Groka) zamiast natywnego tooltipa —
@@ -432,26 +433,27 @@ function LocalGroupsSection({
   const remove = (id: string) => persist(groups.filter((g) => g.id !== id));
 
   /** Drop bota na grupę = przeniesienie tam (usuwa z pozostałych). */
-  const addToGroup = (groupId: string, botId: string) =>
-    persist(
-      groups.map((g) => ({
-        ...g,
-        botIds:
-          g.id === groupId
-            ? [...g.botIds.filter((id) => id !== botId), botId]
-            : g.botIds.filter((id) => id !== botId),
-      })),
-    );
+  const addToGroup = (groupId: string, botId: string) => {
+    const next = groups.map((g) => ({
+      ...g,
+      botIds:
+        g.id === groupId
+          ? [...g.botIds.filter((id) => id !== botId), botId]
+          : g.botIds.filter((id) => id !== botId),
+    }));
+    persist(next);
+  };
 
   useEffect(() => {
-    const hasBot = (e: DragEvent) => e.dataTransfer?.types.includes("text/mb-bot-id");
+    const hasBot = (e: DragEvent) =>
+      !!e.dataTransfer && (e.dataTransfer.types.includes("text/mb-bot-id") || e.dataTransfer.types.includes("text/plain"));
     const onOver = (e: DragEvent) => {
       if (hasBot(e)) e.preventDefault();
     };
     // Drop poza grupą = wyjęcie bota ze wszystkich lokalnych grup.
     // Pasek/listy grupy robią stopPropagation, więc tu wpada tylko tło.
     const onDropDoc = (e: DragEvent) => {
-      const botId = e.dataTransfer?.getData("text/mb-bot-id") ?? "";
+      const botId = (e.dataTransfer?.getData("text/mb-bot-id") || e.dataTransfer?.getData("text/plain") || "").trim();
       if (!botId) return;
       const target = e.target as HTMLElement;
       if (target.closest("[data-local-group]")) return;
@@ -499,7 +501,8 @@ function LocalGroupsSection({
               data-local-group={group.id}
               className={cn("mt-1 rounded-2xl p-1", isOver && "bg-raised/40 ring-1 ring-accent")}
               onDragOver={(e) => {
-                if (!e.dataTransfer?.types.includes("text/mb-bot-id")) return;
+                const t = e.dataTransfer?.types ?? [];
+                if (!Array.from(t as unknown as string[]).some((x) => x === "text/mb-bot-id" || x === "text/plain")) return;
                 e.preventDefault();
                 if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
                 setDragOverId(group.id);
@@ -510,7 +513,7 @@ function LocalGroupsSection({
                 setDragOverId((cur) => (cur === group.id ? null : cur));
               }}
               onDrop={(e) => {
-                const botId = e.dataTransfer?.getData("text/mb-bot-id") ?? "";
+                const botId = (e.dataTransfer?.getData("text/mb-bot-id") || e.dataTransfer?.getData("text/plain") || "").trim();
                 if (!botId) return;
                 e.preventDefault();
                 e.stopPropagation();
@@ -718,7 +721,8 @@ function GroupsSection({
           onDragLeave={() => setDragOverId((cur) => (cur === g.id ? null : cur))}
           onDrop={(e) => {
             e.preventDefault();
-            void dropBot(g.id, e.dataTransfer.getData("text/mb-bot-id"));
+            const bid = (e.dataTransfer.getData("text/mb-bot-id") || e.dataTransfer.getData("text/plain") || "").trim();
+            if (bid) void dropBot(g.id, bid);
           }}
           // multibot: w szynie zostają same awatary składu, więc nazwa grupy
           // musi wrócić jako tooltip.
