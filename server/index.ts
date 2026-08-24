@@ -202,6 +202,14 @@ function roomThreadId(roomId: string, botId: string): string {
   return `room-${roomId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}-${botId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}`;
 }
 
+/** Isolated thread for a one-shot delegated peer turn ("[Delegation from @X]",
+ * no room view): the envelope and everything the peer does in that turn stay
+ * off the peer's main chat. Stable per caller→peer pair, like groupThreadId
+ * is per group, so the peer keeps one session for delegated work. */
+function delegationThreadId(callerBotId: string, peerBotId: string): string {
+  return `delegation-${callerBotId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}-${peerBotId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}`;
+}
+
 function askBotAndWait(
   targetBotId: string,
   message: string,
@@ -260,6 +268,29 @@ function askBotAndWait(
       finish(`(couldn't start that bot: ${err instanceof Error ? err.message : String(err)})`),
     );
   });
+}
+
+/** Delegated peer turn ("[Delegation from @X]", no room view) on an ISOLATED
+ * thread: the envelope and everything the peer does stay off its main chat —
+ * only the returned text reaches the caller, exactly like before. */
+async function delegatedPeerTurn(callerId: string, peerId: string, message: string, depth: number): Promise<string> {
+  const peer = store.bot(peerId);
+  if (!peer) return "(no such bot)";
+  // busy refusal keeps the old reply semantics: a non-isolated turn used to
+  // die on startTurn's busy guard and fold this exact note back to the caller
+  if (peer.busy) return "(couldn't start that bot: the bot is already working — interrupt it first)";
+  // multibot (F9): izolowana nitka omija gałąź !isolated w startTurn, która
+  // normalnie stawia znacznik głębokości — bez niego bot silnika (deklarujący
+  // 0 na zawsze) mógłby po delegacji wywołać kolejnego bota i wydłużyć łańcuch.
+  activeCommsDepth.set(peerId, depth + 1);
+  try {
+    return await askBotAndWait(peerId, `[Delegation from @${store.bot(callerId)?.name ?? callerId}] ${message}`, depth, {
+      threadId: delegationThreadId(callerId, peerId),
+    });
+  } finally {
+    // sprzątamy tylko własny wpis — równoległa tura mogła postawić głębszy
+    if ((activeCommsDepth.get(peerId) ?? 0) <= depth + 1) activeCommsDepth.delete(peerId);
+  }
 }
 
 // multibot: pokoje i cele mają różną tolerancję na zajętego bota. Cel (runGoal)
@@ -1477,7 +1508,10 @@ opts?: {
         const replies = await Promise.all(
           tagged.map(async (peer) => ({
             peer,
-            reply: await askBotAndWait(peer.id, `[Delegation from @${bot.name}] ${text}`, commsDepth),
+            // multibot: tura peera idzie na izolowaną nitkę (delegacja nie
+            // tworzy pokoju), więc koperta ani praca peera nie trafiają na
+            // jego główny kanał; odpowiedź wraca jak dotąd
+            reply: await delegatedPeerTurn(bot.id, peer.id, text, commsDepth),
           })),
         );
         taggedReplies = replies
@@ -2168,6 +2202,13 @@ const server = createServer(async (req, res) => {
         // to JEDNA rosnąca wiadomość, nie dymek na każdy spłuk bufora.
         let liveMsgId: string | null = null;
         const reply = await askBotAndWait(toBotId, prefixed, depth, {
+          // multibot: tura odbiorcy idzie na izolowaną nitkę POKOJU (jak tura
+          // uczestnika w runCollab) — ani koperta, ani odpowiedź, ani pigułki
+          // aktywności nie trafiają na jego główny kanał czatu; cała wymiana
+          // jest widoczna wyłącznie tutaj, w transkrypcie pokoju (rooms.append
+          // + onText poniżej). Kontekst rozmowy odbiorcy zostaje: startTurn
+          // bez `transcript` bierze ostatnie wpisy z głównej nitki bota.
+          threadId: roomThreadId(room.id, toBotId),
           // multibot: pytany bot może mieć komputer i pracować dłużej niż
           // dawne 4 minuty — sufit tury pokoju, jak w runCollab.
           timeoutMs: 20 * 60_000,

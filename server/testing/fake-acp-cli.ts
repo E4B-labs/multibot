@@ -11,10 +11,12 @@
 //                     peer, and reply with what the peer said — the comms e2e)
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
 //                   argv shape (agent/stdio flags) and env hygiene
+//   FAKE_ACP_PROMPT_DUMP  path to append every received session/prompt as a
+//                   JSON line — lets tests pin what text actually reached the CLI
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
 const argv = process.argv.slice(2);
@@ -143,6 +145,11 @@ function handle(msg: any) {
       result(msg.id, {});
       break;
     case "session/prompt": {
+      // multibot: dowód dla testów, CO fake dostało w prompcie — drivery CLI
+      // nie czytają pola `transcript`, więc prompt to jedyny kanał treści.
+      if (process.env.FAKE_ACP_PROMPT_DUMP) {
+        appendFileSync(process.env.FAKE_ACP_PROMPT_DUMP, `${JSON.stringify({ mode, prompt: msg.params?.prompt ?? null })}\n`);
+      }
       const complete = () =>
         result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } });
       if (mode === "hang") {

@@ -129,6 +129,10 @@ describe("comms e2e (fake ACP fleet)", () => {
       // every throwaway test bot.
       MULTIBOT_COMPUTER: "off",
         FAKE_CODEX_DUMP: join(home, "codex-dump.json"),
+        // multibot: każdy prompt, jaki fake ACP dostało, ląduje w tym pliku —
+        // jedyna droga, by w teście przypiąć treść WEJŚCIA tury bota (drivery
+        // CLI nie czytają pola `transcript`)
+        FAKE_ACP_PROMPT_DUMP: join(home, "acp-prompts.ndjson"),
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -221,11 +225,17 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(chip).toBeTruthy();
       expect(chip.room.ownerBotId).toBe(asker.id);
 
-      // B's thread received the attributed message and ran a real turn
+      // multibot: koperta JAKO WEJŚCIE tury B jest przypięta przez zrzut promptów
+      // fake CLI — to, co bot dostaje, nie zależy od tego, co widać w UI.
+      const prompts = readFileSync(join(home, "acp-prompts.ndjson"), "utf8");
+      expect(prompts).toContain("[Message from @Asker");
+      expect(prompts).toContain("ping from fake");
+
+      // B ran a real turn, but its own chat stays EMPTY for the exchange:
+      // the whole conversation lives in the room (regression guard below).
       const helperBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === helper.id);
-      const inbound = helperBot.messages.find((m: any) => m.role === "user" && m.kind === "text");
-      expect(inbound.text).toContain("[Message from @Asker");
-      expect(inbound.text).toContain("ping from fake");
+      expect(helperBot.messages.some((m: any) => m.role === "user")).toBe(false);
+      expect(helperBot.messages.some((m: any) => m.kind === "text" && m.text?.includes("hello from fake acp"))).toBe(false);
       expect(helperBot.busy).toBeFalsy();
     },
     40_000,
@@ -251,6 +261,62 @@ describe("comms e2e (fake ACP fleet)", () => {
     const room = rooms.find((r: any) => r.ownerBotId === askerId);
     expect(room?.status).toBe("done");
   });
+
+  // multibot: wymiana bot→bot nie może zostawić ŻADNEGO śladu na głównym
+  // kanacie adresata — żadnej koperty "[Message from @…]", żadnej odpowiedzi,
+  // żadnej pigułki aktywności. Całość widoczna wyłącznie w pokoju współpracy.
+  it(
+    "keeps a bot-to-bot exchange entirely off the target's main chat",
+    async () => {
+      const selection = { instanceId: "grok", model: "fake-model" };
+      const helper = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${helper.id}`, { name: "Quiet Helper", modelSelection: selection });
+      const asker = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${asker.id}`, { name: "Quiet Asker", modelSelection: selection });
+
+      // licznik STARTOWY po rename'ach — każdy PATCH dokleja pigułkę "renamed"
+      const countHelperMessages = async () =>
+        (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === helper.id).messages.length;
+      const before = await countHelperMessages();
+
+      expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Quiet Helper ping once more" })).status).toBe(202);
+
+      // ten sam tor co w pierwszym e2e: A pyta przez proxy agents, B odpowiada
+      const deadline = Date.now() + 25_000;
+      for (;;) {
+        const askerBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
+        const settled =
+          askerBot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.includes("peer says:")) &&
+          !askerBot.busy;
+        if (settled) break;
+        if (Date.now() > deadline) {
+          throw new Error(
+            `second exchange never settled. messages: ${JSON.stringify(askerBot.messages.slice(-4))}\nstderr: ${stderr.slice(-2000)}`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      // NIEPODWAŻALNE: główna nitka adresata zyskała ZERO wpisów
+      expect(await countHelperMessages()).toBe(before);
+
+      // ...a transkrypt pokoju ma obie strony wymiany, w kolejności
+      const room = (await api("GET", "/api/rooms")).body.rooms.find((r: any) => r.ownerBotId === asker.id);
+      expect(room).toBeTruthy();
+      expect(room.status).toBe("done");
+      expect(room.transcript).toHaveLength(2);
+      // fake ACP pyta peera hardcoded "ping from fake" — to on ląduje w pokoju
+      // jako strona wołającego, nie tekst użytkownika do A
+      expect(room.transcript[0]).toMatchObject({ from: asker.id, text: "ping from fake" });
+      expect(room.transcript[1]).toMatchObject({ from: helper.id, text: "hello from fake acp" });
+
+      // koperta dalej jest WEJŚCIEM tury adresata (zrzut promptów fake CLI)
+      const prompts = readFileSync(join(home, "acp-prompts.ndjson"), "utf8");
+      expect(prompts).toContain("[Message from @Quiet Asker");
+      expect(prompts).toContain("ping from fake");
+    },
+    40_000,
+  );
 
   // Regresja: `ask_user` niósł wyłącznie broker uprawnień claude'a, który
   // montuje się tylko przy włączonych zgodach i tylko u tego jednego drivera.
