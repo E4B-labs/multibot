@@ -266,7 +266,7 @@ function askBotAndWait(
       () => {
         // timeout -> anuluj provider turn i zwolnij busy
         const instId = store.bot(targetBotId)?.modelSelection.instanceId;
-        if (instId) void registry.get(instId)?.adapter.cancelTurn?.(threadId).catch(() => {});
+        if (instId) void registry.get(instId)?.adapter.interruptTurn(threadId as any).catch(() => {});
         // force clear busy jesli provider nie wyslal turn.completed
         const b = store.bot(targetBotId);
         if (b?.busy) {
