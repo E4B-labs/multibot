@@ -167,6 +167,8 @@ const activeComputerLeases = new Map<string, string>();
 // multibot (U1): prywatny Store nie zna izolowanych wątków grupy, ale ich
 // zużycie nadal należy do konkretnego bota.
 const isolatedTurnBots = new Map<string, string>();
+// watchdog: busy stuck >70s -> auto clear (provider zawiesił się, brak turn.completed)
+const busyWatchdog = new Map<string, ReturnType<typeof setTimeout>>();
 // proxy entry: .ts in dev (node type-strips), .js in the packaged dist-server
 const agentsProxyPath = (() => {
   const ts = join(dirname(fileURLToPath(import.meta.url)), "drivers", "agents-proxy.ts");
@@ -261,7 +263,20 @@ function askBotAndWait(
     // grupy trzymają odpowiedź HTTP przez czas wszystkich botów sekwencyjnie,
     // więc dziedziczenie długiego sufitu po cichu wieszałoby czat.
     const timer = setTimeout(
-      () => finish(text || "(timed out waiting for the bot to reply)"),
+      () => {
+        // timeout -> anuluj provider turn i zwolnij busy
+        const instId = store.bot(targetBotId)?.modelSelection.instanceId;
+        if (instId) void registry.get(instId)?.adapter.cancelTurn?.(threadId).catch(() => {});
+        // force clear busy jesli provider nie wyslal turn.completed
+        const b = store.bot(targetBotId);
+        if (b?.busy) {
+          store.patchBot(targetBotId, { busy: false });
+          if (busyWatchdog.has(targetBotId)) { clearTimeout(busyWatchdog.get(targetBotId)!); busyWatchdog.delete(targetBotId); }
+          activeCommsDepth.delete(targetBotId);
+          broadcast({ kind: "bot", bot: store.bot(targetBotId) });
+        }
+        finish(text || "(timed out waiting for the bot to reply)");
+      },
       options?.timeoutMs ?? 60_000,
     );
     startTurn(targetBotId, message, { commsDepth: depth + 1, ...options, origin: "bot" }).catch((err) =>
@@ -847,6 +862,13 @@ bus.subscribe((event: RuntimeEvent) => {
     case "runtime.error":
       pushMessage({ role: "bot", kind: "activity", tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false } });
       endTurnPush(bot.id, "failed", event.message.slice(0, 120));
+      // watchdog: provider padl bez turn.completed -> zwolnij busy
+      if (bot) {
+        store.patchBot(bot.id, { busy: false });
+        if (busyWatchdog.has(bot.id)) { clearTimeout(busyWatchdog.get(bot.id)!); busyWatchdog.delete(bot.id); }
+        activeCommsDepth.delete(bot.id);
+        broadcast({ kind: "bot", bot: store.bot(bot.id) });
+      }
       break;
     case "turn.completed": {
       // the last live frame becomes a settled inline screen message —
@@ -854,6 +876,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const frame = stopScreenPoller(bot.id);
       if (frame) pushMessage({ role: "bot", kind: "screen", png: frame.png, mime: frame.mime });
       store.patchBot(bot.id, { busy: false, unread: true });
+      if (busyWatchdog.has(bot.id)) { clearTimeout(busyWatchdog.get(bot.id)!); busyWatchdog.delete(bot.id); }
       const lastReply = store.messagesFor(bot.threadId).filter((m) => m.role === "bot" && m.kind === "text" && m.text).at(-1)?.text ?? "";
       endTurnPush(bot.id, "finished", lastReply.slice(0, 120) || t("skończył pracę", "finished working"));
       clearTurnPolicy(bot.threadId);
@@ -1432,6 +1455,20 @@ opts?: {
     if (origin === "routine") scheduleStartedPush(bot.id, `rutyna ${opts?.routineName ?? ""} wystartowała`);
     else if (origin === "user") scheduleStartedPush(bot.id, `zaczyna pracę: ${text.slice(0, 80)}`);
     broadcast({ kind: "bot", bot: store.bot(bot.id) });
+    // watchdog 70s - jesli brak turn.completed (provider zawiesil sie) zwolnij busy
+    if (busyWatchdog.has(bot.id)) clearTimeout(busyWatchdog.get(bot.id)!);
+    const wd = setTimeout(() => {
+      const b = store.bot(bot.id);
+      if (b?.busy) {
+        console.warn(`[multibot] watchdog: ${bot.id} busy 70s no completed, force clear`);
+        store.patchBot(bot.id, { busy: false });
+        activeCommsDepth.delete(bot.id);
+        busyWatchdog.delete(bot.id);
+        broadcast({ kind: "bot", bot: store.bot(bot.id) });
+      }
+    }, 70_000);
+    wd.unref?.();
+    busyWatchdog.set(bot.id, wd);
   }
 
   void (async () => {
@@ -3486,6 +3523,13 @@ async function reconcileComputers(): Promise<void> {
   await resumeComputer().catch(() => false);
 }
 
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`[multibot] port ${PORT} busy (EADDRINUSE) - another server on ${HOST}:${PORT} already running, refusing second instance`);
+    process.exit(1);
+  }
+  throw err;
+});
 server.listen(PORT, HOST, () => {
   console.log(`multibot server on http://${HOST}:${PORT}`);
   if (access.created) console.log(`[multibot] access token (shown once): ${access.token}`);
