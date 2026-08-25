@@ -33,6 +33,10 @@ contextBridge.exposeInMainWorld("ogb", {
   addRemoteHost: (url) =>
     ipcRenderer.invoke("hosts:add-remote", { url }).then((host) => ipcRenderer.invoke("hosts:use-host", host.id)),
 
+  /** Unread-conversation count for the taskbar badge (Windows overlay icon,
+   * macOS/Linux dock badge). Fire-and-forget; dormant in plain browsers. */
+  setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
+
   /** In-app auto-update. State object:
    *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",
    *    version?, percent?, message? }. onState fires immediately with the

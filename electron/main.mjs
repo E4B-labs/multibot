@@ -1,14 +1,19 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, Menu, nativeImage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
 import { addRemoteHost, getActiveId, listRemoteHosts, removeHost, resolveLoadTarget, setActiveHost } from "./hosts.mjs";
 import { isLocalSender } from "./local-origin.mjs";
+import { activateExistingWindow } from "./single-instance.mjs";
 import { startRemoteUiServer } from "./remote-ui.mjs";
 import { startSpeech, stopSpeech } from "./speech.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
+
+const require = createRequire(import.meta.url);
+const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // multibot (G6): Task Scheduler starts packaged app without a window. Electron
@@ -19,6 +24,17 @@ const SERVER_ONLY = process.argv.includes("--server-only");
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+
+// multibot: one desktop app per user session. The headless --server-only
+// Task Scheduler instance must NOT take the lock — it has no window, so a
+// second launch absorbed into it would just die and the UI would never open.
+if (!SERVER_ONLY && !app.requestSingleInstanceLock()) {
+  console.log("[desktop] MultiBot is already running — focusing that window");
+  process.exit(0);
+}
+app.on("second-instance", () => {
+  activateExistingWindow([mainWindow]);
+});
 
 // Packaged: the harness server ships in Resources (compiled JS, zero deps)
 // and runs on Electron's own Node via utilityProcess. It serves the built
@@ -38,6 +54,80 @@ let pickerWindow = null;
 // przy pierwszym starcie. Ten sam układ katalogów zna server/engine/supervisor.ts.
 const ENGINE_RUNTIME = path.join(app.getPath("userData"), "engine-runtime");
 const ENGINE_DATA = path.join(app.getPath("userData"), "engine-data");
+
+// multibot: zapamiętana geometria okna głównego — <userData>/window-state.json,
+// atomiczny zapis (tmp+rename), debounce 250 ms na resize/move, flush przy zamknięciu.
+function windowStateFile() {
+  return path.join(app.getPath("userData"), "window-state.json");
+}
+
+function savedWindowState() {
+  try {
+    return parseWindowState(fs.readFileSync(windowStateFile(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+// workAreas muszą mieć primary pierwszym — resolveWindowState() centruje tam
+// okna uratowane po zmianie monitora/DPI.
+function workAreasPrimaryFirst() {
+  const primary = screen.getPrimaryDisplay();
+  const displays = [...screen.getAllDisplays()].sort((a) => (a.id === primary.id ? -1 : 0));
+  return displays.map((d) => d.workArea);
+}
+
+let saveStateTimer = null;
+function scheduleWindowSave(win) {
+  if (saveStateTimer) clearTimeout(saveStateTimer);
+  saveStateTimer = setTimeout(() => {
+    saveStateTimer = null;
+    try {
+      const state = { bounds: win.getNormalBounds(), maximized: win.isMaximized() };
+      const file = windowStateFile();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
+      fs.renameSync(tmp, file);
+    } catch {
+      /* geometry saving is best-effort */
+    }
+  }, 250);
+}
+
+function trackWindowForState(win) {
+  const events = ["resize", "move", "maximize", "unmaximize"];
+  for (const ev of events) win.on(ev, () => scheduleWindowSave(win));
+  win.on("close", () => {
+    if (saveStateTimer) {
+      clearTimeout(saveStateTimer);
+      saveStateTimer = null;
+      try {
+        const state = { bounds: win.getNormalBounds(), maximized: win.isMaximized() };
+        fs.writeFileSync(windowStateFile(), JSON.stringify(state), { mode: 0o600 });
+      } catch {}
+    }
+  });
+}
+
+// multibot: nieprzeczytane rozmowy na pasku zadań (Windows overlay icon,
+// macOS/Linux dock badge). Liczbę przelicza renderer i tu ją wysyła.
+let unreadOverlayIcon = null;
+ipcMain.on("desktop:unread-count", (_event, rawCount) => {
+  const count = normalizeUnreadCount(rawCount);
+  if (process.platform === "darwin") {
+    app.setBadgeCount(count === 999 ? 999 : count);
+  } else if (process.platform === "linux") {
+    app.setBadgeCount(count);
+  } else if (process.platform === "win32" && mainWindow) {
+    if (!count) {
+      mainWindow.setOverlayIcon(null, "");
+      return;
+    }
+    unreadOverlayIcon ??= nativeImage.createFromPath(APP_ICON).resize({ width: 16, height: 16 });
+    mainWindow.setOverlayIcon(unreadOverlayIcon, `${count} unread conversations`);
+  }
+});
 
 function localAccessTokenFragment() {
   try {
@@ -215,9 +305,10 @@ async function loadActiveTarget(win) {
 }
 
 function createWindow() {
+  const saved = savedWindowState();
+  const restored = resolveWindowState(saved, workAreasPrimaryFirst());
   const win = new BrowserWindow({
-    width: 1440,
-    height: 920,
+    ...restored.bounds,
     minWidth: 900,
     minHeight: 600,
     icon: APP_ICON,
@@ -232,6 +323,47 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
     },
+  });
+  if (restored.maximized) win.maximize();
+  trackWindowForState(win);
+
+  // multibot: natywne menu kontekstowe — edycja w polach tekstowych,
+  // sugestie spellchecka i kopiowanie linków. Bez actionable pozycji nie
+  // wyskakuje wcale (czysty klik prawym na tle ma być cichy).
+  win.webContents.on("context-menu", (_event, params) => {
+    if (!params.isEditable && !params.linkURL && !params.misspelledWord && !params.selectionText) return;
+    const items = [];
+    if (params.misspelledWord) {
+      for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
+        items.push({ label: suggestion, click: () => win.webContents.replaceMisspelling(suggestion) });
+      }
+      items.push(
+        { type: "separator" },
+        {
+          label: "Add to dictionary",
+          click: () => win.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+        },
+        { type: "separator" },
+      );
+    }
+    if (params.linkURL) {
+      items.push({ label: "Copy Link", click: () => clipboard.writeText(params.linkURL) }, { type: "separator" });
+    }
+    const flags = params.editFlags;
+    for (const [label, role, can] of [
+      ["Undo", "undo", flags.canUndo],
+      ["Redo", "redo", flags.canRedo],
+      ["Cut", "cut", flags.canCut],
+      ["Copy", "copy", flags.canCopy],
+      ["Paste", "paste", flags.canPaste],
+      ["Paste and Match Style", "pasteAndMatchStyle", flags.canPaste],
+      ["Select All", "selectAll", flags.canSelectAll],
+    ]) {
+      if (can) items.push({ label, role });
+    }
+    if (items.length > 0 && items[items.length - 1]?.type === "separator") items.pop();
+    if (items.length === 0) return;
+    Menu.buildFromTemplate(items).popup({ window: win, frame: params.frame });
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {

@@ -27,6 +27,7 @@ import { authEventName, authFetch, clearAuthToken, getAuthToken, setAuthToken } 
 // multibot (A1): logowanie Google — pola konfiguracji i cała droga do sesji
 import { fetchAuthStatus, renderGoogleButton, type GoogleLoginConfig } from "@/lib/googleLogin";
 import { useLanguage } from "@/lib/language";
+import { unreadConversationCount } from "@/lib/unread";
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const language = useLanguage();
@@ -147,6 +148,10 @@ function Shell() {
     const rn = (window as unknown as { ReactNativeWebView?: { postMessage(m: string): void } }).ReactNativeWebView;
     if (rn && bot) rn.postMessage(JSON.stringify({ type: "bot.selected", botId: bot.id }));
   }, [bot?.id]);
+  // multibot: nieprzeczytane rozmowy → badge na pasku zadań (Electron only).
+  useEffect(() => {
+    window.ogb?.setUnreadCount?.(unreadConversationCount(state.bots));
+  }, [state.bots]);
   return (
     <div className="multibot-shell flex h-full flex-col">
       {/* fixed-position popup, bottom-left — outside the layout flow */}

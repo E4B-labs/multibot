@@ -7,7 +7,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   test: {
     environment: "node",
-    include: ["server/**/*.test.ts", "src/**/*.test.ts"],
+    // multibot: electron/ ma własne testy node:test (remote-ui, updater) —
+    // do vitest wchodzą tylko nowe moduły desktopowe pisane pod ten runner
+    include: ["server/**/*.test.ts", "src/**/*.test.ts", "electron/single-instance.test.mjs", "electron/window-state.test.mjs"],
     setupFiles: ["server/testing/setup.ts"],
     // the suite spawns fake provider CLIs and a real harness server;
     // parallel files introduce load-sensitive flakes for no win

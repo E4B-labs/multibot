@@ -27,6 +27,9 @@ declare global {
        * "connect"). Optional — older shells don't expose it, so callers must
        * feature-detect and fall back to a plain navigation. */
       addRemoteHost?(url: string): Promise<void>;
+      /** Unread-conversation count for the taskbar badge. Fire-and-forget;
+       * absent in plain browsers, so callers must feature-detect. */
+      setUnreadCount?(count: number): void;
       /** In-app auto-update (packaged app only; dormant in dev). onState
        * fires immediately with the current state, then on transitions. */
       updater?: {
