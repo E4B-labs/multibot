@@ -214,7 +214,7 @@ function askBotAndWait(
   targetBotId: string,
   message: string,
   depth: number,
-  options?: { threadId?: string; transcript?: Array<{ role: "user" | "assistant"; text: string }>; timeoutMs?: number; onText?: (text: string) => void },
+  options?: { threadId?: string; transcript?: Array<{ role: "user" | "assistant"; text: string }>; timeoutMs?: number; onText?: (text: string) => void; reasoning?: string },
 ): Promise<string> {
   const target = store.bot(targetBotId);
   if (!target) return Promise.resolve("(no such bot)");
@@ -420,9 +420,9 @@ async function runCollab(roomId: string): Promise<void> {
       const reply = await askBotAndWait(botId, prompt, 1, {
         threadId: roomThreadId(roomId, botId),
         transcript: live.transcript.map((m) => ({ role: "assistant" as const, text: m.text })),
-        // multibot 0.1.59: odpowiedź 1 bota na 1 pytanie ma max 60s (cel <15s)
-        // dawniej 20min zwracało "(timed out)" dopiero po 20min - stad "atlas nie odpowiedzial w rozsadnym czasie"
+        // multibot 0.1.63: 60s max, target <15s - low reasoning dla pokoju 5 tur
         timeoutMs: 60_000,
+        reasoning: "low",
         onText: (t0) => {
           const liveRoom = rooms.get(roomId);
           if (!liveRoom || liveRoom.status !== "running") return;
