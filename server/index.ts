@@ -214,7 +214,7 @@ function askBotAndWait(
   targetBotId: string,
   message: string,
   depth: number,
-  options?: { threadId?: string; transcript?: Array<{ role: "user" | "assistant"; text: string }>; timeoutMs?: number; onText?: (text: string) => void; reasoning?: string },
+  options?: { threadId?: string; transcript?: Array<{ role: "user" | "assistant"; text: string }>; timeoutMs?: number; onText?: (text: string) => void; reasoning?: any },
 ): Promise<string> {
   const target = store.bot(targetBotId);
   if (!target) return Promise.resolve("(no such bot)");
