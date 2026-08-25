@@ -262,7 +262,7 @@ function askBotAndWait(
     // więc dziedziczenie długiego sufitu po cichu wieszałoby czat.
     const timer = setTimeout(
       () => finish(text || "(timed out waiting for the bot to reply)"),
-      options?.timeoutMs ?? 4 * 60_000,
+      options?.timeoutMs ?? 60_000,
     );
     startTurn(targetBotId, message, { commsDepth: depth + 1, ...options, origin: "bot" }).catch((err) =>
       finish(`(couldn't start that bot: ${err instanceof Error ? err.message : String(err)})`),
@@ -286,6 +286,7 @@ async function delegatedPeerTurn(callerId: string, peerId: string, message: stri
   try {
     return await askBotAndWait(peerId, `[Delegation from @${store.bot(callerId)?.name ?? callerId}] ${message}`, depth, {
       threadId: delegationThreadId(callerId, peerId),
+      timeoutMs: 60_000,
     });
   } finally {
     // sprzątamy tylko własny wpis — równoległa tura mogła postawić głębszy
@@ -294,13 +295,13 @@ async function delegatedPeerTurn(callerId: string, peerId: string, message: stri
 }
 
 // multibot: pokoje i cele mają różną tolerancję na zajętego bota. Cel (runGoal)
-// czeka 2 minuty — najzwyklejszy przypadek to użytkownik, który dopisał zwykłą
+// czeka 60s (24*2.5s) — najzwyklejszy przypadek to użytkownik, który dopisał zwykłą
 // wiadomość w trakcie celu, i nie chcemy trzymać pętli na martwym bocie.
-// Pokój czeka 15 minut: uczestnik z komputerem potrafi robić cudzą turę całe
-// kwadranse i nie można za to zabijać pracy pozostałych.
-const IDLE_WAIT_MS = 5_000;
-const IDLE_ROUNDS_LIMIT = 24;
-const ROOM_IDLE_ROUNDS_LIMIT = 180;
+// Pokój czeka 60s (30*2s): odpowiedź jednego bota na pytanie drugiego ma max 60s,
+// cel <15s typowo — stąd 20*60s -> 60s timeout w runCollab.
+const IDLE_WAIT_MS = 2_000;
+const IDLE_ROUNDS_LIMIT = 30;
+const ROOM_IDLE_ROUNDS_LIMIT = 30;
 
 /** Clickable "X texted Y" pill on the owner's thread pointing at the room. */
 function postRoomChip(ownerBotId: string, room: RoomRecord) {
@@ -419,9 +420,9 @@ async function runCollab(roomId: string): Promise<void> {
       const reply = await askBotAndWait(botId, prompt, 1, {
         threadId: roomThreadId(roomId, botId),
         transcript: live.transcript.map((m) => ({ role: "assistant" as const, text: m.text })),
-        // multibot: tura pokoju może być długą pracą z komputerem — 4 minuty
-        // zwracały "(timed out…)" w trakcie rzeczywistej pracy bota.
-        timeoutMs: 20 * 60_000,
+        // multibot 0.1.59: odpowiedź 1 bota na 1 pytanie ma max 60s (cel <15s)
+        // dawniej 20min zwracało "(timed out)" dopiero po 20min - stad "atlas nie odpowiedzial w rozsadnym czasie"
+        timeoutMs: 60_000,
         onText: (t0) => {
           const liveRoom = rooms.get(roomId);
           if (!liveRoom || liveRoom.status !== "running") return;
