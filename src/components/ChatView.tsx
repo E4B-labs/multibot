@@ -133,6 +133,9 @@ function Bubble({ botId, message }: { botId: string; message: Message }) {
             <SpeakButton text={text} />
           </>
         )}
+        <div className={cn("mt-1.5 text-[11px] leading-none", user ? "text-right text-ink/55" : "text-left text-ink-secondary/60")}>
+          {formatTime(message.at)}
+        </div>
       </div>
     </div>
   );

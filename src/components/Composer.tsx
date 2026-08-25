@@ -752,15 +752,15 @@ setText("");
           </div>
         )}
         {/* multibot: scena „boty rozmawiają między sobą" — w przepływie tuż nad
-            wierszem pisania, więc dymki niczego nie zakrywają; pusty slot 60px
+            wierszem pisania, więc dymki niczego nie zakrywają; pusty slot 40px
             po lewej trafia dokładnie tam, gdzie unosi się awatar gospodarza.
-            Gdy scena gra, jej rząd awatara ZASTĘPUJE pas md:mt-[68px] — inaczej
-            margines wsunąłby 68px przerwy i partner nie stałby na równi. */}
+            Gdy scena gra, jej rząd awatara ZASTĘPUJE pas md:mt-[48px] — inaczej
+            margines wsunąłby 48px przerwy i partner nie stałby na równi. */}
         {peerChat && <PeerChatIndicator bot={bot} view={peerChat} />}
-        <div className={cn("relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5", !peerChat && "md:mt-[68px]")}>
-        {/* Desktop agent avatar: 60 px, no frame, anchored above Attach. */}
-        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[60px] items-center justify-center md:flex" title={bot.name}>
-          <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={60} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
+        <div className={cn("relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5", !peerChat && "md:mt-[48px]")}>
+        {/* Desktop agent avatar: 40 px (zmniejszone z 60 per 0.1.58), no frame, anchored above Attach. */}
+        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={bot.name}>
+          <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={40} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
         </div>
         <button
           type="button"
