@@ -155,7 +155,7 @@ const MAX_COMMS_DEPTH = 1;
 /** "Room only for task": a user @mention opens a collaboration room only when
  * the message also carries task language; bare mentions stay one-shot folds. */
 const TASK_HINTS =
-  /(razem|zadanie|zadania|współprac|wspolprac|collab|collaborat|\btogether\b|\btask\b|delegat|napisz do|napiszesz do|napisać do|napisac do|zrób|zrob|zróbcie|zrobcie|wykonaj|przygotuj|przygotować|przygotowac|opracuj|pomóż|pomoz|pomoc|pracujcie|wspólnie|wspolnie)/i;
+  /(razem|zadanie|zadania|współprac|wspolprac|collab|collaborat|\btogether\b|\btask\b|delegat|napisz do|napiszesz do|napisać do|napisac do|zrób|zrob|zróbcie|zrobcie|wykonaj|przygotuj|przygotować|przygotowac|opracuj|pomóż|pomoz|pomoc|pracujcie|wspólnie|wspolnie|pogadaj|pogadajcie|porozmawiaj|porozmawiajcie|przeprowadź|przeprowadz|przeprowadzcie|rozmow|dyskusj|konwersac|\btur\b|\bturach\b|\bturę\b|\bture\b|chat\b)/i;
 // multibot (F9): głębokość tury, która TERAZ trwa u danego bota — druga (i
 // wiarygodniejsza) połowa `chainDepth` w `store.ts`. Upstream ufa `depth` z env
 // proxy, co działa, dopóki proxy startuje raz na turę (claude/ACP); bot silnika
@@ -384,21 +384,9 @@ async function runCollab(roomId: string): Promise<void> {
     let anyReply = false;
     let finished = false;
     for (const botId of room.bot_ids) {
-      let bot = store.bot(botId);
+      const bot = store.bot(botId);
       if (!bot) continue;
-      if (bot.busy) {
-        // 0.1.60 fix: nie skip od razu - czekaj max 60s az atlas sie zwolni (mobile->atlas)
-        // wczesniej `continue` robil 0 wiadomosci i `done` z pustym transcript -> halucynacja 5 tur
-        const waitStart = Date.now();
-        while (Date.now() - waitStart < 60_000) {
-          await new Promise((r) => setTimeout(r, 500));
-          const cur = rooms.get(roomId);
-          if (!cur || cur.status !== "running") break;
-          const fresh = store.bot(botId);
-          if (!fresh || !fresh.busy) { bot = fresh as any; break; }
-        }
-        if (!bot || bot.busy) continue;
-      }
+      if (bot.busy) continue; // busy-safe: that bot is mid-turn elsewhere
       // świeży zrzut TUŻ przed turą — snapshot z początku rundy nie widzi
       // wkładek botów, które właśnie skończyły w tej samej rundzie
       const live = rooms.get(roomId);
