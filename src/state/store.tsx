@@ -13,9 +13,10 @@ import {
 } from "react";
 import type { MascotShape } from "@/lib/mascotShapes";
 import type { MausColor, MausMotion } from "@/lib/mascot";
+import { MAUS_COLORS } from "@/lib/mascot";
 import { authFetch, authenticatedEventSource } from "@/lib/auth";
 import { getLanguage } from "@/lib/language";
-import { notifyBrowser } from "@/lib/notifications";
+import { botNotificationIcon, notificationTag, notifyBrowser } from "@/lib/notifications";
 
 export type { MausColor } from "@/lib/mascot";
 
@@ -652,10 +653,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const before = seen.get(bot.id);
       const attention = bot.needsAttention ?? null;
       if (bot.notifications && before && attention && attention !== before.attention) {
-        notifyBrowser(`${bot.name} needs your input`, attention);
+        notifyBrowser(`${bot.name} needs your input`, attention, {
+          tag: notificationTag(bot.id),
+          icon: botNotificationIcon(MAUS_COLORS[bot.color]),
+        });
       } else if (bot.notifications && before && bot.unread && !before.unread) {
         const last = [...bot.messages].reverse().find((message) => message.role === "bot" && message.text);
-        notifyBrowser(`${bot.name} finished`, last?.text?.slice(0, 180) ?? "New bot message");
+        notifyBrowser(`${bot.name} finished`, last?.text?.slice(0, 180) ?? "New bot message", {
+          tag: notificationTag(bot.id),
+          icon: botNotificationIcon(MAUS_COLORS[bot.color]),
+        });
       }
       seen.set(bot.id, { unread: bot.unread, attention });
     }
