@@ -155,7 +155,7 @@ const MAX_COMMS_DEPTH = 1;
 /** "Room only for task": a user @mention opens a collaboration room only when
  * the message also carries task language; bare mentions stay one-shot folds. */
 const TASK_HINTS =
-  /(razem|zadanie|zadania|współprac|wspolprac|collab|collaborat|\btogether\b|\btask\b|delegat|napisz do|napiszesz do|napisać do|napisac do|zrób|zrob|zróbcie|zrobcie|wykonaj|przygotuj|przygotować|przygotowac|opracuj|pomóż|pomoz|pomoc|pracujcie|wspólnie|wspolnie|pogadaj|pogadajcie|porozmawiaj|porozmawiajcie|przeprowadź|przeprowadz|przeprowadzcie|rozmow|dyskusj|konwersac|\btur\b|\bturach\b|\bturę\b|\bture\b|chat\b)/i;
+  /(razem|zadanie|zadania|współprac|wspolprac|collab|collaborat|\btogether\b|\btask\b|delegat|napisz do|napiszesz do|napisać do|napisac do|zrób|zrob|zróbcie|zrobcie|wykonaj|przygotuj|przygotować|przygotowac|opracuj|pomóż|pomoz|pomoc|pracujcie|wspólnie|wspolnie|pogadaj|pogadajcie|porozmawiaj|porozmawiajcie|przeprowadź|przeprowadz|przeprowadzcie|rozmow|dyskusj|konwersac|\btur\b|\bturach\b|\bturę\b|\bture\b|chat\b|pokój|pokoju|pokoi\b)/i;
 // multibot (F9): głębokość tury, która TERAZ trwa u danego bota — druga (i
 // wiarygodniejsza) połowa `chainDepth` w `store.ts`. Upstream ufa `depth` z env
 // proxy, co działa, dopóki proxy startuje raz na turę (claude/ACP); bot silnika
@@ -457,7 +457,9 @@ async function runCollab(roomId: string): Promise<void> {
         broadcast({ kind: "room", room: rooms.get(roomId) });
       }
       anyReply = true;
-      if (markerAt >= 0) {
+      // 0.1.62: jesli zadanie mowi "5 tur" nie koncz przed 5 wiadomosciami - zapobiega halucynacji "5 tur" gdy atlas skip
+      const needFive = current && /5\s*tur/i.test(current.task) && (current.transcript.length + (visible ? 1 : 0) < 5);
+      if (markerAt >= 0 && !needFive) {
         finished = true;
         break;
       }
