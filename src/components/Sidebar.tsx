@@ -255,7 +255,7 @@ function BotListItem({
         color={bot.color}
         shape={bot.mascotShape}
         state={stateForBot(bot)}
-        size={56}
+        size={48}
         motion={mascotMotion?.kind ?? "none"}
         motionKey={mascotMotion?.nonce ?? 0}
       />

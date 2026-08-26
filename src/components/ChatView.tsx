@@ -389,7 +389,7 @@ export function ChatView({ bot }: { bot: Bot }) {
               color={bot.color}
               shape={bot.mascotShape}
               state={stateForBot(bot)}
-              size={46}
+              size={40}
               motion={bot.busy ? "working" : mascotMotion?.kind ?? "none"}
               motionKey={bot.busy ? 1 : mascotMotion?.nonce ?? 0}
               animated
