@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { botSystemPrompt } from "./bot-prompt.ts";
@@ -3168,7 +3168,7 @@ const server = createServer(async (req, res) => {
     // multibot: scout folderu → manifest zespołu (port z OpenMausBot #339)
     if (method === "GET" && path === "/api/teams/scout") {
       const cwd = url.searchParams.get("cwd") ?? "";
-      if (!cwd || !path.isAbsolute(cwd)) return json(res, 400, { error: "cwd must be an absolute path" });
+      if (!cwd || !isAbsolute(cwd)) return json(res, 400, { error: "cwd must be an absolute path" });
       const manifest = scoutProject(cwd);
       if ("kind" in manifest) return json(res, 404, manifest);
       return json(res, 200, { manifest });

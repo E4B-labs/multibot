@@ -122,19 +122,19 @@ function detectStack(files: string[], deps: string[]): string[] {
   return chips;
 }
 
-function pickLead(stack: string[], evidence: string[]): ScoutRole {
+function pickLead(stack: string[]): ScoutRole {
   if (stack.some((s) => ["rust", "go", "node", "fastapi"].includes(s))) {
     return { name: "Compass", role: "Architect", description: "Rozumie całość repozytorium: strukturę, typy, granice modułów. Pomaga w nawigacji, planowaniu i decyzjach architektonicznych" };
   }
   return { name: "Compass", role: "Architect", description: "Koordynuje zespół, wybiera specjalistów do zadania, pilnuje spójności projektu" };
 }
 
-function buildSpecialists(files: string[], deps: string[], evidence: string[]): ScoutRole[] {
+function buildSpecialists(files: string[], deps: string[], _evidence: string[]): ScoutRole[] {
   const found = DETECTORS.filter((d) => d.match("", files, deps)).slice(0, 5);
   if (found.length === 0) {
     return [{ name: "Wrench", role: "Generalist", description: "Pomaga we wszystkim, gdy nikt bardziej konkretny nie pasuje do zadania" }];
   }
-  return found.map((d) => ({ name: d.role, role: d.role, description: `${d.description}. ${evidence[0] ? `Kontekst: ${evidence[0].slice(0, 90)}.` : ""}` }));
+  return found.map((d) => ({ name: d.role, role: d.role, description: d.description }));
 }
 
 export function scoutProject(cwd: string): ScoutManifest | ScoutError {
@@ -164,6 +164,6 @@ export function scoutProject(cwd: string): ScoutManifest | ScoutError {
   }
   const stack = detectStack(files, deps);
   const specialists = buildSpecialists(files, deps, evidence);
-  const lead = pickLead(stack, evidence);
+  const lead = pickLead(stack);
   return { lead, specialists, evidence, stack };
 }
