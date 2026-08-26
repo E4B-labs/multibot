@@ -41,9 +41,10 @@ export interface OptionCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "event" | "screen" | "room";
+  kind: "text" | "options" | "activity" | "event" | "screen" | "room" | "secret";
   text?: string;
   card?: OptionCardData;
+  secret?: { target: string; label: string; description: string; placeholder?: string; helpUrl?: string; requestKey: string; provided?: boolean; dismissed?: boolean };
   /** activity messages: tool name + outcome */
   tool?: { name: string; ok?: boolean };
   event?: { type: "renamed" | "skill-created" | "routine-created" | "goal-progress"; value: string };
@@ -83,6 +84,8 @@ export interface Bot {
   firstUnreadId?: string | null;
   /** multibot: sekcja sidebaru (port z OpenMausBot #296) — brak = lista główna. */
   section?: string;
+  chiefOfStaff?: boolean;
+  composioAccounts?: Record<string, string>;
   busy?: boolean;
   // multibot: why the bot is waiting on a human (login/captcha/question); null/absent = not waiting.
   // Arrives via the same `{kind:"bot"}` SSE frame as every other bot patch.
@@ -152,6 +155,7 @@ interface AppState {
   skillsOpen: boolean;
   // multibot: live team map (port z OpenMausBot)
   teamMapOpen: boolean;
+  inspectorOpen: boolean;
   /** multibot: nazwy skilli do podświetlania w treści wiadomości (skillRefs) */
   skillNames: string[];
   // multibot: F9-FE — otwarty pokój grupowy (prawy slot); null = zamknięty
@@ -214,6 +218,7 @@ type Action =
   | { type: "toggleSkills"; open?: boolean }
   // multibot: team map (port z OpenMausBot)
   | { type: "toggleTeamMap"; open?: boolean }
+  | { type: "toggleInspector"; open?: boolean }
   /** multibot: nazwy skilli do podświetlania w treści wiadomości */
   | { type: "setSkillNames"; names: string[] }
   // multibot: F9-FE — otwarcie pokoju grupowego (group) / zamknięcie (null)
@@ -230,7 +235,7 @@ type Action =
       patch: Partial<
         Pick<
           Bot,
-          "name" | "title" | "description" | "notifications" | "color" | "mascotExpression" | "mascotShape" | "pinned" | "hidden"
+          "name" | "title" | "description" | "notifications" | "color" | "mascotExpression" | "mascotShape" | "pinned" | "hidden" | "chiefOfStaff" | "composioAccounts"
         >
         // multibot: sekcja dopuszcza null — JSON.stringify wycina undefined,
         // a null musi dolecieć do serwera, żeby wyczyścić pole.
@@ -532,6 +537,19 @@ function reducer(state: AppState, action: Action): AppState {
     // multibot: team map — globalny overlay niezależny od prawego slotu
     case "toggleTeamMap":
       return { ...state, teamMapOpen: action.open ?? !state.teamMapOpen };
+    case "toggleInspector": {
+      const open = action.open ?? !state.inspectorOpen;
+      return {
+        ...state,
+        inspectorOpen: open,
+        settingsOpen: open ? false : state.settingsOpen,
+        computerOpen: open ? false : state.computerOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+        routinesOpen: open ? false : state.routinesOpen,
+        memoryOpen: open ? false : state.memoryOpen,
+        skillsOpen: open ? false : state.skillsOpen,
+      };
+    }
     case "setSkillNames":
       return { ...state, skillNames: action.names };
     // multibot: F9-FE — pokój grupowy w prawym slocie, ta sama zasada wykluczania
@@ -629,6 +647,7 @@ const initialState: AppState = {
   memoryOpen: false,
   skillsOpen: false,
   teamMapOpen: false,
+  inspectorOpen: false,
   skillNames: [],
   groupOpen: null,
   roomOpen: null,

@@ -30,6 +30,7 @@ export interface AppConfig {
    * catalog with official logos in the plugins marketplace. */
   composio?: { key?: string; apiKey?: string; url?: string };
   box?: { token?: string };
+  voice?: { key?: string };
   /** The person using the app (collected in onboarding, shown in the
    * sidebar). Not a secret — echoed back by GET /api/config. */
   profile?: { name?: string; email?: string };
@@ -57,6 +58,17 @@ export interface AppConfig {
   /** multibot (U28): tokeny powiadomień push (Expo) na telefon, obok sesji. */
   pushDevices?: Record<string, PushDevice>;
 }
+
+/** Credential names shared with Electron diagnostics redaction. */
+export const WORKSPACE_CREDENTIAL_ENV = [
+  "XAI_API_KEY",
+  "BOX_TOKEN",
+  "OPENCODE_API_KEY",
+  "OMB_TTS_KEY",
+  "OMB_OPENAI_IMAGE_KEY",
+  "COMPOSIO_API_KEY",
+  "OMB_COMPOSIO_BROKER_TOKEN",
+] as const;
 
 export const DATA_DIR = join(homedir(), ".openmausbot");
 const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
@@ -94,6 +106,7 @@ export function loadConfig(): AppConfig {
   cfg.xai = { key: process.env.XAI_API_KEY, ...cfg.xai };
   cfg.composio = { key: process.env.COMPOSIO_KEY, ...cfg.composio };
   cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
+  cfg.voice = { key: process.env.OMB_TTS_KEY, ...cfg.voice };
   return cfg;
 }
 
@@ -115,6 +128,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     "xai",
     "composio",
     "box",
+    "voice",
     "profile",
     "mcpConnectors",
     "firebase",

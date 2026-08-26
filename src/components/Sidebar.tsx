@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ClipboardCopy,
   Copy,
+  Crown,
   EyeOff,
   FolderPlus,
   Loader2,
@@ -174,6 +175,9 @@ function BotContextMenu({
           dispatch({ type: "select", id: bot.id });
           dispatch({ type: "toggleSettings", open: true });
         }),
+        item(<Crown size={16} className={bot.chiefOfStaff ? "text-accent" : "text-ink-secondary"} />, bot.chiefOfStaff ? polish ? "Zdejmij szefa sekcji" : "Remove section chief" : polish ? "Ustaw szefa sekcji" : "Set section chief", () =>
+          dispatch({ type: "updateBot", botId: bot.id, patch: { chiefOfStaff: !bot.chiefOfStaff } }),
+        ),
         item(<Copy size={16} className="text-ink-secondary" />, polish ? "Duplikuj" : "Duplicate", () =>
           dispatch({ type: "duplicateBot", botId: bot.id }),
         ),
@@ -404,6 +408,7 @@ function BotListItem({
         <div className="flex items-baseline justify-between gap-2">
            <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
              {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
+             {bot.chiefOfStaff && <Crown size={12} className="shrink-0 text-accent" aria-label="Section chief" />}
              <span className="truncate">{bot.name}</span>
            </span>
           {selected && last && (

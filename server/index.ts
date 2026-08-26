@@ -72,6 +72,8 @@ import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalR
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
 import { chainDepth, mentionedBots, Store, type BotRecord, type Message, type OptionCardData } from "./store.ts";
+import { CREDENTIAL_TARGETS, credentialConfigPatch, isCredentialTargetId, type CredentialTargetId } from "./credential-request.ts";
+import { inspectorEvents, recordInspectorEvent, replayInspectorEvents } from "./inspector.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
 import { WorkspaceStore } from "./workspace.ts";
 import { canUseIntegration, clearTurnPolicy, rememberApprovalRule, setTurnPolicy } from "./turn-policy.ts";
@@ -672,6 +674,7 @@ const approvalRuleByRequest = new Map<string, ApprovalRuleCandidate>();
 // nie jest uprawnieniem, więc mieszka tu, razem z resztą narzędzi warsztatu, i
 // działa u każdego drivera, który montuje serwer `agents`.
 const pendingUserAsks = new Map<string, (answer: string) => void>();
+const pendingCredentials = new Map<string, { botId: string; resolve: (value: string) => void }>();
 // ponytail: cztery minuty, bo `fetch` w proxy ma domyślny headersTimeout 300 s
 // — dłuższe trzymanie odpowiedzi zerwałoby połączenie po stronie klienta.
 // Trzeba dłużej: pętla odpytująca po `requestId` zamiast jednego wiszącego
@@ -750,11 +753,33 @@ async function askOwnerAndWait(threadId: string, card: Omit<OptionCardData, "req
     });
   });
 }
+
+async function askCredentialAndWait(bot: BotRecord, target: CredentialTargetId): Promise<string> {
+  const requestKey = newId();
+  const meta = CREDENTIAL_TARGETS[target];
+  const message = store.appendMessage(bot.threadId, {
+    role: "bot",
+    kind: "secret",
+    secret: { target, ...meta, requestKey },
+  });
+  broadcast({ kind: "message", threadId: bot.threadId, message });
+  pushForBot(bot.id, "question", meta.label);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      if (!pendingCredentials.delete(requestKey)) return;
+      const patched = store.patchMessage(bot.threadId, message.id, { secret: { ...message.secret!, dismissed: true } });
+      if (patched) broadcast({ kind: "message.patch", threadId: bot.threadId, message: patched });
+      resolve("MultiBot: credential request expired.");
+    }, USER_ASK_TIMEOUT_MS);
+    pendingCredentials.set(requestKey, { botId: bot.id, resolve: (value) => { clearTimeout(timer); resolve(value); } });
+  });
+}
 // multibot (F12): model faktycznie użyty w bieżącej turze (z `session.started`)
 // — przypinany do odpowiedzi bota, żeby badge pokazywał realny model.
 const turnModelByThread = new Map<string, string>();
 
 bus.subscribe((event: RuntimeEvent) => {
+  recordInspectorEvent(event);
   broadcast({ kind: "runtime", event });
   if (event.type === "turn.completed" || event.type === "runtime.error") {
     const leasedBotId = activeComputerLeases.get(event.threadId);
@@ -1570,7 +1595,7 @@ opts?: {
         model: turnModel,
         ...(!isolated ? { resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId] } : {}),
         transcript,
-        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace }),
+        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: store.bots }),
         integrations,
         ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
       } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel });
@@ -2063,6 +2088,13 @@ const server = createServer(async (req, res) => {
             });
             return json(res, 200, { answer });
           }
+          case "credential.request": {
+            requireFull();
+            const target = body.target;
+            if (!isCredentialTargetId(target)) return json(res, 422, { error: "unsupported credential target" });
+            const answer = await askCredentialAndWait(caller, target);
+            return json(res, 200, { answer });
+          }
           case "memory.list": return json(res, 200, workspace.facts(fromBotId, String(body.query ?? "")));
           case "memory.graph": return json(res, 200, workspace.graph(fromBotId));
           case "memory.markdown.get": return json(res, 200, workspace.markdown(fromBotId));
@@ -2083,7 +2115,7 @@ const server = createServer(async (req, res) => {
             }
             const created = store.createBot({ temporary: body.temporary === true });
             const selection = bootSelection;
-            const updated = store.patchBot(created.id, { name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), modelSelection: selection });
+            const updated = store.patchBot(created.id, { name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), modelSelection: selection, ...(caller.chiefOfStaff ? { section: caller.section } : {}) });
             if (access === "full") workspace.setAccess(created.id, "full");
             broadcast({ kind: "bot", bot: updated });
             return json(res, 201, updated);
@@ -2092,6 +2124,7 @@ const server = createServer(async (req, res) => {
             requireFull();
             const target = store.bot(String(body.botId ?? ""));
             if (!target) return json(res, 404, { error: "no such target bot" });
+            if (caller.chiefOfStaff && (target.section?.trim() ?? "") !== (caller.section?.trim() ?? "")) return json(res, 403, { error: "chief delegation is limited to its section" });
             const updated = store.patchBot(target.id, { ...(body.patch as Record<string, unknown> ?? {}) });
             broadcast({ kind: "bot", bot: updated });
             return json(res, 200, updated);
@@ -2223,6 +2256,7 @@ const server = createServer(async (req, res) => {
         if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop" });
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
+        if (from.chiefOfStaff && (target.section?.trim() ?? "") !== (from.section?.trim() ?? "")) return json(res, 403, { error: "chief delegation is limited to its section" });
         if (target.busy) return json(res, 200, { busy: true });
         // multibot: widoczność wymiany ask_bot. Wcześniej szara pigułka
         // aktywności ukrywała odpowiedź bota na zawsze, choć jej tokeny były
@@ -2514,8 +2548,17 @@ const server = createServer(async (req, res) => {
         if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
       }
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "color", "mascotExpression", "mascotShape", "pinned", "hidden"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "color", "mascotExpression", "mascotShape", "pinned", "hidden", "composioAccounts"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (body.composioAccounts !== undefined) {
+        if (!body.composioAccounts || typeof body.composioAccounts !== "object" || Array.isArray(body.composioAccounts)) return json(res, 400, { error: "composioAccounts must be an object" });
+        const accounts: Record<string, string> = {};
+        for (const [slug, id] of Object.entries(body.composioAccounts as Record<string, unknown>)) {
+          if (!/^[a-z0-9_-]{1,64}$/i.test(slug) || typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id)) return json(res, 400, { error: "invalid Composio account mapping" });
+          accounts[slug] = id;
+        }
+        body.composioAccounts = accounts;
       }
       if (body.section !== undefined) {
         const section = typeof body.section === "string" ? body.section.trim() : "";
@@ -2528,6 +2571,10 @@ const server = createServer(async (req, res) => {
       const previousName = previous?.name;
       const bot = store.patchBot(m[1], patch);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (body.chiefOfStaff !== undefined) {
+        if (typeof body.chiefOfStaff !== "boolean") return json(res, 400, { error: "chiefOfStaff must be boolean" });
+        store.setChiefOfStaff(bot.id, body.chiefOfStaff);
+      }
       if (typeof patch.name === "string" && previousName !== bot.name) {
         appendBotEvent(bot.id, { type: "renamed", value: bot.name });
       }
@@ -2607,6 +2654,49 @@ const server = createServer(async (req, res) => {
     }
 
     // onboarding/ask cards persist their answered/dismissed state
+    m = path.match(/^\/api\/bots\/([\w-]+)\/credential$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const body = await readBody(req);
+      const requestKey = String(body.requestKey ?? "");
+      const pending = pendingCredentials.get(requestKey);
+      if (!pending || pending.botId !== bot.id) return json(res, 404, { error: "no such credential request" });
+      const existing = store.messagesFor(bot.threadId).find((message) => message.secret?.requestKey === requestKey);
+      const target = existing?.secret?.target;
+      if (!isCredentialTargetId(target)) return json(res, 409, { error: "invalid credential request" });
+      const dismissed = body.dismissed === true;
+      if (!dismissed) {
+        const value = String(body.value ?? "");
+        if (!value.trim()) return json(res, 422, { error: "credential value required" });
+        saveConfig(credentialConfigPatch(target, value));
+        Object.assign(cfg, loadConfig());
+        await reloadProviders();
+      }
+      pendingCredentials.delete(requestKey);
+      const patched = existing
+        ? store.patchMessage(bot.threadId, existing.id, { secret: { ...existing.secret!, provided: !dismissed, dismissed } })
+        : null;
+      if (patched) broadcast({ kind: "message.patch", threadId: bot.threadId, message: patched });
+      pending.resolve(dismissed ? "MultiBot: user skipped credential request." : "MultiBot: credential saved securely.");
+      return json(res, 200, { ok: true });
+    }
+
+    m = path.match(/^\/api\/bots\/([\w-]+)\/inspector$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { events: inspectorEvents(bot.threadId, Number(url.searchParams.get("limit") ?? 100)) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/inspector\/replay$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const body = await readBody(req);
+      const ids = Array.isArray(body.ids) ? body.ids.map(String).slice(0, 200) : [];
+      return json(res, 200, { events: replayInspectorEvents(bot.threadId, ids) });
+    }
+
     m = path.match(/^\/api\/bots\/([\w-]+)\/cards\/([\w-]+)$/);
     if (m && method === "PATCH") {
       const bot = store.bot(m[1]);
@@ -3467,7 +3557,15 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { configured: true, services: status });
     }
     m = path.match(/^\/api\/connectors\/([\w-]+)\/authorize$/);
-    if (m && method === "POST") return json(res, 200, await composio.authorizeService(cfg, m[1]));
+    if (m && method === "POST") {
+      const body = await readBody(req).catch(() => ({}));
+      return json(res, 200, await composio.authorizeService(cfg, m[1], typeof body.alias === "string" ? body.alias : undefined));
+    }
+    m = path.match(/^\/api\/connectors\/([\w-]+)\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/);
+    if (m && method === "DELETE") {
+      await composio.removeAccount(cfg, m[1], m[2]);
+      return json(res, 200, { ok: true });
+    }
     m = path.match(/^\/api\/connectors\/([\w-]+)$/);
     if (m && method === "DELETE") return json(res, 200, await composio.removeService(cfg, m[1]));
 

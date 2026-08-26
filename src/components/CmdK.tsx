@@ -12,6 +12,7 @@ import { normalizeState } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
+import { autocompleteBots } from "@/lib/botAutocomplete";
 
 /** Subsequence match: every query char appears, in order, in the target. */
 function fuzzyMatch(query: string, target: string): boolean {
@@ -278,7 +279,13 @@ export function CmdK() {
     return cmds;
   }, [state.bots, state.selectedId, current, dispatch, polish, showHidden, skills]);
 
-  const visible = useMemo(() => commands.filter((c) => fuzzyMatch(query, c.label)), [commands, query]);
+  const faceBots = useMemo(() => autocompleteBots(query, state.bots), [query, state.bots]);
+  const visible = useMemo(() => {
+    const faceBotIds = new Set(faceBots.map((bot) => bot.id));
+    return commands.filter((command) => command.id.startsWith("bot:") && query.trim()
+      ? faceBotIds.has(command.id.slice(4))
+      : fuzzyMatch(query, command.label));
+  }, [commands, query, faceBots]);
 
   useEffect(() => setHighlight(0), [query]);
 

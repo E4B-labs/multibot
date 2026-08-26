@@ -22,6 +22,7 @@ interface ToolkitCard {
   // vs DELETE /api/connectors/custom/:id.
   source?: "composio" | "custom";
 }
+interface ConnectedAccount { id: string; alias?: string; status: string }
 
 function ServiceIcon({ card }: { card: ToolkitCard }) {
   // 0 = official logo, 1 = favicon by domain, 2 = monogram
@@ -368,7 +369,7 @@ export function PluginsPanel() {
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
   const [configured, setConfigured] = useState(true);
-  const [status, setStatus] = useState<Record<string, { connected: boolean }>>({});
+  const [status, setStatus] = useState<Record<string, { connected: boolean; accounts?: ConnectedAccount[] }>>({});
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -410,7 +411,8 @@ export function PluginsPanel() {
   const connect = (slug: string) => {
     setBusySlug(slug);
     setError(null);
-    api(`/api/connectors/${slug}/authorize`, { method: "POST" })
+    const alias = window.prompt(polish ? "Nazwa konta (opcjonalnie)" : "Account label (optional)", "")?.trim() ?? "";
+    api(`/api/connectors/${slug}/authorize`, { method: "POST", body: JSON.stringify(alias ? { alias } : {}) })
       .then(({ url }) => {
         window.open(url);
         // the user finishes OAuth in the browser; poll a few times to catch it
@@ -420,6 +422,14 @@ export function PluginsPanel() {
           if (++tries >= 6 || status[slug]?.connected) clearInterval(timer);
         }, 5000);
       })
+      .catch((e) => setError(e.message))
+      .finally(() => setBusySlug(null));
+  };
+
+  const disconnectAccount = (slug: string, accountId: string) => {
+    setBusySlug(`${slug}:${accountId}`);
+    api(`/api/connectors/${slug}/accounts/${encodeURIComponent(accountId)}`, { method: "DELETE" })
+      .then(() => refreshStatus([slug]))
       .catch((e) => setError(e.message))
       .finally(() => setBusySlug(null));
   };
@@ -572,6 +582,7 @@ export function PluginsPanel() {
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-[14px] font-medium text-ink">{card.label}</div>
                         <div className="truncate text-[12px] text-ink-secondary">{card.blurb}</div>
+                        {!!status[card.slug]?.accounts?.length && <div className="mt-1 flex flex-wrap gap-1">{status[card.slug]?.accounts?.map((account) => <span key={account.id} className="inline-flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-[10px] text-ink-secondary">{account.alias || account.id}<button type="button" onClick={() => disconnectAccount(card.slug, account.id)} aria-label={`Remove ${account.alias || account.id}`} className="text-danger">×</button></span>)}</div>}
                       </div>
                       <button
                         disabled={busy}

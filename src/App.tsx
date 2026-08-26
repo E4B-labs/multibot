@@ -14,6 +14,7 @@ import { PluginsPanel } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
 import { AppSettingsPanel } from "@/components/AppSettingsPanel";
 import { TeamMapPanel } from "@/components/TeamMapPanel";
+import { InspectorPanel } from "@/components/InspectorPanel";
 // multibot: F6 — panel rutyn silnika slafy
 import { RoutinesPanel } from "@/components/RoutinesPanel";
 // multibot: F8 — panel skilli silnika slafy
@@ -131,6 +132,11 @@ function Shell() {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const bot = state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0];
+  useEffect(() => {
+    const close = () => dispatch({ type: "toggleInspector", open: false });
+    window.addEventListener("mb:inspector:close", close);
+    return () => window.removeEventListener("mb:inspector:close", close);
+  }, [dispatch]);
   // multibot: tapnięcie w powiadomienie na telefonie ustawia `#bot=<id>` —
   // powłoka mobilna wstrzykuje hash i przy starcie, i przy otwartej aplikacji,
   // więc czytamy go też z `hashchange`.
@@ -181,6 +187,7 @@ function Shell() {
         </main>
       )}
       {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
+      {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
       {state.computerOpen && bot && <ComputerPanel bot={bot} />}
       {/* multibot: routines are harness-owned and available for every driver. */}
       {state.routinesOpen && bot && <RoutinesPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}

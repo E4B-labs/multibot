@@ -14,6 +14,8 @@
 import { totalmem } from "node:os";
 
 import { turnToolsText, type TurnIntegrationsLike } from "./turn-tools.ts";
+import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
+import type { BotRecord } from "./store.ts";
 
 /** Tyle z BotRecord, ile prompt naprawdę czyta — test nie buduje całego bota. */
 interface BotLike {
@@ -21,6 +23,9 @@ interface BotLike {
   name: string;
   title?: string | null;
   description?: string | null;
+  section?: string;
+  chiefOfStaff?: boolean;
+  composioAccounts?: Record<string, string>;
 }
 
 /** Strukturalny widok na WorkspaceStore — test podstawia własną atrapę. */
@@ -55,6 +60,7 @@ export function botSystemPrompt(
     workspace: WorkspaceLike;
     tagged?: Array<{ id: string; name: string }>;
     taggedReplies?: string;
+    roster?: BotLike[];
   },
 ): string {
   const { workspace, integrations, isolated } = o;
@@ -127,7 +133,7 @@ export function botSystemPrompt(
     computer &&
       "To open a URL call navigate(url) — prefer it over shell commands. The shell tools you may also have (bash, exec_command, run_command) run on the HOST machine, never inside your computer; for anything on the computer use only the computer tools (navigate, screenshot, read_page, click, type_text, key, scroll, status, computer_exec). If a computer tool is not visible, search for it in the mcp__computer tool namespace.",
     integrations.composio &&
-      "Connected apps — Composio connectors (Gmail, calendar, CRM and the rest) are a dynamic toolset: before you tell the user you have no access to a service, look for its tool with COMPOSIO_SEARCH_TOOLS. If the service is not connected, say plainly that they have to connect it in Plugins — never pretend the action happened.",
+      `Connected apps — Composio connectors (Gmail, calendar, CRM and the rest) are a dynamic toolset: before you tell the user you have no access to a service, look for its tool with COMPOSIO_SEARCH_TOOLS. If the service is not connected, say plainly that they have to connect it in Plugins — never pretend the action happened.${bot.composioAccounts && Object.keys(bot.composioAccounts).length ? ` This bot's selected connected accounts are ${JSON.stringify(bot.composioAccounts)}; pass matching connected_account_id when a Composio tool supports it.` : ""}`,
     agents &&
       "Host files and terminal — read_file, write_file and run_command act on the machine running MultiBot, not on your computer. Use them for the user's own files and local commands; use the computer tools for anything on the computer's screen or disk.",
     agents &&
@@ -162,12 +168,16 @@ export function botSystemPrompt(
     sharedSkills && `# Reusable skills\n${sharedSkills}`,
   ].filter(Boolean).join("\n\n");
 
+  const chief = bot.chiefOfStaff
+    ? chiefOfStaffSystemPrompt(bot as BotRecord, (o.roster ?? []) as BotRecord[], agents)
+    : "";
+
   const peers = tagged.length
     ? agents
       ? `The user tagged ${tagged.map((t) => `@${t.name} (ask_bot bot_id ${t.id})`).join(" and ")} in their message — bring them in with ask_bot and fold their reply into your answer.`
       : "The harness already fetched the tagged peer replies and appended them below."
     : "";
 
-  return ([who, have, how, "# Environment\n" + environmentLine(agents), knowledge, peers]
+  return ([who, have, how, "# Environment\n" + environmentLine(agents), chief, knowledge, peers]
     .filter(Boolean).join("\n\n") + taggedReplies).replace(/[—–]/g, "-");
 }

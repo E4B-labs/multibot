@@ -1,7 +1,7 @@
 // App-level settings, in the right-side slot: who you are + credentials
 // shared by all bots. Per-bot settings (name, persona, model, computer)
 // live in SettingsPanel; contextual Box-token entry stays in ComputerPanel.
-import { Loader2, Plus, QrCode, Trash2, X } from "lucide-react";
+import { FileDown, Loader2, Plus, QrCode, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useStore } from "@/state/store";
 import { ApiKeyRow } from "./ApiKeys";
@@ -11,6 +11,7 @@ import { authFetch, setAuthToken } from "@/lib/auth";
 // multibot: F11 — status silnika dla EngineStatusRow
 import { engineOnline } from "@/lib/engineStatus";
 import { languageLabel, setLanguage, useLanguage, type Language } from "@/lib/language";
+import { SkinPicker } from "./SkinPicker";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -116,6 +117,32 @@ function MachineResources() {
         <span>{polish ? "Dysk" : "Disk"} <b className="font-medium text-ink">{resources.disk ? `${bytes(resources.disk.totalBytes - resources.disk.freeBytes)} / ${bytes(resources.disk.totalBytes)}` : "—"}</b></span>
         {resources.temperatures.length > 0 && <span>{polish ? "Temperatura" : "Temperature"} <b className="font-medium text-ink">{Math.round(resources.temperatures[0].celsius)}°C</b></span>}
       </div> : <div className="mt-3 flex items-center gap-2 text-[12.5px] text-ink-secondary"><Loader2 size={14} className="animate-spin" />{polish ? "Sprawdzanie…" : "Checking…"}</div>}
+    </div>
+  );
+}
+
+function DiagnosticsRow() {
+  const polish = useLanguage() === "pl";
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const exportReport = async () => {
+    if (!window.ogb?.exportDiagnostics) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const report = await window.ogb.exportDiagnostics();
+      if (report.ok && report.path) setResult(polish ? "Zapisano raport." : "Report saved.");
+    } catch (error) {
+      setResult(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mt-4 flex items-center gap-3 rounded-xl bg-card p-4">
+      <FileDown size={18} className="shrink-0 text-ink-secondary" />
+      <div className="min-w-0 flex-1"><div className="text-[15px] font-medium text-ink">{polish ? "Diagnostyka" : "Diagnostics"}</div><div className="mt-0.5 text-[12px] text-ink-secondary">{polish ? "Raport bez kluczy i tokenów." : "Report with keys and tokens redacted."}</div>{result && <div className="mt-1 text-[12px] text-success">{result}</div>}</div>
+      <button type="button" disabled={busy || !window.ogb?.exportDiagnostics} onClick={() => void exportReport()} className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-40">{busy ? <Loader2 size={14} className="animate-spin" /> : polish ? "Eksportuj" : "Export"}</button>
     </div>
   );
 }
@@ -826,6 +853,11 @@ export function AppSettingsPanel() {
             <ProfileFields />
           </div>
         </div>
+        <div className="mt-4 rounded-xl bg-card p-4">
+          <div className="text-[15px] font-medium text-ink">{polish ? "Skórka" : "Skin"}</div>
+          <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Kolory interfejsu zapisują się lokalnie." : "Interface colors are stored locally."}</div>
+          <div className="mt-3"><SkinPicker /></div>
+        </div>
 
         <div className="mt-4 rounded-xl bg-card p-4">
           <div className="text-[15px] font-medium text-ink">{polish ? "Połączenia" : "Connections"}</div>
@@ -858,6 +890,7 @@ export function AppSettingsPanel() {
         {/* multibot: F11 — status local service */}
         <EngineStatusRow />
         <MachineResources />
+        <DiagnosticsRow />
 
         <UpdatesRow />
       </div>

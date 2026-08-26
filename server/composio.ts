@@ -45,18 +45,23 @@ export async function composioTool(cfg: AppConfig, name: string, args: unknown) 
   return parseMcpResponse(await res.text());
 }
 
-/** Connection status per service slug: { slack: { connected, status } }. */
+export interface ConnectedAccountSummary { id: string; alias?: string; status: string }
+
+/** Connection status per service slug, including every connected account. */
 export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
   const out = await composioTool(cfg, "COMPOSIO_MANAGE_CONNECTIONS", {
     toolkits: slugs.map((name) => ({ name, action: "list" })),
   });
   const results = out?.data?.results ?? {};
-  const status: Record<string, { connected: boolean; status: string }> = {};
+  const status: Record<string, { connected: boolean; status: string; accounts: ConnectedAccountSummary[] }> = {};
   for (const slug of slugs) {
     const r = results[slug];
-    const active =
-      (r?.accounts ?? []).some((a: any) => /active/i.test(a.status ?? "")) || /^active$/i.test(r?.status ?? "");
-    status[slug] = { connected: active, status: r?.status ?? "unknown" };
+    const accounts: ConnectedAccountSummary[] = (r?.accounts ?? []).flatMap((account: any) => {
+      const id = String(account.id ?? account.account_id ?? account.nanoid ?? "");
+      return id ? [{ id, ...(account.alias ? { alias: String(account.alias) } : {}), status: String(account.status ?? "unknown") }] : [];
+    });
+    const active = accounts.some((a) => /active/i.test(a.status)) || /^active$/i.test(r?.status ?? "");
+    status[slug] = { connected: active, status: r?.status ?? "unknown", accounts };
   }
   return status;
 }
@@ -77,9 +82,11 @@ export async function removeService(cfg: AppConfig, slug: string) {
 }
 
 /** Mint a browser auth link for one service. Returns { url } or throws. */
-export async function authorizeService(cfg: AppConfig, slug: string) {
+export async function authorizeService(cfg: AppConfig, slug: string, alias?: string) {
+  const cleanAlias = alias?.trim();
+  if (cleanAlias && (cleanAlias.length > 64 || /[\u0000-\u001f\u007f]/.test(cleanAlias))) throw new Error("account alias must be printable and at most 64 characters");
   const out = await composioTool(cfg, "COMPOSIO_MANAGE_CONNECTIONS", {
-    toolkits: [{ name: slug, action: "add" }],
+    toolkits: [{ name: slug, action: "add", ...(cleanAlias ? { alias: cleanAlias } : {}) }],
   });
   // be liberal: any https URL mentioning composio/auth wins, else the first
   const raw = JSON.stringify(out);
@@ -87,6 +94,16 @@ export async function authorizeService(cfg: AppConfig, slug: string) {
   const url = urls.find((u) => /composio|connect|auth/i.test(u)) ?? urls[0];
   if (!url) throw new Error(`Composio returned no auth link for ${slug}`);
   return { url };
+}
+
+/** Remove exactly one account after proving it belongs to requested toolkit. */
+export async function removeAccount(cfg: AppConfig, slug: string, accountId: string) {
+  const cleanId = accountId.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(cleanId)) throw new Error("invalid account id");
+  const out = await composioTool(cfg, "COMPOSIO_MANAGE_CONNECTIONS", { toolkits: [{ name: slug, action: "list" }] });
+  const accounts = out?.data?.results?.[slug]?.accounts ?? [];
+  if (!accounts.some((account: any) => String(account.id ?? account.account_id ?? account.nanoid ?? "") === cleanId)) throw new Error("account not found for service");
+  return composioTool(cfg, "COMPOSIO_MANAGE_CONNECTIONS", { toolkits: [{ name: slug, action: "remove", account_id: cleanId }] });
 }
 
 // ── marketplace catalog ────────────────────────────────────────────────

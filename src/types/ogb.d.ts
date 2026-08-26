@@ -30,6 +30,7 @@ declare global {
       /** Unread-conversation count for the taskbar badge. Fire-and-forget;
        * absent in plain browsers, so callers must feature-detect. */
       setUnreadCount?(count: number): void;
+      exportDiagnostics?(): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
       /** In-app auto-update (packaged app only; dormant in dev). onState
        * fires immediately with the current state, then on transitions. */
       updater?: {

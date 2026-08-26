@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, Search, Upload, Wand2 } from "lucide-react";
+import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, ScanSearch, Search, Upload, Wand2 } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
 import { SkillPill } from "./SkillPill";
@@ -20,6 +20,7 @@ import { stateForBot } from "@/lib/mascot";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { OptionCard } from "./OptionCard";
 import { ComputerHandoffCard } from "./ComputerHandoffCard";
+import { SecretRequestCard } from "./SecretRequestCard";
 import { Composer } from "./Composer";
 // multibot: TTS głośniczek przy wiadomościach bota (tylko driver slafy)
 import { SpeakButton } from "./SpeakButton";
@@ -500,6 +501,14 @@ export function ChatView({ bot }: { bot: Bot }) {
             <Search size={18} />
           </button>
           <button
+            onClick={() => dispatch({ type: "toggleInspector" })}
+            className={cn("rounded-md p-1.5 hover:bg-raised", state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink")}
+            title={polish ? "Inspector runtime" : "Runtime inspector"}
+            aria-label={polish ? "Inspector runtime" : "Runtime inspector"}
+          >
+            <ScanSearch size={18} />
+          </button>
+          <button
             onClick={() => dispatch({ type: "toggleComputer" })}
             className={cn(
               "rounded-md p-1.5 hover:bg-raised",
@@ -579,6 +588,9 @@ export function ChatView({ bot }: { bot: Bot }) {
           {bot.messages.map((m) => {
             let child: ReactNode;
             switch (m.kind) {
+              case "secret":
+                child = <SecretRequestCard key={m.id} botId={bot.id} message={m} />;
+                break;
               case "options":
                 // multibot: karta przekazania komputera ma własny render
                 // (miniatura ekranu + przejmij/gotowe/pomiń), reszta kart bez zmian

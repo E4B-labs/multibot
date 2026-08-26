@@ -59,6 +59,7 @@ const TOOLS = [
   { name: "update_my_profile", description: "Update your name, role, description, icon, notifications, computer or model selection.", inputSchema: { type: "object", properties: { name: { type: "string" }, title: { type: "string" }, description: { type: "string" }, computer: { type: "string" }, color: { type: "string" }, mascotShape: { type: "string" }, notifications: { type: "boolean" }, modelSelection: { type: "object" } } } },
   { name: "ask_user", description: "Ask the human who owns this bot a question and wait for their answer. Use whenever you need a decision, a preference, missing information, or sign-off before doing something consequential — do not guess on things the owner would want to decide. Returns their answer as text.", inputSchema: { type: "object", properties: { question: { type: "string", description: "The question, with enough context to answer at a glance" }, choices: { type: "array", items: { type: "string" }, description: "Optional 2-5 suggested answers, shown as one-tap buttons" } }, required: ["question"] } },
   { name: "hand_over_computer", description: "Hand your computer to the human and wait for them. Use it the moment the screen needs a person and not you: a login, a 2FA code, a captcha, a payment confirmation. The user gets a card with a live view of your screen and can take control, finish and hand it back, or skip. Returns \"user finished\" (with their optional note) or \"user skipped\" — after \"user skipped\" solve it another way or stop and say what blocked you. Do not ask for passwords or codes in chat; this is the way.", inputSchema: { type: "object", properties: { reason: { type: "string", description: "What the human has to do, in one line, e.g. \"Sign in to LinkedIn, then hand it back\"" } }, required: ["reason"] } },
+  { name: "request_credential", description: "Ask the owner for an API key or token through a private in-chat card. Never ask for credentials in plain text.", inputSchema: { type: "object", properties: { target: { type: "string", enum: ["xaiApiKey", "boxToken", "opencodeGoApiKey", "ttsKey", "openaiImageApiKey"] } }, required: ["target"] } },
   { name: "remember", description: "Save a durable fact to your memory.", inputSchema: { type: "object", properties: { text: { type: "string" }, source: { type: "string" } }, required: ["text"] } },
   { name: "recall", description: "Search your durable memory.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
   { name: "read_memory", description: "Read your Graph Memory and markdown memory.", inputSchema: { type: "object", properties: {} } },
@@ -147,6 +148,13 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     const r = await api("/api/internal/agent-action", {
       method: "POST",
       body: JSON.stringify({ fromBotId: BOT_ID, action: "computer.handover", reason: String(args.reason ?? "") }),
+    });
+    return { text: String(r.answer ?? "") };
+  }
+  if (name === "request_credential") {
+    const r = await api("/api/internal/agent-action", {
+      method: "POST",
+      body: JSON.stringify({ fromBotId: BOT_ID, action: "credential.request", target: String(args.target ?? "") }),
     });
     return { text: String(r.answer ?? "") };
   }

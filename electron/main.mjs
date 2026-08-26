@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, ipcMain, Menu, nativeImage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { activateExistingWindow } from "./single-instance.mjs";
 import { startRemoteUiServer } from "./remote-ui.mjs";
 import { startSpeech, stopSpeech } from "./speech.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
+import { buildDiagnosticsReport, decodeLogTail, diagnosticsFileName } from "./diagnostics.mjs";
 
 const require = createRequire(import.meta.url);
 const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
@@ -504,6 +505,33 @@ ipcMain.handle("hosts:use-host", async (_event, id) => {
 // electron/oauth-loopback.mjs for the reusable receiver, unused until then).
 ipcMain.handle("hosts:begin-browser-login", () => {
   throw new Error("Browser sign-in isn't available yet — no Firebase project is configured. Paste the access token instead.");
+});
+
+ipcMain.handle("desktop:export-diagnostics", async (event) => {
+  if (!isLocalSender(event)) return { ok: false, error: "forbidden" };
+  const picked = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
+    title: "Export MultiBot diagnostics",
+    defaultPath: path.join(app.getPath("documents"), diagnosticsFileName()),
+    filters: [{ name: "Text", extensions: ["txt"] }],
+  });
+  if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
+  let logTail = Buffer.alloc(0);
+  try {
+    const log = fs.readFileSync(path.join(app.getPath("logs"), "server.log"));
+    logTail = log.subarray(Math.max(0, log.length - 128 * 1024));
+  } catch {}
+  let configSummary = {};
+  try {
+    const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config`);
+    if (response.ok) configSummary = await response.json();
+  } catch {}
+  const report = buildDiagnosticsReport({
+    appInfo: { version: app.getVersion(), platform: process.platform, arch: process.arch, electron: process.versions.electron, node: process.versions.node, packaged: app.isPackaged, uptimeSeconds: Math.round(process.uptime()) },
+    configSummary,
+    logTail: decodeLogTail(logTail, logTail.length === 128 * 1024).tail,
+  });
+  fs.writeFileSync(picked.filePath, report, { mode: 0o600 });
+  return { ok: true, path: picked.filePath };
 });
 
 app.whenReady().then(async () => {

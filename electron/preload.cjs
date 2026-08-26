@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld("ogb", {
   /** Unread-conversation count for the taskbar badge (Windows overlay icon,
    * macOS/Linux dock badge). Fire-and-forget; dormant in plain browsers. */
   setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
+  exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
 
   /** In-app auto-update. State object:
    *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",

@@ -42,12 +42,24 @@ export interface OptionCardData {
   kind?: "computer-handoff";
 }
 
+export interface SecretRequestCardData {
+  target: string;
+  label: string;
+  description: string;
+  placeholder?: string;
+  helpUrl?: string;
+  requestKey: string;
+  provided?: boolean;
+  dismissed?: boolean;
+}
+
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "event" | "screen" | "room";
+  kind: "text" | "options" | "activity" | "event" | "screen" | "room" | "secret";
   text?: string;
   card?: OptionCardData;
+  secret?: SecretRequestCardData;
   /** activity messages: tool name + outcome */
   tool?: { name: string; ok?: boolean };
   /** Small durable workspace event shown as a chat pill. */
@@ -80,6 +92,10 @@ export interface BotRecord {
   unread: boolean;
   /** multibot: sekcja sidebaru — pusta/nieobecna = lista główna. */
   section?: string;
+  /** One optional chief per section. */
+  chiefOfStaff?: boolean;
+  /** Per-bot Composio account selection, keyed by toolkit slug. */
+  composioAccounts?: Record<string, string>;
   modelSelection: ModelSelection;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
@@ -272,6 +288,20 @@ export class Store {
     const bot = this.bot(id);
     if (!bot) return null;
     Object.assign(bot, patch);
+    this.saveBots();
+    return bot;
+  }
+
+  setChiefOfStaff(id: string, value: boolean): BotRecord | null {
+    const bot = this.bot(id);
+    if (!bot) return null;
+    const section = bot.section?.trim() ?? "";
+    if (value) {
+      for (const peer of this.bots) {
+        if (peer.id !== id && peer.chiefOfStaff && (peer.section?.trim() ?? "") === section) peer.chiefOfStaff = false;
+      }
+    }
+    bot.chiefOfStaff = value;
     this.saveBots();
     return bot;
   }
