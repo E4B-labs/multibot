@@ -11,8 +11,6 @@ import { ChatFindBar } from "./ChatFindBar";
 // multibot: flat replies — cytowanie wiadomości (port z OpenMausBot #437)
 import { ReplyQuote, replyTargetOf } from "./ReplyQuote";
 import { Reply as ReplyIcon } from "lucide-react";
-// multibot: honest execution timeline (port z OpenMausBot)
-import { timelineEvents } from "@/lib/taskTimeline";
 import { routineStartName, slashCommandLabel } from "@/lib/transcriptChips";
 import { useStore, formatTime, type Bot, type Message } from "@/state/store";
 import { MausAvatar } from "./Avatar";
@@ -320,34 +318,6 @@ function NewSeparator() {
   );
 }
 
-// multibot: honest execution timeline (port z OpenMausBot, czysta projekcja
-// transkryptu — zero zgadywania, tylko zapisane activity/screen/text).
-function TaskTimeline({ messages }: { messages: Message[] }) {
-  const events = timelineEvents(messages as unknown as Parameters<typeof timelineEvents>[0]);
-  if (events.length === 0) return null;
-  const visible = events.slice(-8);
-  const dot: Record<string, string> = {
-    running: "bg-accent animate-pulse",
-    complete: "bg-emerald-500",
-    failed: "bg-danger",
-    observed: "bg-ink-secondary",
-  };
-  return (
-    <div className="mx-5 mb-2 rounded-xl border border-hairline/40 bg-raised/30 px-3 py-2">
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">Timeline</div>
-      <div className="flex flex-col gap-1">
-        {visible.map((event) => (
-          <div key={event.id} className="flex items-center gap-2 text-[12.5px] leading-none">
-            <span className={cn("size-1.5 shrink-0 rounded-full", dot[event.state] ?? "bg-ink-secondary")} />
-            <span className="truncate text-ink-secondary">{event.label}</span>
-            <span className="ml-auto shrink-0 text-[11px] tabular-nums text-ink-secondary/60">{formatTime(event.at)}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function ChatView({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
@@ -559,10 +529,8 @@ export function ChatView({ bot }: { bot: Bot }) {
         {findOpen && (
           <ChatFindBar messages={bot.messages} onClose={closeFind} onJump={jumpToHit} />
         )}
-        {/* multibot: execution timeline — czysta projekcja ostatniego stanu wątku */}
-        <TaskTimeline messages={bot.messages} />
-      {/* Messages */}
-      <div
+        {/* Messages */}
+        <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-5 [overflow-anchor:none]"
         onWheel={(e) => {
@@ -658,7 +626,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           )}
           {streaming ? <StreamingBubble text={streaming} /> : null}
         </div>
-      </div>
+        </div>
         {/* desktop drag&drop overlay — any file dropped onto chat becomes an attachment */}
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-app/70 backdrop-blur-[2px]">
