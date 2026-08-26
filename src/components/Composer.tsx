@@ -1,7 +1,7 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, Brain, CalendarClock, Camera, File as FileIcon, Images, Loader2, Mic, Plus, Puzzle, SlidersHorizontal, Wand2, Wrench, X } from "lucide-react";
-import { useStore, type Bot } from "@/state/store";
+import { ArrowUp, Brain, CalendarClock, Camera, File as FileIcon, Images, Loader2, Mic, Plus, Puzzle, Shield, SlidersHorizontal, Wand2, Wrench, X } from "lucide-react";
+import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
 import { MausAvatar } from "./Avatar";
@@ -10,6 +10,108 @@ import { useLanguage } from "@/lib/language";
 import { parseSchedule, type PresetOrUnknown } from "@/lib/routineSchedule";
 import { AttachmentCard } from "./AttachmentCard";
 import { PeerChatIndicator, usePeerChat } from "./PeerChatIndicator";
+
+// multibot: szybki przełącznik dostępu w composerze (port z OpenMausBot #442,
+// tam PermissionModeSelector) — te same endpointy co EngineAutonomy.
+type ComposerAccess = "read-only" | "approval" | "full";
+
+const ACCESS_LABELS: Record<ComposerAccess, { pl: string; en: string }> = {
+  "read-only": { pl: "Tylko odczyt", en: "Read Only" },
+  approval: { pl: "Pytaj o zgodę", en: "Ask for approval" },
+  full: { pl: "Pełny dostęp", en: "Full Access" },
+};
+
+function normalizeAccess(value: unknown): ComposerAccess {
+  return value === "read-only" || value === "full" ? value : "approval";
+}
+
+function ComposerAccessPill({ bot }: { bot: Bot }) {
+  const polish = useLanguage() === "pl";
+  const [access, setAccess] = useState<ComposerAccess>("approval");
+  const [ready, setReady] = useState(false);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    api(`/api/bots/${bot.id}/access`)
+      .then((value: { access?: string }) => {
+        if (!active) return;
+        setAccess(normalizeAccess(value.access));
+        setReady(true);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [bot.id]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const choose = (next: ComposerAccess) => {
+    setOpen(false);
+    if (next === access) return;
+    const previous = access;
+    setAccess(next);
+    api(`/api/bots/${bot.id}/access`, { method: "PATCH", body: JSON.stringify({ access: next }) })
+      .then((value: { access?: string }) => setAccess(normalizeAccess(value.access)))
+      .catch(() => setAccess(previous));
+  };
+
+  if (!ready) return null;
+  return (
+    <div ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={cn(
+          "flex h-8 items-center gap-1 rounded-full px-2 text-[11px] font-medium",
+          open ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised hover:text-ink",
+        )}
+        title={`${polish ? "Dostęp" : "Access"}: ${polish ? ACCESS_LABELS[access].pl : ACCESS_LABELS[access].en}`}
+      >
+        <Shield size={14} />
+        <span className="hidden lg:inline">{polish ? ACCESS_LABELS[access].pl : ACCESS_LABELS[access].en}</span>
+      </button>
+      {open && (
+        <div role="menu" className="absolute bottom-full right-0 z-30 mb-2 min-w-44 overflow-hidden rounded-xl border border-hairline/40 bg-card p-1 shadow-xl">
+          {(Object.keys(ACCESS_LABELS) as ComposerAccess[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              role="menuitemradio"
+              aria-checked={access === item}
+              onClick={() => choose(item)}
+              className={cn(
+                "flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-left text-[12px] text-ink",
+                access === item ? "bg-raised" : "hover:bg-raised/60",
+              )}
+            >
+              {polish ? ACCESS_LABELS[item].pl : ACCESS_LABELS[item].en}
+              {access === item && <span className="text-accent">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
@@ -884,6 +986,8 @@ setText("");
             </div>
           )}
         </div>
+        {/* multibot: szybki przełącznik dostępu bota, obok poziomu rozumowania */}
+        <ComposerAccessPill bot={bot} />
         <button
           onClick={toggleMic}
           className={cn(

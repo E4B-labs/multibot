@@ -4,6 +4,8 @@ import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor
 import { EventChip } from "./EventChip";
 import { SkillPill } from "./SkillPill";
 import { AttachmentCard } from "./AttachmentCard";
+// multibot: lightbox załączników-obrazków (port z OpenMausBot #436)
+import { AttachmentPreviewDialog } from "./AttachmentPreview";
 // multibot: pasek szukania w transkrypcie (port z OpenMausBot #437)
 import { ChatFindBar } from "./ChatFindBar";
 // multibot: flat replies — cytowanie wiadomości (port z OpenMausBot #437)
@@ -31,6 +33,7 @@ const USER_COLLAPSE_LINES = 8;
 
 function MessageAttachment({ botId, file }: { botId: string; file: NonNullable<Message["attachments"]>[number] }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   useEffect(() => {
     let active = true;
     let objectUrl = "";
@@ -50,9 +53,15 @@ function MessageAttachment({ botId, file }: { botId: string; file: NonNullable<M
 
   if (file.mime.startsWith("image/")) {
     return url ? (
-      <a href={url} download={file.name} className="block">
-        <img src={url} alt={file.name} className="max-h-64 w-auto max-w-full rounded-xl object-contain" />
-      </a>
+      <>
+        {/* multibot: klik otwiera lightbox; pobieranie przeniosłem do dialogu */}
+        <button type="button" onClick={() => setPreviewOpen(true)} className="block cursor-zoom-in">
+          <img src={url} alt={file.name} className="max-h-64 w-auto max-w-full rounded-xl object-contain" />
+        </button>
+        {previewOpen && (
+          <AttachmentPreviewDialog url={url} name={file.name} onClose={() => setPreviewOpen(false)} />
+        )}
+      </>
     ) : <div className="h-24 w-40 animate-pulse rounded-xl bg-raised" />;
   }
   return (
