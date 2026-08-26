@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { scoutProject } from "./project-scout";
+import { scoutProject } from "./project-scout.ts";
 
 function tempProject(setup: (cwd: string) => void): string {
   const cwd = join(tmpdir(), `mb-scout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -37,7 +37,7 @@ describe("scoutProject", () => {
     const result = scoutProject(cwd);
     expect(result.kind).toBeUndefined();
     const manifest = result as Exclude<typeof result, ScoutError>;
-    const roles = manifest.specialists.map((s) => s.role);
+    const roles: string[] = manifest.specialists.map((s: { role: string }) => s.role);
     expect(roles).toContain("Frontend");
     expect(roles).toContain("Testing");
     expect(roles).toContain("Documentation");
