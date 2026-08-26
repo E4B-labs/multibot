@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { promptWithReply, replyExcerpt, resolveReplyTarget } from "./replies";
+import { promptWithReply, replyExcerpt, resolveReplyTarget } from "./replies.ts";
 
 describe("reply excerpts", () => {
   it("collapses whitespace and truncates long quotes", () => {
