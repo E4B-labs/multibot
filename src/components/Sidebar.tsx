@@ -438,6 +438,10 @@ function GroupContextMenu({ menu, onClose }: { menu: GroupMenuState; onClose: ()
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [busy, setBusy] = useState(false);
+  // multibot: zmiana nazwy grupy (port z OpenMausBot #343) — inline input
+  // w menu, Enter zapisuje (IME-safe), Escape wraca do pozycji menu.
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(menu.group.name || "");
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -471,20 +475,97 @@ function GroupContextMenu({ menu, onClose }: { menu: GroupMenuState; onClose: ()
 
   const top = Math.min(menu.y, window.innerHeight - 90);
   const left = Math.min(menu.x, window.innerWidth - 220);
+
+  const saveRename = async () => {
+    const name = draft.trim().slice(0, 100);
+    if (!name || name === menu.group.name) return setRenaming(false);
+    setBusy(true);
+    try {
+      const res = await authFetch(`/api/groups/${encodeURIComponent(menu.group.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `${res.status} ${res.statusText}`);
+      dispatch({ type: "workspaceChanged", botId: "", resource: "groups" });
+      onClose();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+      setBusy(false);
+      setRenaming(false);
+    }
+  };
+
+  const menuItem = (
+    icon: React.ReactNode,
+    label: string,
+    onClick?: () => void,
+    opts?: { danger?: boolean; disabled?: boolean },
+  ) => (
+    <button
+      key={label}
+      disabled={opts?.disabled || busy}
+      onClick={() => {
+        onClick?.();
+        if (!opts?.disabled) onClose();
+      }}
+      className={cn(
+        "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]",
+        opts?.danger ? "text-danger" : "text-ink",
+        opts?.disabled ? "cursor-default opacity-40" : "hover:bg-raised/70",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
   return (
     <div
       data-group-menu
       style={{ top, left }}
       className="fixed z-40 w-[208px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60"
     >
-      <button
-        onClick={() => void remove()}
-        disabled={busy}
-        className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger hover:bg-danger/10 disabled:cursor-default disabled:opacity-50"
-      >
-        {busy ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-        {polish ? "Usuń grupę" : "Delete group"}
-      </button>
+      {renaming ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void saveRename();
+          }}
+          className="px-2 py-1"
+        >
+          <input
+            autoFocus
+            value={draft}
+            maxLength={100}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                setRenaming(false);
+              }
+            }}
+            onBlur={() => void saveRename()}
+            aria-label={polish ? "Nazwa grupy" : "Group name"}
+            className="w-full rounded-lg bg-inset px-2 py-1.5 text-[13px] text-ink outline-none"
+          />
+        </form>
+      ) : (
+        <>
+          {menuItem(<Pencil size={16} className="text-ink-secondary" />, polish ? "Zmień nazwę" : "Rename", () => {
+            setDraft(menu.group.name || "");
+            setTimeout(() => setRenaming(true), 0);
+          })}
+          <button
+            onClick={() => void remove()}
+            disabled={busy}
+            className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger hover:bg-danger/10 disabled:cursor-default disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            {polish ? "Usuń grupę" : "Delete group"}
+          </button>
+        </>
+      )}
     </div>
   );
 }

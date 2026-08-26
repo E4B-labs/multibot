@@ -58,6 +58,36 @@ def test_create_rejects_empty_and_unknown_bot(monkeypatch, tmp_path):
         groups.create("bad", ["known", "ghost"])
 
 
+def test_rename_group_trims_persists_and_validates(monkeypatch, tmp_path):
+    monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(bots, "get_bot", lambda bid: {"id": bid})
+    group = groups.create("room", ["a"])
+
+    renamed = groups.rename(group["id"], "  Nowa nazwa  ")
+    assert renamed["name"] == "Nowa nazwa"
+    assert groups.get(group["id"])["name"] == "Nowa nazwa"
+
+    with pytest.raises(KeyError):
+        groups.rename("ghost-id", "x")
+    with pytest.raises(ValueError):
+        groups.rename(group["id"], "   ")
+    with pytest.raises(ValueError):
+        groups.rename(group["id"], "x" * 101)
+
+
+def test_api_group_rename_is_200_404_422(monkeypatch, tmp_path):
+    monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(bots, "get_bot", lambda bid: {"id": bid})
+    group = groups.create("room", ["a"])
+    with TestClient(app_module.app) as api:
+        r = api.patch(f"/api/groups/{group['id']}", json={"name": " Zmieniona "})
+        assert r.status_code == 200
+        assert r.json()["name"] == "Zmieniona"
+        assert api.get(f"/api/groups/{group['id']}").json()["name"] == "Zmieniona"
+        assert api.patch("/api/groups/ghost", json={"name": "x"}).status_code == 404
+        assert api.patch(f"/api/groups/{group['id']}", json={"name": "  "}).status_code == 422
+
+
 # --------------------------------------------------------------------------- #
 # run: tury po kolei + owner
 # --------------------------------------------------------------------------- #

@@ -2371,6 +2371,29 @@ const server = createServer(async (req, res) => {
         ? json(res, 200, { ok: true, engineSynced: removed.engineSynced })
         : json(res, 404, { error: "no such group" });
     }
+    // multibot: zmiana nazwy grupy (port z OpenMausBot #343) — harnessowy
+    // zapis jest źródłem dla UI, silnik dostaje PATCH best-effort.
+    if (m && method === "PATCH") {
+      const body = await readBody(req);
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      if (!name) return json(res, 400, { error: "room name must be a non-empty string" });
+      if (name.length > 100) return json(res, 400, { error: "room name must be at most 100 characters" });
+      let engineSynced = true;
+      try {
+        const base = await ensureEngine();
+        const remote = await fetch(`${base}/api/groups/${encodeURIComponent(m[1])}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        engineSynced = remote.ok || remote.status === 404;
+      } catch {
+        engineSynced = false; // silnik offline — nazwa i tak zostaje w harnessie
+      }
+      const renamed = groupStore.rename(m[1], name);
+      if (!renamed && !engineSynced) return json(res, 404, { error: "no such group" });
+      return json(res, 200, { ok: true, group: renamed, engineSynced });
+    }
     // multibot: mixed-provider group rooms. Engine stores membership/shadow
     // ids; harness owns actual turns so Claude/Codex/ACP bots answer through
     // their selected provider instead of being silently replaced by engine.

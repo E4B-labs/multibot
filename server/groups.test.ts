@@ -130,4 +130,28 @@ describe("grupy botów bez silnika", () => {
     },
     120_000,
   );
+
+  it(
+    "zmienia nazwę grupy i waliduje wejście (multibot port OMB #343)",
+    async () => {
+      const selection = { instanceId: "fake", model: "fake-model" };
+      const first = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${first.id}`, { modelSelection: selection });
+      const created = await api("POST", "/api/groups", { name: "Stara", bot_ids: [first.id] });
+      expect(created.status).toBe(201);
+      const gid = created.body.id as string;
+
+      const renamed = await api("PATCH", `/api/groups/${gid}`, { name: "  Nowa  " });
+      expect(renamed.status).toBe(200);
+      expect(renamed.body.group.name).toBe("Nowa");
+      expect((await api("GET", `/api/groups/${gid}`)).body.name).toBe("Nowa");
+
+      expect((await api("PATCH", `/api/groups/${gid}`, { name: "   " })).status).toBe(400);
+      expect((await api("PATCH", `/api/groups/${gid}`, { name: "x".repeat(101) })).status).toBe(400);
+      expect((await api("PATCH", "/api/groups/ghost", { name: "x" })).status).toBe(404);
+
+      await api("DELETE", `/api/groups/${gid}`);
+    },
+    60_000,
+  );
 });

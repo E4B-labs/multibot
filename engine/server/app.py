@@ -155,6 +155,10 @@ class GroupUpdate(BaseModel):
     bot_ids: list[str]
 
 
+class GroupRename(BaseModel):
+    name: str
+
+
 class PluginIn(BaseModel):
     name: str
     # F7: własny serwer MCP użytkownika — spec zamiast wpisu z katalogu.
@@ -820,6 +824,12 @@ def get_group(group_id: str) -> dict:
 def update_group_members(group_id: str, body: GroupUpdate) -> dict:
     """Podmień skład pokoju (multibot: drag & drop bota na grupę w UI)."""
     return groups.set_members(group_id, body.bot_ids)
+
+
+@app.patch("/api/groups/{group_id}")
+def rename_group(group_id: str, body: GroupRename) -> dict:
+    """Zmień nazwę pokoju (multibot port OMB #343)."""
+    return groups.rename(group_id, body.name)  # KeyError → 404, ValueError → 422
 
 
 @app.delete("/api/groups/{group_id}", status_code=204)

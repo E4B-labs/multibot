@@ -80,6 +80,22 @@ def set_members(group_id: str, bot_ids: list[str]) -> dict:
     return groups[group_id]
 
 
+def rename(group_id: str, name: str) -> dict:
+    """Zmień nazwę pokoju (multibot port OMB #343). Nieznany pokój → KeyError
+    (→ 404), pusta nazwa albo > 100 znaków → ValueError (→ 422)."""
+    clean = (name or "").strip()
+    if not clean:
+        raise ValueError("name required")
+    if len(clean) > 100:
+        raise ValueError("room name must be at most 100 characters")
+    groups = _load()
+    if group_id not in groups:
+        raise KeyError(f"no such group: {group_id}")
+    groups[group_id]["name"] = clean
+    _save(groups)
+    return groups[group_id]
+
+
 def delete(group_id: str) -> bool:
     groups = _load()
     if group_id not in groups:

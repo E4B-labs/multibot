@@ -94,4 +94,13 @@ export class GroupStore {
     this.save();
     return full;
   }
+
+  /** multibot: zmiana nazwy grupy (port OMB #343). Nieznane id → null. */
+  rename(id: string, name: string): GroupRecord | null {
+    const group = this.groups.find((g) => g.id === id);
+    if (!group) return null;
+    group.name = name;
+    this.save();
+    return this.get(id)!;
+  }
 }
