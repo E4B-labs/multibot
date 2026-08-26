@@ -481,6 +481,28 @@ describe("harness HTTP API", () => {
     expect(after.body.bots.find((b: { id: string }) => b.id === bot.id)).toBeUndefined();
   });
 
+  it("patches a bot section with validation and clearing (multibot port OMB #296)", async () => {
+    const created = await api("POST", "/api/bots");
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+
+    const assigned = await api("PATCH", `/api/bots/${bot.id}`, { section: "  Research  " });
+    expect(assigned.status).toBe(200);
+    expect(assigned.body.bot.section).toBe("Research");
+
+    const tooLong = await api("PATCH", `/api/bots/${bot.id}`, { section: "x".repeat(61) });
+    expect(tooLong.status).toBe(400);
+
+    const wrongType = await api("PATCH", `/api/bots/${bot.id}`, { section: 7 });
+    expect(wrongType.status).toBe(400);
+
+    const cleared = await api("PATCH", `/api/bots/${bot.id}`, { section: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.bot.section).toBeUndefined();
+
+    await api("DELETE", `/api/bots/${bot.id}`);
+  });
+
   it("persists an answered onboarding card", async () => {
     const { body } = await api("GET", "/api/bots");
     const bot = body.bots[0];

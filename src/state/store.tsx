@@ -81,6 +81,8 @@ export interface Bot {
   /** multibot: id pierwszej nieprzeczytanej wiadomości — nad nią rysujemy
    *  separator "NEW" (wyczyszczany przy otwarciu czatu / select). */
   firstUnreadId?: string | null;
+  /** multibot: sekcja sidebaru (port z OpenMausBot #296) — brak = lista główna. */
+  section?: string;
   busy?: boolean;
   // multibot: why the bot is waiting on a human (login/captcha/question); null/absent = not waiting.
   // Arrives via the same `{kind:"bot"}` SSE frame as every other bot patch.
@@ -226,7 +228,9 @@ type Action =
           Bot,
           "name" | "title" | "description" | "notifications" | "color" | "mascotExpression" | "mascotShape" | "pinned" | "hidden"
         >
-      >;
+        // multibot: sekcja dopuszcza null — JSON.stringify wycina undefined,
+        // a null musi dolecieć do serwera, żeby wyczyścić pole.
+      > & { section?: string | null };
     };
 
 function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppState {
@@ -570,7 +574,13 @@ function reducer(state: AppState, action: Action): AppState {
       const next = mascotChanged
         ? withMascotMotion(state, action.botId, "customize")
         : state;
-      return updateBot(next, action.botId, (b) => ({ ...b, ...action.patch }));
+      return updateBot(next, action.botId, (b) => {
+        // multibot: section null = wyczyszczona (zgodnie z PATCH-em serwera)
+        const { section, ...rest } = action.patch;
+        const merged = { ...b, ...rest };
+        if (section !== undefined) merged.section = section ?? undefined;
+        return merged;
+      });
     }
     // handled entirely by the async wrapper — but the user's message must
     // appear instantly, not after the server round-trip (SSE messageAdded)

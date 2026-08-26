@@ -2480,9 +2480,22 @@ const server = createServer(async (req, res) => {
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
     if (m && method === "PATCH") {
       const body = await readBody(req);
+      // multibot: sekcja sidebaru (port z OpenMausBot #296) — null/"" czyści,
+      // inaczej trim i limit 60 znaków.
+      if (body.section !== undefined) {
+        if (body.section !== null && typeof body.section !== "string") {
+          return json(res, 400, { error: "section must be a string" });
+        }
+        const section = typeof body.section === "string" ? body.section.trim() : "";
+        if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
+      }
       const patch: Record<string, unknown> = {};
       for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "color", "mascotExpression", "mascotShape", "pinned", "hidden"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (body.section !== undefined) {
+        const section = typeof body.section === "string" ? body.section.trim() : "";
+        patch.section = section || undefined;
       }
       const previous = store.bot(m[1]);
       // multibot: patchBot mutuje rekord w miejscu (Object.assign), więc

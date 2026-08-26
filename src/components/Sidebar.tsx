@@ -88,7 +88,16 @@ interface GroupMenuState {
   y: number;
 }
 
-function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => void }) {
+function BotContextMenu({
+  menu,
+  onClose,
+  onMoveToSection,
+}: {
+  menu: MenuState;
+  onClose: () => void;
+  /** multibot: sekcje sidebaru (port z OpenMausBot #296) */
+  onMoveToSection?: (botId: string) => void;
+}) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const bot = state.bots.find((b) => b.id === menu.botId);
@@ -151,10 +160,11 @@ function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
           bot.pinned ? polish ? "Odepnij" : "Unpin" : polish ? "Przypnij" : "Pin",
           () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
         ),
-        item(<FolderPlus size={16} className="text-ink-secondary" />, polish ? "Przenieś do nowej sekcji" : "Move to new section", undefined, {
-          disabled: true,
-          hint: polish ? "Wkrótce" : "Coming soon",
-        }),
+        item(
+          <FolderPlus size={16} className="text-ink-secondary" />,
+          bot.section ? polish ? "Zmień sekcję" : "Change section" : polish ? "Przenieś do sekcji" : "Move to section",
+          () => onMoveToSection?.(bot.id),
+        ),
         item(<BellDot size={16} className="text-ink-secondary" />, polish ? "Oznacz jako nieprzeczytane" : "Mark as Unread", () =>
           dispatch({ type: "markUnread", botId: bot.id }),
         ),
@@ -178,6 +188,121 @@ function BotContextMenu({ menu, onClose }: { menu: MenuState; onClose: () => voi
           danger: true,
         }),
       ]}
+    </div>
+  );
+}
+
+// multibot: nagłówek sekcji botów na liście (port z OpenMausBot #296)
+function SectionDivider({ name }: { name: string }) {
+  return (
+    <div className="flex items-center gap-2 px-3 pb-1 pt-3">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{name}</span>
+      <div className="h-px flex-1 bg-hairline/40" />
+    </div>
+  );
+}
+
+/** Popover „przenieś do sekcji": istniejące sekcje jako chips, pole na nową,
+ * usunięcie z sekcji. Sam tylko dispatchuje updateBot. */
+function SectionPicker({
+  botId,
+  anchor,
+  onClose,
+}: {
+  botId: string;
+  anchor: { x: number; y: number };
+  onClose: () => void;
+}) {
+  const { state, dispatch } = useStore();
+  const polish = useLanguage() === "pl";
+  const [draft, setDraft] = useState("");
+  const bot = state.bots.find((b) => b.id === botId);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest("[data-section-picker]")) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("blur", onClose);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("blur", onClose);
+    };
+  }, [onClose]);
+
+  if (!bot) return null;
+  const top = Math.min(anchor.y, window.innerHeight - 300);
+  const left = Math.min(anchor.x, window.innerWidth - 250);
+  const names = [...new Set(state.bots.map((b) => b.section?.trim()).filter((s): s is string => Boolean(s)))];
+  // multibot: czyszczenie jedzie jako null (nie undefined) — JSON.stringify
+  // wycina undefined i pole nigdy nie dotarłoby do PATCH-a
+  const assign = (section: string | null) => {
+    dispatch({ type: "updateBot", botId, patch: { section } });
+    onClose();
+  };
+
+  return (
+    <div
+      data-section-picker
+      style={{ top, left }}
+      className="fixed z-40 w-[236px] overflow-hidden rounded-xl border border-hairline/50 bg-card p-1.5 shadow-2xl shadow-black/60"
+    >
+      <div className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">
+        {polish ? "Sekcje" : "Sections"}
+      </div>
+      {names.length > 0 && (
+        <div className="flex flex-wrap gap-1 px-1 pb-1">
+          {names.map((name) => (
+            <button
+              key={name}
+              onClick={() => assign(name)}
+              className={cn(
+                "rounded-full border border-hairline/50 px-2 py-1 text-[12px]",
+                bot.section === name ? "bg-accent text-white" : "text-ink hover:bg-raised",
+              )}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const name = draft.trim().slice(0, 60);
+          if (name) assign(name);
+        }}
+        className="flex gap-1 px-1 py-1"
+      >
+        <input
+          autoFocus
+          value={draft}
+          maxLength={60}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={polish ? "Nowa sekcja…" : "New section…"}
+          className="min-w-0 flex-1 rounded-lg bg-inset px-2 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-secondary/60"
+        />
+        <button
+          type="submit"
+          disabled={!draft.trim()}
+          aria-label={polish ? "Dodaj do sekcji" : "Add to section"}
+          className="shrink-0 rounded-lg bg-raised px-2.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-40"
+        >
+          ✓
+        </button>
+      </form>
+      {bot.section && (
+        <button
+          onClick={() => assign(null)}
+          className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-danger hover:bg-raised/70"
+        >
+          <FolderPlus size={14} className="rotate-180" />
+          {polish ? "Usuń z sekcji" : "Remove from section"}
+        </button>
+      )}
     </div>
   );
 }
@@ -948,6 +1073,28 @@ export function Sidebar() {
   const visibleBots = state.bots
     .filter((b) => !b.hidden && !localGroupBotIds.has(b.id))
     .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
+  // multibot: sekcje sidebaru (port z OpenMausBot #296) — przypięte zostają na
+  // górze bez podziałów; reszta dzieli się na „bez sekcji" i grupy w kolejności
+  // pierwszego wystąpienia. W zwiniętej szynie podziałów nie rysujemy.
+  const [sectionPicker, setSectionPicker] = useState<{ botId: string; x: number; y: number } | null>(null);
+  const unpinned = visibleBots.filter((b) => !b.pinned);
+  const unsectionedBots = collapsed ? [] : unpinned.filter((b) => !b.section);
+  const sectionedBots = collapsed
+    ? []
+    : (() => {
+        const out: Array<{ name: string; bots: Bot[] }> = [];
+        for (const b of unpinned) {
+          if (!b.section) continue;
+          let group = out.find((s) => s.name === b.section);
+          if (!group) {
+            group = { name: b.section, bots: [] };
+            out.push(group);
+          }
+          group.bots.push(b);
+        }
+        return out;
+      })();
+  const flatBots = collapsed ? visibleBots : [...visibleBots.filter((b) => b.pinned), ...unsectionedBots];
   // multibot: F9-FE — kandydaci do grup: cała flota, także ukryci. Kolejność
   // stabilna z listy botów; wybrany driver nie usuwa bota z grup.
   const groupBots = state.bots;
@@ -1104,7 +1251,7 @@ export function Sidebar() {
           onUnhover={hideHoverCard}
         />
         <div className="flex flex-col gap-0.5">
-          {visibleBots.map((b) => (
+          {flatBots.map((b) => (
             <BotListItem
               key={b.id}
               bot={b}
@@ -1115,6 +1262,24 @@ export function Sidebar() {
             />
           ))}
         </div>
+        {!collapsed &&
+          sectionedBots.map((group) => (
+            <div key={group.name}>
+              <SectionDivider name={group.name} />
+              <div className="flex flex-col gap-0.5">
+                {group.bots.map((b) => (
+                  <BotListItem
+                    key={b.id}
+                    bot={b}
+                    onMenu={setMenu}
+                    collapsed={collapsed}
+                    onHover={showHoverCard}
+                    onUnhover={hideHoverCard}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
       </div>
 
       {/* Footer */}
@@ -1174,8 +1339,15 @@ export function Sidebar() {
         )}
       </div>
 
-      {menu && <BotContextMenu menu={menu} onClose={() => setMenu(null)} />}
+      {menu && (
+        <BotContextMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          onMoveToSection={(botId) => setSectionPicker({ botId, x: menu.x, y: menu.y })}
+        />
+      )}
       {groupMenu && <GroupContextMenu menu={groupMenu} onClose={() => setGroupMenu(null)} />}
+      {sectionPicker && <SectionPicker botId={sectionPicker.botId} anchor={sectionPicker} onClose={() => setSectionPicker(null)} />}
       {hover && (() => {
         const bot = state.bots.find((b) => b.id === hover.botId);
         return bot ? <BotHoverCard bot={bot} top={hover.top} left={hover.left} /> : null;

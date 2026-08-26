@@ -78,6 +78,8 @@ export interface BotRecord {
   /** Optional silhouette from the built-in mascot icon set. */
   mascotShape?: MascotShape;
   unread: boolean;
+  /** multibot: sekcja sidebaru — pusta/nieobecna = lista główna. */
+  section?: string;
   modelSelection: ModelSelection;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
