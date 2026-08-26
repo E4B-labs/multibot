@@ -1,9 +1,11 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, Upload, Wand2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, Search, Upload, Wand2 } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
 import { SkillPill } from "./SkillPill";
 import { AttachmentCard } from "./AttachmentCard";
+// multibot: pasek szukania w transkrypcie (port z OpenMausBot #437)
+import { ChatFindBar } from "./ChatFindBar";
 import { routineStartName, slashCommandLabel } from "@/lib/transcriptChips";
 import { useStore, formatTime, type Bot, type Message } from "@/state/store";
 import { MausAvatar } from "./Avatar";
@@ -90,7 +92,7 @@ function ModelBadge({ model }: { model: string }) {
   );
 }
 
-function Bubble({ botId, message }: { botId: string; message: Message }) {
+function Bubble({ botId, message, highlighted }: { botId: string; message: Message; highlighted?: boolean }) {
   const polish = useLanguage() === "pl";
   const user = message.role === "user";
   const [expanded, setExpanded] = useState(false);
@@ -98,8 +100,16 @@ function Bubble({ botId, message }: { botId: string; message: Message }) {
   const collapsible =
     user && !expanded && (text.length > USER_COLLAPSE_CHARS || text.split("\n").length > USER_COLLAPSE_LINES);
   return (
-    // multibot: group/msg reveals the SpeakButton (TTS) on bubble hover
-    <div className={cn("group/msg flex w-full", user ? "justify-end" : "justify-start")}>
+    // multibot: group/msg reveals the SpeakButton (TTS) on bubble hover;
+    // data-mb-msg = kotwica dla find-in-chat
+    <div
+      data-mb-msg={message.id}
+      className={cn(
+        "group/msg flex w-full rounded-2xl transition-shadow",
+        user ? "justify-end" : "justify-start",
+        highlighted ? "ring-2 ring-accent/70" : "",
+      )}
+    >
       <div
         className={cn(
           "max-w-[70%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
@@ -273,9 +283,43 @@ export function ChatView({ bot }: { bot: Bot }) {
   const touchY = useRef(0);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
+
+  // multibot: find-in-chat — Ctrl/Cmd+F otwiera pasek, skok podświetla dymek
+  const [findOpen, setFindOpen] = useState(false);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const jumpToHit = useCallback((id: string) => {
+    setFollow(false);
+    setHighlightId(id);
+  }, []);
+  useEffect(() => {
+    if (!highlightId) return;
+    document
+      .querySelector(`[data-mb-msg="${CSS.escape(highlightId)}"]`)
+      ?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [highlightId]);
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setHighlightId(null);
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFollow(false);
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const latestSkillEvent = [...bot.messages].reverse().find((message) => message.event?.type === "skill-created")?.id;
 
   useEffect(() => setFollow(true), [bot.id]);
+  useEffect(() => {
+    // zmiana bota zamyka find — trafienia należą do starego transkryptu
+    setFindOpen(false);
+    setHighlightId(null);
+  }, [bot.id]);
   useEffect(() => {
     let active = true;
     authFetch(`/api/bots/${bot.id}/skills`)
@@ -356,6 +400,20 @@ export function ChatView({ bot }: { bot: Bot }) {
         <div className="flex items-center gap-2">
           <ModelPicker bot={bot} />
           <button
+            onClick={() => {
+              setFollow(false);
+              setFindOpen((open) => !open);
+            }}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title={polish ? "Szukaj w rozmowie (Ctrl+F)" : "Find in chat (Ctrl+F)"}
+            aria-label={polish ? "Szukaj w rozmowie" : "Find in chat"}
+          >
+            <Search size={18} />
+          </button>
+          <button
             onClick={() => dispatch({ type: "toggleComputer" })}
             className={cn(
               "rounded-md p-1.5 hover:bg-raised",
@@ -403,6 +461,9 @@ export function ChatView({ bot }: { bot: Bot }) {
           wiadomości, nie w całej kolumnie czatu — inaczej jej środek wypadał
           między nagłówkiem a polem pisania i karta wyglądała na przesuniętą. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
+        {findOpen && (
+          <ChatFindBar messages={bot.messages} onClose={closeFind} onJump={jumpToHit} />
+        )}
       {/* Messages */}
       <div
         ref={scrollRef}
@@ -455,7 +516,9 @@ export function ChatView({ bot }: { bot: Bot }) {
               default:
                 // multibot: pigułka zdarzenia wygrywa z dymkiem, gdy treść
                 // wiadomości jest samym zdarzeniem (patrz userEventChip)
-                child = userEventChip(m) ?? <Bubble key={m.id} botId={bot.id} message={m} />;
+                child = userEventChip(m) ?? (
+                  <Bubble key={m.id} botId={bot.id} message={m} highlighted={highlightId === m.id} />
+                );
             }
             return (
               <Fragment key={m.id}>
