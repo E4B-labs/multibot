@@ -55,6 +55,8 @@ export interface Message {
   attachments?: Array<{ id: string; name: string; mime: string; size: number }>;
   /** multibot (F12): model, który obsłużył tę wiadomość — badge w UI */
   model?: string;
+  /** multibot: flat reply — id wiadomości, na którą odpowiada ta wiadomość. */
+  replyToId?: string;
   /** optimistic echo — user message waiting for the server's confirmation */
   pending?: boolean;
   at: number;
@@ -177,7 +179,7 @@ type Action =
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
   | { type: "selectComputer"; id: string }
-  | { type: "send"; botId: string; text: string; reasoning?: string; attachmentIds?: string[] }
+  | { type: "send"; botId: string; text: string; reasoning?: string; attachmentIds?: string[]; replyToId?: string }
   | { type: "answerCard"; botId: string; messageId: string; answer: string }
   | { type: "dismissCard"; botId: string; messageId: string }
   | { type: "newBot" }
@@ -579,6 +581,7 @@ function reducer(state: AppState, action: Action): AppState {
         role: "user",
         kind: "text",
         text: action.text,
+        ...(action.replyToId ? { replyToId: action.replyToId } : {}),
         at: Date.now(),
         pending: true,
       };
@@ -695,6 +698,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               text: action.text,
               ...(action.reasoning ? { reasoning: action.reasoning } : {}),
               ...(action.attachmentIds?.length ? { attachmentIds: action.attachmentIds } : {}),
+              ...(action.replyToId ? { replyToId: action.replyToId } : {}),
             }),
           }).catch(showError);
           break;

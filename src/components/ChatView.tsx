@@ -6,6 +6,9 @@ import { SkillPill } from "./SkillPill";
 import { AttachmentCard } from "./AttachmentCard";
 // multibot: pasek szukania w transkrypcie (port z OpenMausBot #437)
 import { ChatFindBar } from "./ChatFindBar";
+// multibot: flat replies — cytowanie wiadomości (port z OpenMausBot #437)
+import { ReplyQuote, replyTargetOf } from "./ReplyQuote";
+import { Reply as ReplyIcon } from "lucide-react";
 import { routineStartName, slashCommandLabel } from "@/lib/transcriptChips";
 import { useStore, formatTime, type Bot, type Message } from "@/state/store";
 import { MausAvatar } from "./Avatar";
@@ -92,7 +95,25 @@ function ModelBadge({ model }: { model: string }) {
   );
 }
 
-function Bubble({ botId, message, highlighted }: { botId: string; message: Message; highlighted?: boolean }) {
+function Bubble({
+  botId,
+  message,
+  highlighted,
+  onReply,
+  replyTarget,
+  replyBotName,
+  onJumpTo,
+}: {
+  botId: string;
+  message: Message;
+  highlighted?: boolean;
+  onReply?: (message: Message) => void;
+  /** multibot: wiadomość cytowana przez tę wiadomość (flat reply) */
+  replyTarget?: Message;
+  /** nazwa bota do etykiety cytatu („Replying to Atlas") */
+  replyBotName?: string;
+  onJumpTo?: (id: string) => void;
+}) {
   const polish = useLanguage() === "pl";
   const user = message.role === "user";
   const [expanded, setExpanded] = useState(false);
@@ -118,6 +139,14 @@ function Bubble({ botId, message, highlighted }: { botId: string; message: Messa
         )}
       >
         {message.model && <ModelBadge model={message.model} />}
+        {replyTarget && (
+          <ReplyQuote
+            compact
+            message={replyTarget}
+            botName={replyBotName}
+            onJump={() => onJumpTo?.(replyTarget.id)}
+          />
+        )}
         {!!message.attachments?.length && message.attachments.some((f) => f.name.toLowerCase() !== "skill.md") && (
           <div className={cn("flex flex-col gap-2", text && "mb-2")}>
             {message.attachments.filter((f) => f.name.toLowerCase() !== "skill.md").map((file) => <MessageAttachment key={file.id} botId={botId} file={file} />)}
@@ -142,6 +171,20 @@ function Bubble({ botId, message, highlighted }: { botId: string; message: Messa
             {/* multibot: TTS — see SpeakButton.tsx; renders null off-slafy */}
             <SpeakButton text={text} />
           </>
+        )}
+        {/* multibot: flat reply — przycisk na hover, jak SpeakButton */}
+        {onReply && message.kind === "text" && (
+          <div className="mt-1 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100">
+            <button
+              type="button"
+              onClick={() => onReply(message)}
+              aria-label={polish ? "Odpowiedz" : "Reply"}
+              title={polish ? "Odpowiedz" : "Reply"}
+              className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+            >
+              <ReplyIcon size={13} />
+            </button>
+          </div>
         )}
         <div className={cn("mt-1.5 text-[11px] leading-none", user ? "text-right text-ink/55" : "text-left text-ink-secondary/60")}>
           {formatTime(message.at)}
@@ -297,6 +340,10 @@ export function ChatView({ bot }: { bot: Bot }) {
       .querySelector(`[data-mb-msg="${CSS.escape(highlightId)}"]`)
       ?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [highlightId]);
+  // multibot: flat reply — stan cytatu nad composerem
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  useEffect(() => setReplyTo(null), [bot.id]);
+
   const closeFind = useCallback(() => {
     setFindOpen(false);
     setHighlightId(null);
@@ -517,7 +564,16 @@ export function ChatView({ bot }: { bot: Bot }) {
                 // multibot: pigułka zdarzenia wygrywa z dymkiem, gdy treść
                 // wiadomości jest samym zdarzeniem (patrz userEventChip)
                 child = userEventChip(m) ?? (
-                  <Bubble key={m.id} botId={bot.id} message={m} highlighted={highlightId === m.id} />
+                  <Bubble
+                    key={m.id}
+                    botId={bot.id}
+                    message={m}
+                    highlighted={highlightId === m.id}
+                    onReply={setReplyTo}
+                    replyTarget={replyTargetOf(bot.messages, m.replyToId)}
+                    replyBotName={bot.name}
+                    onJumpTo={jumpToHit}
+                  />
                 );
             }
             return (
@@ -580,7 +636,18 @@ export function ChatView({ bot }: { bot: Bot }) {
         </button>
       )}
 
-      <Composer bot={bot} />
+      {/* multibot: flat reply — pasek cytatu nad composerem */}
+      {replyTo && (
+        <div className="px-5">
+          <ReplyQuote
+            message={replyTargetOf(bot.messages, replyTo.id) ?? replyTo}
+            botName={bot.name}
+            onClear={() => setReplyTo(null)}
+          />
+        </div>
+      )}
+
+      <Composer bot={bot} replyToId={replyTo?.id} onClearReply={() => setReplyTo(null)} />
 
     </main>
   );

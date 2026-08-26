@@ -60,6 +60,9 @@ export interface Message {
   attachments?: AttachmentMeta[];
   /** multibot (F12): model, który obsłużył tę wiadomość — badge w UI. */
   model?: string;
+  /** multibot: flat reply — id wiadomości, na którą odpowiada ta wiadomość.
+   * Addytywne i opcjonalne; stare zapisy czytają się bez migracji. */
+  replyToId?: string;
   at: number;
 }
 

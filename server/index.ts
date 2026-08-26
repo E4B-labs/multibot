@@ -54,6 +54,7 @@ import * as computerControl from "./computer-control.ts";
 import { claimPairing, pairingPending, startPairing } from "./pairing.ts";
 import { pairingQrSvg } from "./qr.ts";
 import { filterSearchResults, searchText, type SearchResult } from "./search.ts";
+import { promptWithReply, resolveReplyTarget } from "./replies.ts";
 import { matchVncRoute, mountVncUpgrade, proxyVncHttp } from "./computer-vnc-proxy.ts";
 import { broadcastWs, mountEventsWs } from "./events-ws.ts";
 import { mountEngineProxy } from "./engine/proxy.ts";
@@ -2618,6 +2619,12 @@ const server = createServer(async (req, res) => {
       const text = String(body.text ?? "").trim();
       const turnAttachments = attachments.resolveMany(m[1], body.attachmentIds);
       if (!text && !turnAttachments.length) return json(res, 400, { error: "text or attachment required" });
+      // multibot: flat reply — walidacja celu zanim cokolwiek pójdzie w turę
+      const replyBot = store.bot(m[1]);
+      if (!replyBot) return json(res, 404, { error: "no such bot" });
+      const replyTarget = resolveReplyTarget(store.messagesFor(replyBot.threadId), body.replyToId);
+      if (body.replyToId && !replyTarget) return json(res, 404, { error: "no such message to reply to" });
+      const turnText = replyTarget ? promptWithReply(text, replyTarget, replyBot.name) : text;
       const reasoning = isReasoningLevel(body.reasoning) ? body.reasoning : undefined;
       let taskText = text;
       let modelReply = turnAttachments.length ? null : await handleModelCommand(store.bot(m[1]), text);
@@ -2626,7 +2633,12 @@ const server = createServer(async (req, res) => {
         if (goalReply !== null) {
           const bot = store.bot(m[1]);
           if (!bot) return json(res, 404, { error: "no such bot" });
-          const userMessage = store.appendMessage(bot.threadId, { role: "user", kind: "text", text });
+          const userMessage = store.appendMessage(bot.threadId, {
+            role: "user",
+            kind: "text",
+            text,
+            ...(replyTarget ? { replyToId: replyTarget.id } : {}),
+          });
           const botMessage = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: goalReply });
           broadcast({ kind: "message", threadId: bot.threadId, message: userMessage });
           broadcast({ kind: "message", threadId: bot.threadId, message: botMessage });
@@ -2659,7 +2671,12 @@ const server = createServer(async (req, res) => {
       if (collab) {
         const botId = m[1];
         const owner = store.bot(botId)!;
-        const userMessage = store.appendMessage(owner.threadId, { role: "user", kind: "text", text });
+        const userMessage = store.appendMessage(owner.threadId, {
+          role: "user",
+          kind: "text",
+          text,
+          ...(replyTarget ? { replyToId: replyTarget.id } : {}),
+        });
         broadcast({ kind: "message", threadId: owner.threadId, message: userMessage });
         postRoomChip(botId, collab.room);
         const peersNamed = collab.room.bot_ids
@@ -2693,12 +2710,17 @@ const server = createServer(async (req, res) => {
       // i odpali jedną turą odpowiedzi na wszystkie wiadomości naraz.
       const busyBot = store.bot(m[1]);
       if (busyBot?.busy) {
-        const userMessage = store.appendMessage(busyBot.threadId, { role: "user", kind: "text", text });
+        const userMessage = store.appendMessage(busyBot.threadId, {
+          role: "user",
+          kind: "text",
+          text,
+          ...(replyTarget ? { replyToId: replyTarget.id } : {}),
+        });
         broadcast({ kind: "message", threadId: busyBot.threadId, message: userMessage });
-        queuedUserMessages.push(busyBot.id, taskText);
+        queuedUserMessages.push(busyBot.id, turnText);
         return json(res, 202, { ok: true, queued: true });
       }
-      await startTurn(m[1], taskText, { reasoning, attachments: turnAttachments });
+      await startTurn(m[1], turnText, { reasoning, attachments: turnAttachments });
       return json(res, 202, { ok: true });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/respond$/);

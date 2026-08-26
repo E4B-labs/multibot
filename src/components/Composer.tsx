@@ -131,7 +131,16 @@ function reasoningLevels(model: string) {
   return model.startsWith("gpt-5.6-") ? REASONING_LEVELS : REASONING_LEVELS.filter((level) => level.id !== "max");
 }
 
-export function Composer({ bot }: { bot: Bot }) {
+export function Composer({
+  bot,
+  replyToId,
+  onClearReply,
+}: {
+  bot: Bot;
+  /** multibot: flat reply — id wiadomości z paska cytatu nad inputem */
+  replyToId?: string;
+  onClearReply?: () => void;
+}) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [text, setText] = useState("");
@@ -553,9 +562,11 @@ export function Composer({ bot }: { bot: Bot }) {
         botId: bot.id,
         text: text.trim(),
         attachmentIds,
+        ...(replyToId ? { replyToId } : {}),
         ...(reasoning !== "default" ? { reasoning } : {}),
       });
       track("message_sent", { driver: bot.modelSelection?.instanceId });
+      onClearReply?.();
 setText("");
       if (inputRef.current) inputRef.current.style.height = "auto";
       for (const item of attachments) if (item.preview) URL.revokeObjectURL(item.preview);
