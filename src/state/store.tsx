@@ -150,6 +150,8 @@ interface AppState {
   // multibot: F8 — panele pamięci i skilli silnika slafy, ten sam prawy slot
   memoryOpen: boolean;
   skillsOpen: boolean;
+  // multibot: live team map (port z OpenMausBot)
+  teamMapOpen: boolean;
   /** multibot: nazwy skilli do podświetlania w treści wiadomości (skillRefs) */
   skillNames: string[];
   // multibot: F9-FE — otwarty pokój grupowy (prawy slot); null = zamknięty
@@ -210,6 +212,8 @@ type Action =
   // multibot: F8 — otwarcie/zamknięcie paneli pamięci i skilli
   | { type: "toggleMemory"; open?: boolean }
   | { type: "toggleSkills"; open?: boolean }
+  // multibot: team map (port z OpenMausBot)
+  | { type: "toggleTeamMap"; open?: boolean }
   /** multibot: nazwy skilli do podświetlania w treści wiadomości */
   | { type: "setSkillNames"; names: string[] }
   // multibot: F9-FE — otwarcie pokoju grupowego (group) / zamknięcie (null)
@@ -525,6 +529,9 @@ function reducer(state: AppState, action: Action): AppState {
         groupOpen: open ? null : state.groupOpen,
       };
     }
+    // multibot: team map — globalny overlay niezależny od prawego slotu
+    case "toggleTeamMap":
+      return { ...state, teamMapOpen: action.open ?? !state.teamMapOpen };
     case "setSkillNames":
       return { ...state, skillNames: action.names };
     // multibot: F9-FE — pokój grupowy w prawym slocie, ta sama zasada wykluczania
@@ -621,6 +628,7 @@ const initialState: AppState = {
   routinesOpen: false,
   memoryOpen: false,
   skillsOpen: false,
+  teamMapOpen: false,
   skillNames: [],
   groupOpen: null,
   roomOpen: null,

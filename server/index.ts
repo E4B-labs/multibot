@@ -3151,6 +3151,19 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { instances: await registry.describe() });
     }
 
+    // multibot: live team map (port z OpenMausBot, GET /api/team-map)
+    if (method === "GET" && path === "/api/team-map") {
+      const collaborations = groupStore
+        .list()
+        .filter((group) => group.bot_ids.length === 2)
+        .map((group) => ({
+          groupId: group.id,
+          botIds: [group.bot_ids[0]!, group.bot_ids[1]!] as [string, string],
+          lastAt: group.messages[group.messages.length - 1]?.at ?? group.createdAt,
+        }));
+      return json(res, 200, { collaborations, queued: [], running: [] });
+    }
+
     // ── multibot (G3): device scan + background setup progress ─────────
     if (method === "GET" && path === "/api/device") {
       return json(res, 200, await deviceInfo());

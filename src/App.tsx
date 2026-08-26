@@ -13,6 +13,7 @@ import { SettingsPanel } from "@/components/SettingsPanel";
 import { PluginsPanel } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
 import { AppSettingsPanel } from "@/components/AppSettingsPanel";
+import { TeamMapPanel } from "@/components/TeamMapPanel";
 // multibot: F6 — panel rutyn silnika slafy
 import { RoutinesPanel } from "@/components/RoutinesPanel";
 // multibot: F8 — panel skilli silnika slafy
@@ -184,6 +185,10 @@ function Shell() {
       {/* multibot: routines are harness-owned and available for every driver. */}
       {state.routinesOpen && bot && <RoutinesPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}
       {state.skillsOpen && bot && <SkillsPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}
+      {/* multibot: live team map (port z OpenMausBot) — globalny overlay */}
+      {state.teamMapOpen && (
+        <TeamMapPanel onClose={() => dispatch({ type: "toggleTeamMap", open: false })} />
+      )}
       {/* multibot: F9-FE — pokój grupowy; otwierany wyłącznie z sekcji Groups
           (widocznej tylko przy botach slafy), klucz per grupę = świeży mount */}
       {state.appSettingsOpen && <AppSettingsPanel />}
