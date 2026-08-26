@@ -11,10 +11,23 @@ function tempProject(setup: (cwd: string) => void): string {
   return cwd;
 }
 
+interface ScoutManifest {
+  lead: { name: string; role: string; description: string };
+  specialists: Array<{ name: string; role: string; description: string }>;
+  evidence: string[];
+  stack: string[];
+}
+
+interface ScoutRole {
+  name: string;
+  role: string;
+  description: string;
+}
+
 describe("scoutProject", () => {
   it("returns an error for missing folder", () => {
     const result = scoutProject("/definitely/not/here");
-    expect(result.kind).toBe("missing");
+    expect("kind" in result && result.kind).toBe("missing");
   });
 
   it("returns an error when path is a file", () => {
@@ -22,7 +35,7 @@ describe("scoutProject", () => {
     const file = join(cwd, "only.txt");
     writeFileSync(file, "x");
     const result = scoutProject(file);
-    expect(result.kind).toBe("not_directory");
+    expect("kind" in result && result.kind).toBe("not_directory");
   });
 
   it("proposes a frontend + testing pair for a minimal React repo", () => {
@@ -35,9 +48,9 @@ describe("scoutProject", () => {
       writeFileSync(join(root, "vitest.config.ts"), "export default {}");
     });
     const result = scoutProject(cwd);
-    expect(result.kind).toBeUndefined();
-    const manifest = result as Exclude<typeof result, ScoutError>;
-    const roles: string[] = manifest.specialists.map((s: { role: string }) => s.role);
+    expect("kind" in result).toBe(false);
+    const manifest = result as ScoutManifest;
+    const roles = manifest.specialists.map((s: ScoutRole) => s.role);
     expect(roles).toContain("Frontend");
     expect(roles).toContain("Testing");
     expect(roles).toContain("Documentation");
@@ -49,15 +62,10 @@ describe("scoutProject", () => {
   it("falls back to a generalist for an empty project", () => {
     const cwd = tempProject(() => {});
     const result = scoutProject(cwd);
-    expect(result.kind).toBeUndefined();
-    const manifest = result as Exclude<typeof result, ScoutError>;
+    expect("kind" in result).toBe(false);
+    const manifest = result as ScoutManifest;
     expect(manifest.specialists).toHaveLength(1);
     expect(manifest.specialists[0]!.role).toBe("Generalist");
     expect(manifest.stack).toEqual([]);
   });
 });
-
-interface ScoutError {
-  kind: string;
-  message: string;
-}
