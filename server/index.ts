@@ -55,6 +55,7 @@ import { claimPairing, pairingPending, startPairing } from "./pairing.ts";
 import { pairingQrSvg } from "./qr.ts";
 import { filterSearchResults, searchText, type SearchResult } from "./search.ts";
 import { promptWithReply, resolveReplyTarget } from "./replies.ts";
+import { scoutProject } from "./project-scout.ts";
 import { matchVncRoute, mountVncUpgrade, proxyVncHttp } from "./computer-vnc-proxy.ts";
 import { broadcastWs, mountEventsWs } from "./events-ws.ts";
 import { mountEngineProxy } from "./engine/proxy.ts";
@@ -3162,6 +3163,41 @@ const server = createServer(async (req, res) => {
           lastAt: group.messages[group.messages.length - 1]?.at ?? group.createdAt,
         }));
       return json(res, 200, { collaborations, queued: [], running: [] });
+    }
+
+    // multibot: scout folderu → manifest zespołu (port z OpenMausBot #339)
+    if (method === "GET" && path === "/api/teams/scout") {
+      const cwd = url.searchParams.get("cwd") ?? "";
+      if (!cwd || !path.isAbsolute(cwd)) return json(res, 400, { error: "cwd must be an absolute path" });
+      const manifest = scoutProject(cwd);
+      if ("kind" in manifest) return json(res, 404, manifest);
+      return json(res, 200, { manifest });
+    }
+
+    // multibot: import manifestu scouta — tworzy boty addytywnie, nigdy nie
+    // modyfikuje istniejących (każdy rekord dostaje świeże id z POST /api/bots).
+    if (method === "POST" && path === "/api/teams/import") {
+      const body = await readBody(req);
+      const roles: Array<{ name: string; role: string; description: string }> = Array.isArray(body?.manifest?.specialists) && Array.isArray(body?.manifest?.lead)
+        ? []
+        : [
+          body?.manifest?.lead,
+          ...(Array.isArray(body?.manifest?.specialists) ? body.manifest.specialists : []),
+        ].filter((r): r is { name: string; role: string; description: string } => Boolean(r?.name && r?.role));
+      if (!roles.length) return json(res, 422, { error: "manifest must include a lead" });
+      const created: Array<{ id: string; name: string }> = [];
+      for (const role of roles) {
+        const bot = store.createBot();
+        store.patchBot(bot.id, {
+          name: typeof role.name === "string" && role.name.trim() ? role.name.trim().slice(0, 80) : role.role.slice(0, 80),
+          title: typeof role.role === "string" ? role.role.slice(0, 80) : "",
+          description: typeof role.description === "string" ? role.description.slice(0, 500) : "",
+        });
+        const fresh = store.bot(bot.id)!;
+        created.push({ id: fresh.id, name: fresh.name });
+        broadcast({ kind: "bot", bot: fresh });
+      }
+      return json(res, 201, { created });
     }
 
     // ── multibot (G3): device scan + background setup progress ─────────

@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useStore, formatTime, type Bot, type EngineGroup } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
+import { ScoutTeamModal } from "./ScoutTeamModal";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { plainPreview } from "@/lib/plainPreview";
@@ -1067,6 +1068,7 @@ export function Sidebar() {
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
   // multibot 0.1.46: formularz grupy LOKALNEJ otwiera PPM w pustą część listy
   const [localCreateOpen, setLocalCreateOpen] = useState(false);
+  const [scoutOpen, setScoutOpen] = useState(false);
   // multibot 0.1.49: kafelek hovera — timer 350 ms gasi migotanie przy
   // przejeżdżaniu myszką przez listę; wyjazd z wiersza kasuje go natychmiast.
   const [hover, setHover] = useState<HoverState | null>(null);
@@ -1272,6 +1274,16 @@ export function Sidebar() {
                 <Users size={15} className="text-ink-secondary" />
                 {polish ? "Nowa grupa" : "New group"}
               </button>
+              <button
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  setScoutOpen(true);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-raised"
+              >
+                <FolderPlus size={15} className="text-ink-secondary" />
+                {polish ? "Zespół z folderu" : "Scout from folder"}
+              </button>
             </div>
           )}
         </div>
@@ -1441,6 +1453,7 @@ export function Sidebar() {
       )}
       {groupMenu && <GroupContextMenu menu={groupMenu} onClose={() => setGroupMenu(null)} />}
       {sectionPicker && <SectionPicker botId={sectionPicker.botId} anchor={sectionPicker} onClose={() => setSectionPicker(null)} />}
+      {scoutOpen && <ScoutTeamModal onClose={() => setScoutOpen(false)} />}
       {hover && (() => {
         const bot = state.bots.find((b) => b.id === hover.botId);
         return bot ? <BotHoverCard bot={bot} top={hover.top} left={hover.left} /> : null;
