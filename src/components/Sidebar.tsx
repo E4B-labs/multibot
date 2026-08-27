@@ -1319,21 +1319,24 @@ export function Sidebar() {
       </div>
       )}
 
-      {/* Pinned — poziomo obok siebie, zawijanie dopiero gdy brak miejsca */}
+      {/* Pinned — 3 w rzędzie, zawijanie co 3, hover z opisem jak reszta botów */}
       {!collapsed && pinnedBots.length > 0 && (
-        <div className="flex flex-row flex-wrap justify-center gap-2 px-3 pb-3">
+        <div className="grid grid-cols-3 gap-2 px-3 pb-3">
           {pinnedBots.map((b) => {
             const isSelected = state.selectedId === b.id && !state.groupOpen;
             return (
               <button
                 key={b.id}
+                title={b.description?.trim() || preview(b)}
                 onClick={() => dispatch({ type: "select", id: b.id })}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setMenu({ botId: b.id, x: e.clientX, y: e.clientY });
                 }}
+                onMouseEnter={(e) => showHoverCard(b.id, e.currentTarget.getBoundingClientRect())}
+                onMouseLeave={() => hideHoverCard()}
                 className={cn(
-                  "flex flex-col items-center gap-1.5 rounded-2xl px-3 py-2",
+                  "flex flex-col items-center gap-1.5 rounded-2xl px-2 py-2",
                   isSelected ? "bg-raised" : "hover:bg-raised/50",
                 )}
               >
@@ -1341,9 +1344,9 @@ export function Sidebar() {
                   color={b.color}
                   shape={b.mascotShape}
                   state={stateForBot(b)}
-                  size={72}
+                  size={56}
                 />
-                <span className="max-w-[200px] truncate text-center text-[13px] font-medium text-ink">
+                <span className="w-full truncate text-center text-[12px] font-medium leading-tight text-ink">
                   {b.name}
                 </span>
               </button>
