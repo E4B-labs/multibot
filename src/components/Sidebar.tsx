@@ -33,6 +33,7 @@ import { authFetch } from "@/lib/auth";
 // multibot: F11 — status silnika dla warunkowej kropki w stopce
 import { engineOnline } from "@/lib/engineStatus";
 import { getLanguage, useLanguage } from "@/lib/language";
+import { botDisplayName } from "@/lib/botNames";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
@@ -315,6 +316,7 @@ function SectionPicker({
 // Kafelek hovera: te same klasy co menu kontekstowe, ale pointer-events-none —
 // musnięcie kafelka nie może go zgasić. Pozycję liczy Sidebar (clamp do viewportu).
 function BotHoverCard({ bot, top, left }: { bot: Bot; top: number; left: number }) {
+  const lang = useLanguage();
   const last = bot.messages[bot.messages.length - 1];
   return (
     <div
@@ -325,7 +327,7 @@ function BotHoverCard({ bot, top, left }: { bot: Bot; top: number; left: number 
         <MausAvatar color={bot.color} shape={bot.mascotShape} state={stateForBot(bot)} size={28} />
         {/* godzina na wysokości nazwy; flex-1 na nazwie trzyma ją przy prawej
             krawędzi kafelka (ta sama oś X co wcześniej) */}
-        <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{bot.name}</span>
+        <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{botDisplayName(bot, lang)}</span>
         {last && <span className="shrink-0 text-[11px] text-ink-secondary">{formatTime(last.at)}</span>}
       </div>
       <div className="mt-1.5">
@@ -356,6 +358,7 @@ function BotListItem({
   // podświetlony (inaczej świecą dwa: grupa i ostatni bot).
   const selected = state.selectedId === bot.id && !state.groupOpen;
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
+  const lang = useLanguage();
   const last = bot.messages[bot.messages.length - 1];
   return (
     <button
@@ -408,7 +411,7 @@ function BotListItem({
         <div className="flex items-baseline justify-between gap-2">
            <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
              {bot.chiefOfStaff && <Crown size={12} className="shrink-0 text-accent" aria-label="Section chief" />}
-             <span className="truncate">{bot.name}</span>
+              <span className="truncate">{botDisplayName(bot, lang)}</span>
            </span>
           {last && (
             <span className="shrink-0 text-xs text-ink-secondary">
@@ -879,7 +882,8 @@ function GroupsSection({
   collapsed?: boolean;
 }) {
   const { state, dispatch } = useStore();
-  const polish = useLanguage() === "pl";
+  const lang = useLanguage();
+  const polish = lang === "pl";
   // null = nie załadowano (silnik offline / jeszcze nie sprawdzono)
   const [groups, setGroups] = useState<EngineGroup[] | null>(null);
   const [name, setName] = useState("");
@@ -1032,7 +1036,7 @@ function GroupsSection({
                     onChange={() => toggle(engineBotId)}
                     className="accent-accent"
                   />
-                  <span className="truncate">{b.name}</span>
+                   <span className="truncate">{botDisplayName(b, lang)}</span>
                 </label>
               );
             })}
@@ -1066,6 +1070,7 @@ function GroupsSection({
 export function Sidebar() {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
+  const lang = useLanguage();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [groupMenu, setGroupMenu] = useState<GroupMenuState | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -1358,7 +1363,7 @@ export function Sidebar() {
                   size={avatarSize}
                 />
                 <span className="w-full truncate text-center text-[12px] font-medium leading-tight text-ink">
-                  {b.name}
+                  {botDisplayName(b, lang)}
                 </span>
               </button>
             );
