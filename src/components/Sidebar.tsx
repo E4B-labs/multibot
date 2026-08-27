@@ -1319,11 +1319,22 @@ export function Sidebar() {
       </div>
       )}
 
-      {/* Pinned — 3 w rzędzie, zawijanie co 3, hover z opisem jak reszta botów */}
+      {/* Pinned — 1: wycentrowany duży (72px); 2: para obok, wycentrowana (56px);
+          3+: siatka 3 kolumny (56px). Hover z opisem jak reszta botów. */}
       {!collapsed && pinnedBots.length > 0 && (
-        <div className="grid grid-cols-3 gap-2 px-3 pb-3">
+        <div
+          className={cn(
+            "gap-2 px-3 pb-3",
+            pinnedBots.length === 1
+              ? "flex justify-center"
+              : pinnedBots.length === 2
+                ? "flex justify-center"
+                : "grid grid-cols-3",
+          )}
+        >
           {pinnedBots.map((b) => {
             const isSelected = state.selectedId === b.id && !state.groupOpen;
+            const avatarSize = 72;
             return (
               <button
                 key={b.id}
@@ -1344,7 +1355,7 @@ export function Sidebar() {
                   color={b.color}
                   shape={b.mascotShape}
                   state={stateForBot(b)}
-                  size={56}
+                  size={avatarSize}
                 />
                 <span className="w-full truncate text-center text-[12px] font-medium leading-tight text-ink">
                   {b.name}
