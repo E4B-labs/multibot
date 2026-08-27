@@ -23,7 +23,7 @@ import { PEER_CHAT_WAVE_MS, bubbleWaves, selectActivePeerChat, waveSeed, type Bo
 /** Ile jeszcze rysujemy scenę po zamknięciu pokoju — czas na fade/scale-out. */
 const PEER_CHAT_EXIT_MS = 240;
 
-/** Rozmiar awatara partnera: równy awatarowi gospodarza (≤60 px). */
+/** Rozmiar awatara partnera: równy awatarowi gospodarza (40 px na desktopcie, 44 px w telefonie). */
 const DESKTOP_QUERY = "(min-width: 768px)";
 
 export interface PeerChatView {
@@ -134,7 +134,7 @@ export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView 
     return () => window.clearInterval(id);
   }, [view.roomId]);
 
-  // Rozmiar awatara zależy od szerokości ekranu (60 px przy gospodarzu na
+  // Rozmiar awatara zależy od szerokości ekranu (40 px przy gospodarzu na
   // desktopie, 44 px w pionowym telefonie) — jeden breakpoint co w Tailwindzie.
   const [isWide, setIsWide] = useState(
     () => typeof window !== "undefined" && window.matchMedia(DESKTOP_QUERY).matches,
@@ -155,15 +155,16 @@ export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView 
       aria-hidden="true"
       className={cn("pointer-events-none select-none", view.leaving ? "peer-chat-leave" : "peer-chat-enter")}
     >
-      {/* dymki nad oboma awatarami — kolumna szlaczków zmienia się co tick */}
-      <div className="mb-1 flex items-end gap-2">
+      {/* dymki nad oboma awatarami — kolumna szlaczków zmienia się co tick;
+          brak marginesu, żeby dymek przylegał do awatara (nie unosił się) */}
+      <div className="mb-0 flex items-end gap-2">
         <SpeechBubble color={ownerColor} paths={ownerWaves} tick={tick} />
         <SpeechBubble color={peerColor} paths={peerWaves} tick={tick} />
       </div>
       {/* awatary: desktop zostawia lewy slot pusty — wpada tam pływający awatar
           gospodarza z composera; telefon rysuje gospodarza sam */}
       <div className="mb-2 flex items-end gap-2">
-        <span className="hidden size-[60px] md:block" />
+        <span className="hidden size-[40px] md:block" />
         <span className="size-11 md:hidden">
           <MausAvatar
             color={bot.color}
@@ -175,14 +176,14 @@ export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView 
         </span>
         <span
           key={peer.id}
-          className="peer-chat-burst peer-chat-peer size-11 overflow-visible md:size-[60px]"
+          className="peer-chat-burst peer-chat-peer size-11 overflow-visible md:size-[40px]"
           style={{ "--peer-color": peerColor } as CSSProperties}
         >
           <MausAvatar
             color={peer.color}
             shape={peer.mascotShape}
             state={normalizeState(peer.mascotExpression) ?? stateForBot(peer)}
-            size={isWide ? 60 : 44}
+            size={isWide ? 40 : 44}
           />
         </span>
         {/* iskry małego wybuchu — geometria zamknięta w pudełku awatara */}
