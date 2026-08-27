@@ -974,8 +974,16 @@ export function useStore() {
 }
 
 export function formatTime(at: number) {
-  return new Date(at).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const d = new Date(at);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) {
+    return getLanguage() === "pl" ? "Wczoraj" : "Yesterday";
+  }
+  // starsze niż wczoraj — krótka data (bez roku), jak w komunikatorach
+  return d.toLocaleDateString([], { day: "2-digit", month: "2-digit" });
 }

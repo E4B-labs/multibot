@@ -407,11 +407,10 @@ function BotListItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
            <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
-             {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
              {bot.chiefOfStaff && <Crown size={12} className="shrink-0 text-accent" aria-label="Section chief" />}
              <span className="truncate">{bot.name}</span>
            </span>
-          {selected && last && (
+          {last && (
             <span className="shrink-0 text-xs text-ink-secondary">
               {formatTime(last.at)}
             </span>
@@ -1166,6 +1165,8 @@ export function Sidebar() {
   // pierwszego wystąpienia. W zwiniętej szynie podziałów nie rysujemy.
   const [sectionPicker, setSectionPicker] = useState<{ botId: string; x: number; y: number } | null>(null);
   const unpinned = visibleBots.filter((b) => !b.pinned);
+  // multibot: przypięty bot — duży awatar 1:1 pod wyszukiwarką, bez szpilki (wzór z foty)
+  const pinnedBots = visibleBots.filter((b) => b.pinned);
   const unsectionedBots = collapsed ? [] : unpinned.filter((b) => !b.section);
   const sectionedBots = collapsed
     ? []
@@ -1182,7 +1183,8 @@ export function Sidebar() {
         }
         return out;
       })();
-  const flatBots = collapsed ? visibleBots : [...visibleBots.filter((b) => b.pinned), ...unsectionedBots];
+  // multibot: przypięte nie siedzą już w liście — mają osobny header nad nią
+  const flatBots = collapsed ? visibleBots : [...unsectionedBots];
   // multibot: F9-FE — kandydaci do grup: cała flota, także ukryci. Kolejność
   // stabilna z listy botów; wybrany driver nie usuwa bota z grup.
   const groupBots = state.bots;
@@ -1315,6 +1317,39 @@ export function Sidebar() {
           <kbd className="shrink-0 rounded border border-hairline/60 px-1.5 py-0.5 text-[10px] text-ink-secondary">Ctrl K</kbd>
         </button>
       </div>
+      )}
+
+      {/* Pinned — duży awatar 1:1 bez szpilki (wzór z foty: szary blob + nazwa pod spodem) */}
+      {!collapsed && pinnedBots.length > 0 && (
+        <div className="flex flex-col items-center gap-2 px-3 pb-3">
+          {pinnedBots.map((b) => {
+            const isSelected = state.selectedId === b.id && !state.groupOpen;
+            return (
+              <button
+                key={b.id}
+                onClick={() => dispatch({ type: "select", id: b.id })}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ botId: b.id, x: e.clientX, y: e.clientY });
+                }}
+                className={cn(
+                  "flex flex-col items-center gap-1.5 rounded-2xl px-3 py-2",
+                  isSelected ? "bg-raised" : "hover:bg-raised/50",
+                )}
+              >
+                <MausAvatar
+                  color={b.color}
+                  shape={b.mascotShape}
+                  state={stateForBot(b)}
+                  size={72}
+                />
+                <span className="max-w-[200px] truncate text-center text-[13px] font-medium text-ink">
+                  {b.name}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       )}
 
       {/* Unified conversation list: group rows sit with bots, above plugins. */}
