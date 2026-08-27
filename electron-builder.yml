@@ -98,6 +98,6 @@ win:
 nsis:
   oneClick: false
   perMachine: false # instalacja per-user: bez UAC, apka pisze do %LOCALAPPDATA%
-  allowToChangeInstallationDirectory: true
+  allowToChangeInstallationDirectory: false # płynna auto-aktualizacja bez pytania o katalog
   createDesktopShortcut: true
   artifactName: MultiBot-${version}-${arch}-setup.${ext}
