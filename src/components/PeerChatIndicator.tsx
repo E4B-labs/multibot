@@ -84,7 +84,7 @@ function SpeechBubble({
 }) {
   return (
     <span
-      className="relative block h-10 w-12 rounded-xl border bg-card md:h-11 md:w-[60px]"
+      className="relative block h-10 w-11 rounded-xl border bg-card md:h-11 md:w-[40px]"
       style={{ borderColor: color }}
     >
       <svg
@@ -176,7 +176,7 @@ export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView 
         </span>
         <span
           key={peer.id}
-          className="peer-chat-burst peer-chat-peer size-11 overflow-visible md:size-[40px]"
+          className="peer-chat-burst peer-chat-peer relative size-11 overflow-visible md:size-[40px]"
           style={{ "--peer-color": peerColor } as CSSProperties}
         >
           <MausAvatar
@@ -185,15 +185,16 @@ export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView 
             state={normalizeState(peer.mascotExpression) ?? stateForBot(peer)}
             size={isWide ? 40 : 44}
           />
+          {/* iskry małego wybuchu — zamknięte w pudełku awatara (position:
+              absolute), więc nie rozpychają rzędu i promieniują ze środka peera */}
+          {SPARK_ANGLES.map((angle) => (
+            <span
+              key={angle}
+              className="peer-chat-spark"
+              style={{ "--spark-angle": `${angle}deg`, backgroundColor: peerColor } as CSSProperties}
+            />
+          ))}
         </span>
-        {/* iskry małego wybuchu — geometria zamknięta w pudełku awatara */}
-        {SPARK_ANGLES.map((angle) => (
-          <span
-            key={angle}
-            className="peer-chat-spark"
-            style={{ "--spark-angle": `${angle}deg`, backgroundColor: peerColor } as CSSProperties}
-          />
-        ))}
       </div>
     </div>
   );
