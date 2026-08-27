@@ -1,13 +1,14 @@
 // multibot: flat replies (port z OpenMausBot #437, ReplyQuote.tsx)
 import { X } from "lucide-react";
 import type { Message } from "@/state/store";
+import { getLanguage } from "@/lib/language";
 
 export function replySnippet(text: string, limit = 160): string {
   const clean = String(text ?? "").replace(/\s+/g, " ").trim();
   return clean.length <= limit ? clean : `${clean.slice(0, limit)}…`;
 }
 
-export function replyAuthor(message: Message, botName = "Assistant"): string {
+export function replyAuthor(message: Message, botName = getLanguage() === "pl" ? "Asystent" : "Assistant"): string {
   return message.role === "user" ? "You" : botName;
 }
 

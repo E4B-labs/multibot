@@ -23,6 +23,7 @@ import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
+import { botDisplayName } from "@/lib/botNames";
 
 // Ten sam lokalny helper co RoutinesPanel: silnik zwraca błędy jako `{detail}`
 // (FastAPI), przelotka jako `{error}`.
@@ -74,9 +75,10 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
   const nameOf = (engineBotId: string) => {
     if (engineBotId === "you") return polish ? "Ty" : "You";
     const direct = state.bots.find((b) => b.id === engineBotId);
-    if (direct) return direct.name;
+    if (direct) return botDisplayName(direct, polish ? "pl" : "en");
     const threadId = engineBotId.startsWith("mb-") ? engineBotId.slice(3) : engineBotId;
-    return state.bots.find((b) => b.threadId === threadId)?.name ?? engineBotId;
+    const byThread = state.bots.find((b) => b.threadId === threadId);
+    return byThread ? botDisplayName(byThread, polish ? "pl" : "en") : engineBotId;
   };
   const members = group.bot_ids
     .map((engineBotId) => {

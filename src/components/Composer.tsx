@@ -7,6 +7,7 @@ import { authFetch } from "@/lib/auth";
 import { MausAvatar } from "./Avatar";
 import { normalizeState, stateForBot } from "@/lib/mascot";
 import { useLanguage } from "@/lib/language";
+import { botDisplayName } from "@/lib/botNames";
 import { parseSchedule, type PresetOrUnknown } from "@/lib/routineSchedule";
 import { AttachmentCard } from "./AttachmentCard";
 import { PeerChatIndicator, usePeerChat } from "./PeerChatIndicator";
@@ -475,7 +476,7 @@ export function Composer({
       })),
       ...state.bots.filter((peer) => !peer.hidden).map((peer) => ({
         id: `b-${peer.id}`,
-        label: peer.name,
+        label: botDisplayName(peer, polish ? "pl" : "en"),
         hint: peer.id === bot.id ? (polish ? "Bieżący" : "Current") : (polish ? "Przełącz" : "Switch to bot"),
         kind: "agent" as const,
         icon: <MausAvatar color={peer.color} shape={peer.mascotShape} state={normalizeState(peer.mascotExpression) ?? "happy"} size={20} />,
@@ -801,7 +802,7 @@ setText("");
                 {row.type === "bot" ? (
                   <>
                     <MausAvatar color={row.peer.color} shape={row.peer.mascotShape} state={normalizeState(row.peer.mascotExpression) ?? "happy"} size={24} />
-                    <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{row.peer.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{botDisplayName(row.peer, polish ? "pl" : "en")}</span>
                     <span className="shrink-0 text-xs text-ink-secondary">{polish ? "Bot" : "Agent"}</span>
                   </>
                 ) : (
@@ -872,7 +873,7 @@ setText("");
         {peerChat && <PeerChatIndicator bot={bot} view={peerChat} />}
         <div className={cn("relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5", !peerChat && "md:mt-[48px]")}>
         {/* Desktop agent avatar: 40 px (zmniejszone z 60 per 0.1.58), no frame, anchored above Attach. */}
-        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={bot.name}>
+        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
           <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={40} motion={bot.busy ? "working" : "none"} motionKey={bot.busy ? 1 : 0} animated />
         </div>
         <button
@@ -947,7 +948,7 @@ setText("");
             if (e.key === "Escape" && recording) setRecording(false);
           }}
           placeholder={
-            recording ? polish ? "Słucham…" : "Listening…" : bot.busy ? polish ? `${bot.name} pracuje…` : `${bot.name} is working…` : polish ? `Wiadomość do ${bot.name}` : `Message ${bot.name}`
+            recording ? polish ? "Słucham…" : "Listening…" : bot.busy ? polish ? `${botDisplayName(bot, polish ? "pl" : "en")} pracuje…` : `${botDisplayName(bot, polish ? "pl" : "en")} is working…` : polish ? `Wiadomość do ${botDisplayName(bot, polish ? "pl" : "en")}` : `Message ${botDisplayName(bot, polish ? "pl" : "en")}`
           }
           // multibot: pole rosło bez sufitu — wysokość leci na `scrollHeight`,
           // a `overflow-hidden` nie dawał czego przewijać, więc długa

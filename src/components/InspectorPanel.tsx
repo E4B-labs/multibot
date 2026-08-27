@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { Bot } from "@/state/store";
 import { authFetch } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
+import { botDisplayName } from "@/lib/botNames";
 
 type InspectorEvent = { id: string; at: number; type: string; provider: string; itemType?: string; summary?: string; ok?: boolean };
 
@@ -26,7 +27,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         <button type="button" onClick={close} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={polish ? "Zamknij" : "Close"}><X size={18} /></button>
       </div>
       <div className="flex items-center gap-2 border-b border-hairline/40 px-4 pb-3 text-[12px] text-ink-secondary">
-        <span className="min-w-0 flex-1 truncate">{bot.name} · {events.length} events</span>
+        <span className="min-w-0 flex-1 truncate">{botDisplayName(bot, polish ? "pl" : "en")} · {events.length} events</span>
         <button type="button" onClick={() => void load()} title={polish ? "Odśwież" : "Refresh"} className="rounded-md p-1 hover:bg-raised hover:text-ink"><RefreshCw size={14} /></button>
         <button type="button" onClick={() => void replay()} disabled={!events.length} title={polish ? "Odtwórz zapis" : "Replay captured events"} className="rounded-md p-1 hover:bg-raised hover:text-ink disabled:opacity-40"><Play size={14} /></button>
       </div>

@@ -16,6 +16,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import { MAUS_COLORS } from "@/lib/mascot";
 import { authFetch, authenticatedEventSource } from "@/lib/auth";
 import { getLanguage } from "@/lib/language";
+import { botDisplayName } from "@/lib/botNames";
 import { botNotificationIcon, notificationTag, notifyBrowser } from "@/lib/notifications";
 
 export type { MausColor } from "@/lib/mascot";
@@ -689,17 +690,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const seen = notificationState.current;
+    const lang = getLanguage();
     for (const bot of state.bots) {
       const before = seen.get(bot.id);
       const attention = bot.needsAttention ?? null;
       if (bot.notifications && before && attention && attention !== before.attention) {
-        notifyBrowser(`${bot.name} needs your input`, attention, {
+        notifyBrowser(`${botDisplayName(bot, lang)} needs your input`, attention, {
           tag: notificationTag(bot.id),
           icon: botNotificationIcon(MAUS_COLORS[bot.color]),
         });
       } else if (bot.notifications && before && bot.unread && !before.unread) {
         const last = [...bot.messages].reverse().find((message) => message.role === "bot" && message.text);
-        notifyBrowser(`${bot.name} finished`, last?.text?.slice(0, 180) ?? "New bot message", {
+        notifyBrowser(`${botDisplayName(bot, lang)} finished`, last?.text?.slice(0, 180) ?? "New bot message", {
           tag: notificationTag(bot.id),
           icon: botNotificationIcon(MAUS_COLORS[bot.color]),
         });

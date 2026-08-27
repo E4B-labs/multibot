@@ -10,6 +10,7 @@ import { MausAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { authFetch } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
+import { botDisplayName } from "@/lib/botNames";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await authFetch(path, { headers: { "content-type": "application/json" }, ...init });
@@ -43,8 +44,10 @@ export function RoomPanel() {
   const members = room.bot_ids
     .map((id) => state.bots.find((b) => b.id === id))
     .filter((b): b is NonNullable<typeof b> => Boolean(b));
-  const nameOf = (botId: string) =>
-    state.bots.find((b) => b.id === botId)?.name ?? (polish ? "usunięty bot" : "deleted bot");
+  const nameOf = (botId: string) => {
+    const found = state.bots.find((b) => b.id === botId);
+    return found ? botDisplayName(found, polish ? "pl" : "en") : polish ? "usunięty bot" : "deleted bot";
+  };
   // multibot: klikalna pigułka nazwy — otwiera czat tego bota, jak na screenie
   // "Klaus Chief" / "Klaus -> Motion". Zamyka pokój i selectuje bota.
   const openBot = (botId: string) => {
@@ -73,7 +76,7 @@ export function RoomPanel() {
                   {i > 0 && <ArrowLeftRight size={14} className="shrink-0 text-ink-secondary" />}
                   <span className="flex min-w-0 items-center gap-1.5">
                     <MausAvatar color={bot.color} shape={bot.mascotShape} state={stateForBot(bot)} size={24} animated={false} />
-                    <span className="truncate text-[15px] font-semibold text-ink">{bot.name}</span>
+                    <span className="truncate text-[15px] font-semibold text-ink">{botDisplayName(bot, polish ? "pl" : "en")}</span>
                   </span>
                 </Fragment>
               ))}

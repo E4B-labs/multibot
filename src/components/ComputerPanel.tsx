@@ -15,6 +15,7 @@ import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch, getAuthToken } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
+import { botDisplayName } from "@/lib/botNames";
 import { TeachCard } from "./SkillsPanel";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
@@ -301,7 +302,10 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       )}
     </button>
   );
-  const agentName = state.bots.find((item) => item.id === agentQueue.agentOwner)?.name ?? agentQueue.agentOwner;
+  const agentName = (() => {
+    const found = state.bots.find((item) => item.id === agentQueue.agentOwner);
+    return found ? botDisplayName(found, polish ? "pl" : "en") : agentQueue.agentOwner;
+  })();
   const queuedCount = agentQueue.agentQueue?.length ?? 0;
   // H4: the iframe cannot set an Authorization header, so the bearer rides the
   // websockify path as ?token= — mobile WebView has no session cookie to lean
