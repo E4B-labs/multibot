@@ -13,6 +13,16 @@ export const BOT_DEFAULT_NAMES: Array<[en: string, pl: string]> = [
   ["New Bot", "Nowy Bot"],
   ["Assistant", "Asystent"],
   ["Chief of Staff", "Szef Sztabu"],
+  // multibot: project-scout — domyślny zespół (lead + specjaliści)
+  ["Compass", "Kompas"],
+  ["Wrench", "Klucz"],
+  ["Architect", "Architekt"],
+  ["Generalist", "Generalista"],
+  ["Frontend", "Frontend"],
+  ["Backend", "Backend"],
+  ["Testing", "Testowanie"],
+  ["Documentation", "Dokumentacja"],
+  ["Infrastructure", "Infrastruktura"],
 ];
 
 /** Normalizuje nazwę do porównań case-insensitive. */
@@ -39,4 +49,27 @@ export function botDisplayName(bot: Bot, language: Language): string {
 export function useBotName(bot: Bot): string {
   const language = useLanguage();
   return botDisplayName(bot, language);
+}
+
+/**
+ * Zwraca zlokalizowaną rolę/tytuł bota (pole `bot.title`) dla danego języka.
+ * Domyślne role systemowe (Architect, Generalist, Frontend…) tłumaczy;
+ * wpisy użytkownika zostają nietknięte. Używane m.in. w polu „Rola"
+ * w ustawieniach bota.
+ */
+export function botDisplayTitle(bot: Bot, language: Language): string {
+  const current = normalize(bot.title ?? "");
+  if (!current) return bot.title ?? "";
+  for (const [en, pl] of BOT_DEFAULT_NAMES) {
+    if (normalize(en) === current || normalize(pl) === current) {
+      return language === "pl" ? pl : en;
+    }
+  }
+  return bot.title ?? "";
+}
+
+/** Hook wygodowy: pobiera bieżący język i lokalizuje rolę bota. */
+export function useBotTitle(bot: Bot): string {
+  const language = useLanguage();
+  return botDisplayTitle(bot, language);
 }

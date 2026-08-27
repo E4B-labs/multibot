@@ -14,6 +14,7 @@ import { authFetch } from "@/lib/auth";
 import { requestBrowserNotifications } from "@/lib/notifications";
 import { useLanguage } from "@/lib/language";
 import { MASCOT_SHAPES } from "@/lib/mascotShapes";
+import { botDisplayName, botDisplayTitle } from "@/lib/botNames";
 
 function Field({
   label,
@@ -312,7 +313,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           <Field label={polish ? "Nazwa" : "Name"}>
             <input
               className={inputCls}
-              value={bot.name}
+              value={botDisplayName(bot, polish ? "pl" : "en")}
               onChange={(e) => patch({ name: e.target.value })}
             />
           </Field>
@@ -320,7 +321,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             <input
               className={inputCls}
               placeholder={polish ? "Opisz, czym zajmuje się bot" : "Describe what your agent does"}
-              value={bot.title}
+              value={botDisplayTitle(bot, polish ? "pl" : "en")}
               onChange={(e) => patch({ title: e.target.value })}
             />
           </Field>
