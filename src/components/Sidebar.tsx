@@ -1319,9 +1319,9 @@ export function Sidebar() {
       </div>
       )}
 
-      {/* Pinned — duży awatar 1:1 bez szpilki (wzór z foty: szary blob + nazwa pod spodem) */}
+      {/* Pinned — poziomo obok siebie, zawijanie dopiero gdy brak miejsca */}
       {!collapsed && pinnedBots.length > 0 && (
-        <div className="flex flex-col items-center gap-2 px-3 pb-3">
+        <div className="flex flex-row flex-wrap justify-center gap-2 px-3 pb-3">
           {pinnedBots.map((b) => {
             const isSelected = state.selectedId === b.id && !state.groupOpen;
             return (
