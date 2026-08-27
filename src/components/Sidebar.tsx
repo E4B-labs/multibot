@@ -1324,50 +1324,59 @@ export function Sidebar() {
       </div>
       )}
 
-      {/* Pinned — 1: wycentrowany duży (72px); 2: para obok, wycentrowana (56px);
-          3+: siatka 3 kolumny (56px). Hover z opisem jak reszta botów. */}
+      {/* Pinned — podział na rzędy po max 3; ułożenie każdego rzędu zależy
+          od liczby awatarów w TYM rzędzie (1: wycentrowany; 2: wycentrowana
+          para; 3: siatka 3 kolumny). Hover z opisem jak reszta botów. */}
       {!collapsed && pinnedBots.length > 0 && (
-        <div
-          className={cn(
-            "gap-2 px-3 pb-3",
-            pinnedBots.length === 1
-              ? "flex justify-center"
-              : pinnedBots.length === 2
-                ? "flex justify-center"
-                : "grid grid-cols-3",
-          )}
-        >
-          {pinnedBots.map((b) => {
-            const isSelected = state.selectedId === b.id && !state.groupOpen;
-            const avatarSize = 72;
-            return (
-              <button
-                key={b.id}
-                title={b.description?.trim() || preview(b)}
-                onClick={() => dispatch({ type: "select", id: b.id })}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setMenu({ botId: b.id, x: e.clientX, y: e.clientY });
-                }}
-                onMouseEnter={(e) => showHoverCard(b.id, e.currentTarget.getBoundingClientRect())}
-                onMouseLeave={() => hideHoverCard()}
-                className={cn(
-                  "flex flex-col items-center gap-1.5 rounded-2xl px-2 py-2",
-                  isSelected ? "bg-raised" : "hover:bg-raised/50",
-                )}
-              >
-                <MausAvatar
-                  color={b.color}
-                  shape={b.mascotShape}
-                  state={stateForBot(b)}
-                  size={avatarSize}
-                />
-                <span className="w-full truncate text-center text-[12px] font-medium leading-tight text-ink">
-                  {botDisplayName(b, lang)}
-                </span>
-              </button>
-            );
-          })}
+        <div className="flex flex-col gap-2 px-3 pb-3">
+          {Array.from(
+            { length: Math.ceil(pinnedBots.length / 3) },
+            (_, rowIndex) => pinnedBots.slice(rowIndex * 3, rowIndex * 3 + 3),
+          ).map((rowBots, rowIndex) => (
+            <div
+              key={rowIndex}
+              className={cn(
+                "gap-2",
+                rowBots.length === 1
+                  ? "flex justify-center"
+                  : rowBots.length === 2
+                    ? "flex justify-center"
+                    : "grid grid-cols-3",
+              )}
+            >
+              {rowBots.map((b) => {
+                const isSelected = state.selectedId === b.id && !state.groupOpen;
+                const avatarSize = 72;
+                return (
+                  <button
+                    key={b.id}
+                    title={b.description?.trim() || preview(b)}
+                    onClick={() => dispatch({ type: "select", id: b.id })}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setMenu({ botId: b.id, x: e.clientX, y: e.clientY });
+                    }}
+                    onMouseEnter={(e) => showHoverCard(b.id, e.currentTarget.getBoundingClientRect())}
+                    onMouseLeave={() => hideHoverCard()}
+                    className={cn(
+                      "flex flex-col items-center gap-1.5 rounded-2xl px-2 py-2",
+                      isSelected ? "bg-raised" : "hover:bg-raised/50",
+                    )}
+                  >
+                    <MausAvatar
+                      color={b.color}
+                      shape={b.mascotShape}
+                      state={stateForBot(b)}
+                      size={avatarSize}
+                    />
+                    <span className="w-full truncate text-center text-[12px] font-medium leading-tight text-ink">
+                      {botDisplayName(b, lang)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
 
