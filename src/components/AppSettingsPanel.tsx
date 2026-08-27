@@ -816,6 +816,13 @@ export function AppSettingsPanel() {
   const { dispatch } = useStore();
   const language = useLanguage();
   const polish = language === "pl";
+  const [tab, setTab] = useState<"general" | "update" | "other">("general");
+
+  const tabClass = (value: typeof tab) =>
+    cn(
+      "w-full rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors",
+      tab === value ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50",
+    );
 
   return (
     <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
@@ -830,69 +837,87 @@ export function AppSettingsPanel() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-5">
-        <div className="mt-2 flex items-center justify-between gap-4 rounded-xl bg-card p-4">
-          <div>
-            <div className="text-[15px] font-medium text-ink">{polish ? "Język" : "Language"}</div>
-            <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Wybierz język aplikacji." : "Choose app language."}</div>
-          </div>
-          <select
-            value={language}
-            onChange={(event) => setLanguage(event.target.value as Language)}
-            className="rounded-lg border border-hairline/40 bg-inset px-2.5 py-2 text-[13px] text-ink focus:outline-none"
-            aria-label={polish ? "Język" : "Language"}
-          >
-            <option value="en">{languageLabel("en")}</option>
-            <option value="pl">{languageLabel("pl")}</option>
-          </select>
+      <div className="flex flex-1 min-h-0">
+        <nav className="flex w-44 shrink-0 flex-col gap-1 border-r border-hairline/40 px-2 py-3">
+          <button type="button" className={tabClass("general")} onClick={() => setTab("general")}>{polish ? "Ogólne" : "General"}</button>
+          <button type="button" className={tabClass("update")} onClick={() => setTab("update")}>{polish ? "Update" : "Update"}</button>
+          <button type="button" className={tabClass("other")} onClick={() => setTab("other")}>{polish ? "Inne" : "Other"}</button>
+        </nav>
+
+        <div className="flex-1 overflow-y-auto px-5 pb-5">
+          {tab === "general" && (
+            <>
+              <div className="mt-2 flex items-center justify-between gap-4 rounded-xl bg-card p-4">
+                <div>
+                  <div className="text-[15px] font-medium text-ink">{polish ? "Język" : "Language"}</div>
+                  <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Wybierz język aplikacji." : "Choose app language."}</div>
+                </div>
+                <select
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value as Language)}
+                  className="rounded-lg border border-hairline/40 bg-inset px-2.5 py-2 text-[13px] text-ink focus:outline-none"
+                  aria-label={polish ? "Język" : "Language"}
+                >
+                  <option value="en">{languageLabel("en")}</option>
+                  <option value="pl">{languageLabel("pl")}</option>
+                </select>
+              </div>
+              <div className="mt-2 rounded-xl bg-card p-4">
+                <div className="text-[15px] font-medium text-ink">{polish ? "Profil" : "Profile"}</div>
+                <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Widoczny na pasku bocznym. Zapisuje się automatycznie." : "Shown in the sidebar. Saved as you go."}</div>
+                <div className="mt-4">
+                  <ProfileFields />
+                </div>
+              </div>
+              <div className="mt-4 rounded-xl bg-card p-4">
+                <div className="text-[15px] font-medium text-ink">{polish ? "Skórka" : "Skin"}</div>
+                <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Kolory interfejsu zapisują się lokalnie." : "Interface colors are stored locally."}</div>
+                <div className="mt-3"><SkinPicker /></div>
+              </div>
+
+              <div className="mt-4 rounded-xl bg-card p-4">
+                <div className="text-[15px] font-medium text-ink">{polish ? "Połączenia" : "Connections"}</div>
+                <div className="mt-0.5 text-[13px] text-ink-secondary">
+                  {polish
+                    ? "Wspólne dla wszystkich botów. Zapis klucza od razu przeładowuje dostawców; klucze zostają lokalnie i nie są ponownie wyświetlane."
+                    : "Shared by all bots. Saving a key reloads providers instantly; keys are stored locally and never shown again."}
+                </div>
+                <div className="mt-4 flex flex-col gap-4">
+                  <ApiKeyRow section="composio" label="Composio Connect key" placeholder="ck_…" />
+                  <ApiKeyRow
+                    section="composioApi"
+                    label="Composio API key (optional)"
+                    placeholder="ak_…  unlocks the full app catalog"
+                  />
+                  {/* multibot (A5): box.ascii.dev usunięty z rejestracji driverów — pole tokena martwe, więc go nie ma */}
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === "update" && (
+            <UpdatesRow />
+          )}
+
+          {tab === "other" && (
+            <>
+              {/* multibot: G2 — server token, masked until explicitly shown. */}
+              <AccessTokenSettings />
+              <PairDeviceSettings />
+              <InstallAppSettings />
+
+              {/* multibot: G1 — custom model catalog lives at app level, never per bot. */}
+              <CustomModels />
+              {/* multibot: G1 — CLI allowlist UI; provisioning actions land in G3. */}
+              <CommandLineTools />
+
+              {/* multibot: F11 — status local service */}
+              <EngineStatusRow />
+              <MachineResources />
+              <DiagnosticsRow />
+            </>
+          )}
         </div>
-        <div className="mt-2 rounded-xl bg-card p-4">
-          <div className="text-[15px] font-medium text-ink">{polish ? "Profil" : "Profile"}</div>
-          <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Widoczny na pasku bocznym. Zapisuje się automatycznie." : "Shown in the sidebar. Saved as you go."}</div>
-          <div className="mt-4">
-            <ProfileFields />
-          </div>
-        </div>
-        <div className="mt-4 rounded-xl bg-card p-4">
-          <div className="text-[15px] font-medium text-ink">{polish ? "Skórka" : "Skin"}</div>
-          <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Kolory interfejsu zapisują się lokalnie." : "Interface colors are stored locally."}</div>
-          <div className="mt-3"><SkinPicker /></div>
-        </div>
-
-        <div className="mt-4 rounded-xl bg-card p-4">
-          <div className="text-[15px] font-medium text-ink">{polish ? "Połączenia" : "Connections"}</div>
-          <div className="mt-0.5 text-[13px] text-ink-secondary">
-            {polish
-              ? "Wspólne dla wszystkich botów. Zapis klucza od razu przeładowuje dostawców; klucze zostają lokalnie i nie są ponownie wyświetlane."
-              : "Shared by all bots. Saving a key reloads providers instantly; keys are stored locally and never shown again."}
-          </div>
-          <div className="mt-4 flex flex-col gap-4">
-            <ApiKeyRow section="composio" label="Composio Connect key" placeholder="ck_…" />
-            <ApiKeyRow
-              section="composioApi"
-              label="Composio API key (optional)"
-              placeholder="ak_…  unlocks the full app catalog"
-            />
-            {/* multibot (A5): box.ascii.dev usunięty z rejestracji driverów — pole tokena martwe, więc go nie ma */}
-          </div>
-        </div>
-
-        {/* multibot: G2 — server token, masked until explicitly shown. */}
-        <AccessTokenSettings />
-        <PairDeviceSettings />
-        <InstallAppSettings />
-
-        {/* multibot: G1 — custom model catalog lives at app level, never per bot. */}
-        <CustomModels />
-        {/* multibot: G1 — CLI allowlist UI; provisioning actions land in G3. */}
-        <CommandLineTools />
-
-        {/* multibot: F11 — status local service */}
-        <EngineStatusRow />
-        <MachineResources />
-        <DiagnosticsRow />
-
-        <UpdatesRow />
       </div>
     </aside>
   );
