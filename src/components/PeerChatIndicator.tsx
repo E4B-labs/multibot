@@ -1,7 +1,7 @@
 // Wskaźnik „boty rozmawiają między sobą": gdy oglądany bot siedzi w aktywnym
 // pokoju współpracy, obok jego awatara nad composereem wskakuje awatar partnera
-// (mały wybuch w kolorze peera), a nad oboma pojawiają się dymki z poziomymi
-// szlaczkami imitującymi tekst rozmowy. Szlaczki zmieniają się co ~15 s.
+// (mały wybuch w kolorze peera). Dymki ze szlaczkami zostały usunięte — podczas
+// animacji widać tylko awatary.
 //
 // TWARDE OGRANICZENIE — dymki nie mogą nic zakrywać. Dlatego cała scena jest
 // ZWYKŁYM ELEMENTEM PRZEPŁYWU tuż nad wierszem pola pisania: jej pojawienie się
@@ -18,7 +18,7 @@ import { MAUS_COLORS } from "@/lib/mascot";
 import { normalizeState, stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { MausAvatar } from "./Avatar";
-import { PEER_CHAT_WAVE_MS, bubbleWaves, selectActivePeerChat, waveSeed, type BotLookup } from "@/lib/botChatAnimation";
+import { selectActivePeerChat, type BotLookup } from "@/lib/botChatAnimation";
 
 /** Ile jeszcze rysujemy scenę po zamknięciu pokoju — czas na fade/scale-out. */
 const PEER_CHAT_EXIT_MS = 240;
@@ -71,68 +71,12 @@ export function usePeerChat(botId: string): PeerChatView | null {
   return view;
 }
 
-/** Jeden dymek: zaokrąglony prostokąt w kolorze właściciela + ogonek w dół
- * + dwie linie szlaczków rysowane od zera przy każdej zmianie (klucz z tickiem). */
-function SpeechBubble({
-  color,
-  paths,
-  tick,
-}: {
-  color: string;
-  paths: [string, string];
-  tick: number;
-}) {
-  return (
-    <span
-      className="relative block h-10 w-11 rounded-xl border bg-card md:h-11 md:w-[40px]"
-      style={{ borderColor: color }}
-    >
-      <svg
-        viewBox="0 0 48 18"
-        className="absolute inset-x-1 bottom-[7px] left-1 top-1 h-[calc(100%-14px)] w-[calc(100%-8px)]"
-        fill="none"
-        strokeLinecap="round"
-        strokeWidth={2}
-      >
-        {paths.map((d, line) => (
-          <path
-            key={`${tick}-${line}`}
-            d={d}
-            pathLength={1}
-            stroke={color}
-            strokeOpacity={line === 0 ? 0.95 : 0.55}
-            className="peer-chat-wave"
-            style={{ animationDelay: `${line * 140}ms` }}
-          />
-        ))}
-      </svg>
-      <span
-        className="absolute -bottom-[5px] left-1/2 -ml-[5px] block size-2.5 rotate-45 border-b border-r bg-card"
-        style={{ borderColor: color }}
-      />
-    </span>
-  );
-}
-
 /** Kąty iskier wybuchu — pełny okrąg co 60°. */
 const SPARK_ANGLES = [0, 60, 120, 180, 240, 300];
 
 export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView }) {
   const peer = view.peerBot;
-  const ownerColor = MAUS_COLORS[bot.color] ?? MAUS_COLORS.green;
   const peerColor = MAUS_COLORS[peer.color] ?? MAUS_COLORS.green;
-
-  // Rotacja szlaczków co ~15 s; gdy karta jest schowana (document.hidden),
-  // licznik stoi — po powrocie scena dalej wygląda żywo, a przeglądarka nie
-  // nadrabia zaległych tików.
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    setTick(0);
-    const id = window.setInterval(() => {
-      if (!document.hidden) setTick((current) => (current + 1) % 997);
-    }, PEER_CHAT_WAVE_MS);
-    return () => window.clearInterval(id);
-  }, [view.roomId]);
 
   // Rozmiar awatara zależy od szerokości ekranu (40 px przy gospodarzu na
   // desktopie, 44 px w pionowym telefonie) — jeden breakpoint co w Tailwindzie.
@@ -146,21 +90,11 @@ export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView 
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  const seed = waveSeed(view.roomId);
-  const ownerWaves = bubbleWaves(seed, 0, tick);
-  const peerWaves = bubbleWaves(seed, 1, tick);
-
   return (
     <div
       aria-hidden="true"
       className={cn("pointer-events-none select-none", view.leaving ? "peer-chat-leave" : "peer-chat-enter")}
     >
-      {/* dymki nad oboma awatarami — kolumna szlaczków zmienia się co tick;
-          brak marginesu, żeby dymek przylegał do awatara (nie unosił się) */}
-      <div className="mb-0 flex items-end gap-2">
-        <SpeechBubble color={ownerColor} paths={ownerWaves} tick={tick} />
-        <SpeechBubble color={peerColor} paths={peerWaves} tick={tick} />
-      </div>
       {/* awatary: desktop zostawia lewy slot pusty — wpada tam pływający awatar
           gospodarza z composera; telefon rysuje gospodarza sam */}
       <div className="mb-2 flex items-end gap-2">
