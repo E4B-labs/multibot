@@ -57,7 +57,9 @@ export function sidebarWidthFromDrag(startWidth: number, deltaX: number): number
 function readSidebarWidth(key: string, fallback: number): number {
   if (typeof window === "undefined") return fallback;
   try {
-    const stored = Number(window.localStorage.getItem(key));
+    const raw = window.localStorage.getItem(key);
+    if (raw == null || raw.trim() === "") return fallback;
+    const stored = Number(raw);
     return Number.isFinite(stored) ? clampSidebarWidth(stored) : fallback;
   } catch {
     return fallback;
