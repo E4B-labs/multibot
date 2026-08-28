@@ -845,6 +845,11 @@ export function AppSettingsPanel() {
   const language = useLanguage();
   const polish = language === "pl";
   const [tab, setTab] = useState<AppSettingsTab>("general");
+  // multibot: licznik kliknięć w szynę sekcji. Sam `tab` nie wystarczy —
+  // ponowne kliknięcie w już wybraną ikonę nie zmienia stanu, więc animacja
+  // nie miałaby czego odtworzyć. Numer idzie do `key`, co przemontowuje
+  // warstwę błysku i puszcza ją od nowa.
+  const [press, setPress] = useState<{ tab: AppSettingsTab; nth: number }>({ tab: "general", nth: 0 });
   const currentTab = settingsTabs.find((item) => item.id === tab) ?? settingsTabs[0];
 
   return (
@@ -876,18 +881,37 @@ export function AppSettingsPanel() {
               <button
                 key={id}
                 type="button"
-                onClick={() => setTab(id)}
+                data-settings-tab
+                onClick={() => {
+                  setTab(id);
+                  setPress((p) => ({ tab: id, nth: p.tab === id ? p.nth + 1 : 0 }));
+                }}
                 title={label}
                 aria-label={label}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "relative flex size-11 items-center justify-center rounded-xl transition-colors before:absolute before:left-0 before:h-5 before:w-0.5 before:rounded-full",
+                  // multibot: wciśnięcie zjeżdża do 92% — w dół, nigdy w górę,
+                  // więc przycisk nie wychodzi poza swoje miejsce w szynie.
+                  "relative flex size-11 items-center justify-center rounded-xl",
+                  "transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.92]",
+                  "before:absolute before:left-0 before:h-5 before:w-0.5 before:rounded-full",
                   active
                     ? "bg-raised text-accent before:bg-accent"
                     : "text-ink-secondary hover:bg-raised/70 hover:text-ink before:bg-transparent",
                 )}
               >
-                <Icon size={19} strokeWidth={2} />
+                {press.tab === id && (
+                  // Plamka rozchodzi się od środka do krawędzi przycisku i
+                  // gaśnie. `inset-0` plus skala kończąca się na 1 trzymają ją
+                  // w obrysie — nie ma jak najechać na sąsiednią ikonę.
+                  <span
+                    key={press.nth}
+                    data-settings-tab-press
+                    aria-hidden
+                    className="animate-settings-tab-press pointer-events-none absolute inset-0 rounded-xl bg-accent/35"
+                  />
+                )}
+                <Icon size={19} strokeWidth={2} className="relative" />
               </button>
             );
           })}

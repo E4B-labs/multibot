@@ -4,6 +4,9 @@
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  /* multibot: błysk pod kliknięciem ikony w szynie ustawień. Krzywa ta sama
+     co reszta ruchu w apce. */
+  --animate-settings-tab-press: settings-tab-press 0.42s cubic-bezier(0.22, 1, 0.36, 1);
 
   --color-app: #0a0a0a;
   --color-panel: #111111;
@@ -169,6 +172,17 @@ body {
 @keyframes pop-in {
   from { transform: scale(0.96) translateY(6px); opacity: 0; }
   to { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* multibot: reakcja na kliknięcie ikony w szynie ustawień — plamka rozchodzi
+   się od środka przycisku i gaśnie. Skala KOŃCZY się na 1 i nigdy jej nie
+   przekracza, a warstwa siedzi na „inset-0” samego przycisku: dzięki temu
+   animacja nie wychodzi poza jego obrys i nie potrafi najechać na sąsiednie
+   ikony ani na krawędź panelu — nawet bez „overflow: hidden”. Pilnuje tego
+   AppSettingsPanel.test.ts. */
+@keyframes settings-tab-press {
+  from { opacity: 0.55; transform: scale(0.5); }
+  to { opacity: 0; transform: scale(1); }
 }
 
 /* SupaMaus vector motion. The fast horizontal compression is the edge-on
@@ -634,6 +648,11 @@ body {
   .maus-motion {
     animation: none !important;
   }
+
+  /* Kto prosi system o mniej ruchu, dostaje sam kolor — plamka i wciśnięcie
+     przycisku znikają. */
+  [data-settings-tab-press] { display: none; }
+  [data-settings-tab] { transition: none; }
 
   .maus-orbit {
     display: none;
