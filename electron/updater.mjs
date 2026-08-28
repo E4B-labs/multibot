@@ -101,10 +101,11 @@ export function registerUpdaterIpc() {
     try {
       // multibot: NIE używamy quitAndInstall — NSIS `--force-run` relanszuje
       // aplikację przez skrót z Menu Start (StartApp → ExecShellAsUser
-      // "$launchLink"), co na części maszyn (jajowana asocjacja .lnk) kończy
-      // się oknem „Z tym plikiem nie jest skojarzona aplikacja…” (Kacper,
-      // długo). Relaunch robimy sami: cmd czeka na instalatora (start /wait),
-      // potem odpala świeżo zapisany exe bezpośrednio, zero skrótów.
+      // "$launchLink"), co na tej maszynie kończy się oknem „Z tym plikiem nie
+      // jest skojarzona aplikacja…” (Kacper, długo). Relaunch robimy sami —
+      // i wyprzedzająco ubijamy WSZYSTKIE procesy MultiBot, bo NSIS nie
+      // wymieni zablokowanego exe i zostawia częściową instalację (tak
+      // się stało z 0.1.106: exe urwany w połowie, „nieprawidłowa aplikacja”).
       const installerPath = autoUpdater?.installerPath;
       const exePath = app.getPath("exe");
       const installDir = path.dirname(exePath);
@@ -112,12 +113,14 @@ export function registerUpdaterIpc() {
         setState({ status: "downloaded" });
         return;
       }
-      const hasSpaces = /\s/.test(installDir);
-      const installArgs = hasSpaces
-        ? `start "" /wait "${installerPath}" /S --updated`
-        // NSIS wymaga /D= jako OSTATNIEGO parametru, bez cudzysłowów
-        : `start "" /wait "${installerPath}" /S --updated /D=${installDir}`;
-      const cmd = `${installArgs} & start "" "${exePath}"`;
+      // NSIS: /D= musi być OSTATNIM parametrem; ścieżka ze spacjami → w
+      // cudzysłowach (bez spacji nie dotykamy, bo cmd /c je i tak skleja).
+      const dArg = /\s/.test(installDir) ? `/D="${installDir}"` : `/D=${installDir}`;
+      const cmd =
+        `taskkill /f /im MultiBot.exe /t >nul 2>&1 & ` +
+        `timeout /t 2 /nobreak >nul & ` +
+        `start "" /wait "${installerPath}" /S --updated ${dArg} & ` +
+        `start "" "${exePath}"`;
       spawn("cmd.exe", ["/d", "/s", "/c", cmd], {
         detached: true,
         stdio: "ignore",
