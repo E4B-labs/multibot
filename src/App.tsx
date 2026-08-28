@@ -23,6 +23,8 @@ import { SkillsPanel } from "@/components/SkillsPanel";
 import { GroupPanel } from "@/components/GroupPanel";
 import { RoomPanel } from "@/components/RoomPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
+// multibot: pojedynczy bezramkowy pasek funkcyjny na szczycie okna
+import { TopBar } from "@/components/TopBar";
 // multibot: Cmd/Ctrl+K paleta komend
 import { CmdK } from "@/components/CmdK";
 import { authEventName, authFetch, clearAuthToken, getAuthToken, setAuthToken } from "@/lib/auth";
@@ -161,6 +163,8 @@ function Shell() {
   }, [state.bots]);
   return (
     <div className="multibot-shell flex h-full flex-col">
+      {/* multibot: bezramkowy pasek funkcyjny (min/max/close + przyciski) */}
+      <TopBar />
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
       {/* multibot: Cmd/Ctrl+K command palette — fixed overlay, renders null until opened */}

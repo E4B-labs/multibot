@@ -40,6 +40,13 @@ declare global {
         install(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
+      /** Custom window controls — the app runs frameless, so the React TopBar
+       * drives minimize/maximize/close through these. Absent in plain browsers. */
+      window?: {
+        minimize(): void;
+        toggleMaximize(): void;
+        close(): void;
+      };
     };
   }
 }

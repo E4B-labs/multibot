@@ -1,7 +1,5 @@
-import { track } from "@/lib/analytics";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bot as BotIcon,
   BellDot,
   ChevronDown,
   ChevronRight,
@@ -11,13 +9,9 @@ import {
   EyeOff,
   FolderPlus,
   Loader2,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   Pin,
   PinOff,
-  Plus,
-  Search,
   Settings,
   Puzzle,
   Trash2,
@@ -34,8 +28,6 @@ import { authFetch } from "@/lib/auth";
 import { engineOnline } from "@/lib/engineStatus";
 import { getLanguage, useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
-
-const isElectron = navigator.userAgent.includes("Electron");
 
 // multibot: przy wąskim oknie sidebar sam zwija się do szyny z samymi
 // awatarami. Dolna granica nie jest ozdobna: poniżej 700 px `styles.css` ma
@@ -1073,7 +1065,6 @@ export function Sidebar() {
   const lang = useLanguage();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [groupMenu, setGroupMenu] = useState<GroupMenuState | null>(null);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
   // multibot 0.1.46: formularz grupy LOKALNEJ otwiera PPM w pustą część listy
   const [localCreateOpen, setLocalCreateOpen] = useState(false);
@@ -1117,7 +1108,6 @@ export function Sidebar() {
   // tego wracają otwarte przy rozwinięciu — jakby wyskoczyły same.
   useEffect(() => {
     if (!collapsed) return;
-    setAddMenuOpen(false);
     setGroupCreateOpen(false);
   }, [collapsed]);
 
@@ -1194,19 +1184,21 @@ export function Sidebar() {
   // stabilna z listy botów; wybrany driver nie usuwa bota z grup.
   const groupBots = state.bots;
 
+  // multibot: przyciski z TopBara (bezramkowe okno) sterują szyną przez
+  // custom eventy — zwinięcie, nowa grupa i scout z folderu.
   useEffect(() => {
-    if (!addMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest("[data-add-menu]")) setAddMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setAddMenuOpen(false);
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
+    const onToggle = () => setOverride((v) => !(v ?? autoRail));
+    const onGroup = () => setGroupCreateOpen(true);
+    const onScout = () => setScoutOpen(true);
+    window.addEventListener("mb:sidebar:toggle", onToggle);
+    window.addEventListener("mb:sidebar:group-create", onGroup);
+    window.addEventListener("mb:sidebar:scout", onScout);
     return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mb:sidebar:toggle", onToggle);
+      window.removeEventListener("mb:sidebar:group-create", onGroup);
+      window.removeEventListener("mb:sidebar:scout", onScout);
     };
-  }, [addMenuOpen]);
+  }, [autoRail]);
 
   return (
     <aside
@@ -1219,110 +1211,12 @@ export function Sidebar() {
         collapsed ? "w-[80px]" : "w-[320px]",
       )}
     >
-      {/* Titlebar: real traffic lights in Electron, faux ones in the browser */}
-      <div
-        className={cn(
-          "flex items-center px-4 pt-3.5 pb-1",
-          collapsed ? "justify-center" : "justify-between",
-        )}
-        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-      >
-        {!collapsed && (
-          isElectron ? (
-            <div className="w-14" />
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="size-3 rounded-full bg-[#ff5f57]" />
-              <span className="size-3 rounded-full bg-[#febc2e]" />
-              <span className="size-3 rounded-full bg-[#28c840]" />
-            </div>
-          )
-        )}
-        <div className="flex items-center gap-1">
-        {/* multibot: przełącznik szyny. `no-drag` obowiązkowo — bez tego pod
-            Electronem klik ląduje w obszarze przeciągania okna. */}
-        <button
-          onClick={() => setOverride(!collapsed)}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-          title={polish ? (collapsed ? "Rozwiń panel" : "Zwiń panel") : collapsed ? "Expand panel" : "Collapse panel"}
-          aria-label={polish ? (collapsed ? "Rozwiń panel" : "Zwiń panel") : collapsed ? "Expand panel" : "Collapse panel"}
-          aria-expanded={!collapsed}
-        >
-          {collapsed ? <PanelLeftOpen size={20} strokeWidth={2} /> : <PanelLeftClose size={20} strokeWidth={2} />}
-        </button>
-        {!collapsed && (
-        <div className="relative" data-add-menu>
-          <button
-            onClick={() => setAddMenuOpen((v) => !v)}
-            className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-            title={polish ? "Dodaj bota albo grupę" : "Add bot or group"}
-            aria-expanded={addMenuOpen}
-          >
-            <Plus size={20} strokeWidth={2} />
-          </button>
-          {addMenuOpen && (
-            <div className="absolute right-0 top-8 z-30 w-44 rounded-xl border border-hairline/40 bg-card p-1.5 shadow-lg">
-              <button
-                onClick={() => {
-                  track("bot_created");
-                  setAddMenuOpen(false);
-                  dispatch({ type: "newBot" });
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-raised"
-              >
-                <BotIcon size={15} className="text-ink-secondary" />
-                {polish ? "Nowy bot" : "New bot"}
-              </button>
-              <button
-                onClick={() => {
-                  setAddMenuOpen(false);
-                  setGroupCreateOpen(true);
-                }}
-                disabled={groupBots.length === 0}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Users size={15} className="text-ink-secondary" />
-                {polish ? "Nowa grupa" : "New group"}
-              </button>
-              <button
-                onClick={() => {
-                  setAddMenuOpen(false);
-                  setScoutOpen(true);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-raised"
-              >
-                <FolderPlus size={15} className="text-ink-secondary" />
-                {polish ? "Zespół z folderu" : "Scout from folder"}
-              </button>
-            </div>
-          )}
-        </div>
-        )}
-        </div>
-      </div>
+      {/* multibot: belka tytułowa (traffic lights + przełącznik szyny +
+          menu dodawania) przeniesiona do bezramkowego TopBar; szyna zaczyna
+          się od listy. Mały odstęp od góry, żeby treść nie leżała na krawędzi. */}
+      <div className="h-2 shrink-0" />
 
-      {/* Search */}
-      {!collapsed && (
-      <div className="px-3 pt-2 pb-3">
-        {/* multibot: to było `input` bez `value` i bez `onChange` — dało się w
-            nie pisać i nic się nie działo. Wyszukiwanie ma paleta poleceń
-            (CmdK), więc jest teraz jej widocznym wejściem: Ctrl+K sam z siebie
-            nikomu się nie objawi. Przycisk, nie pole, żeby kursor nie lądował
-            tutaj zamiast w palecie; stąd też `preventDefault` na wciśnięciu. */}
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => window.dispatchEvent(new CustomEvent("mb:cmdk:open"))}
-          className="flex w-full items-center gap-2 rounded-lg bg-raised/70 px-3 py-2 text-left hover:bg-raised"
-        >
-          <Search size={16} className="shrink-0 text-ink-secondary" />
-          <span className="flex-1 truncate text-[14px] text-ink-secondary">{polish ? "Szukaj" : "Search"}</span>
-          <kbd className="shrink-0 rounded border border-hairline/60 px-1.5 py-0.5 text-[10px] text-ink-secondary">Ctrl K</kbd>
-        </button>
-      </div>
-      )}
+      {/* Search — przeniesione do TopBar (przycisk CmdK). */}
 
       {/* Pinned — podział na rzędy po max 3; ułożenie każdego rzędu zależy
           od liczby awatarów w TYM rzędzie (1: wycentrowany; 2: wycentrowana
