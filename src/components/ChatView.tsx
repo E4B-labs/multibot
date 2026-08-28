@@ -149,8 +149,8 @@ function Bubble({
       <div
         className={cn(
           // multibot: dymek na PC zwężony o połowę (35%). Rozmiar czcionki
-          // ustawiał właściciel iteracyjnie: 15 → 11 (za mało) → 17 → 13px.
-          "max-w-[35%] rounded-2xl px-2 py-[5px] text-[13px] leading-relaxed",
+          // ustawiał właściciel iteracyjnie: 15 → 11 → 17 → 13 → 15px.
+          "max-w-[35%] rounded-2xl px-2 py-[5px] text-[15px] leading-relaxed",
           user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
           message.pending && "opacity-60",
         )}
@@ -178,7 +178,7 @@ function Bubble({
             </div>
             {/* multibot: skalowane tym samym wsp. co reszta treści dymka */}
             {collapsible && (
-              <button onClick={() => setExpanded(true)} className="mt-1 text-[11px] text-ink-secondary hover:text-ink">
+              <button onClick={() => setExpanded(true)} className="mt-1 text-[13px] text-ink-secondary hover:text-ink">
                 {polish ? "Pokaż całą wiadomość" : "Show full message"}
               </button>
             )}
@@ -192,7 +192,7 @@ function Bubble({
             między treścią a godziną robiła się pusta linijka. */}
         <div
           className={cn(
-            "mt-1 flex items-center gap-1.5 text-[9px] leading-none",
+            "mt-1 flex items-center gap-1.5 text-[10px] leading-none",
             user ? "justify-end text-right text-ink/55" : "justify-start text-left text-ink-secondary/60",
           )}
         >
@@ -208,7 +208,7 @@ function Bubble({
               title={polish ? "Odpowiedz" : "Reply"}
               className="rounded-md p-0.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/msg:opacity-100"
             >
-              <ReplyIcon size={11} />
+              <ReplyIcon size={13} />
             </button>
           )}
         </div>
@@ -312,9 +312,9 @@ function StreamingBubble({ text }: { text: string }) {
     <div className="flex w-full justify-start">
       {/* multibot: ten sam rozmiar co Bubble — inaczej tekst „skakałby" po
           zakończeniu strumienia */}
-      <div className="max-w-[35%] rounded-2xl bg-card px-2 py-[5px] text-[13px] leading-relaxed text-ink">
+      <div className="max-w-[35%] rounded-2xl bg-card px-2 py-[5px] text-[15px] leading-relaxed text-ink">
         <ChatMarkdown text={text} streaming compact />
-        <span className="ml-0.5 inline-block h-[11px] w-[2px] animate-pulse bg-ink-secondary align-middle" />
+        <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-ink-secondary align-middle" />
       </div>
     </div>
   );
