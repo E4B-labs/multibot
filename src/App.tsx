@@ -23,8 +23,6 @@ import { SkillsPanel } from "@/components/SkillsPanel";
 import { GroupPanel } from "@/components/GroupPanel";
 import { RoomPanel } from "@/components/RoomPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
-// multibot: pojedynczy bezramkowy pasek funkcyjny na szczycie okna
-import { TopBar } from "@/components/TopBar";
 // multibot: Cmd/Ctrl+K paleta komend
 import { CmdK } from "@/components/CmdK";
 import { authEventName, authFetch, clearAuthToken, getAuthToken, setAuthToken } from "@/lib/auth";
@@ -163,47 +161,50 @@ function Shell() {
   }, [state.bots]);
   return (
     <div className="multibot-shell flex h-full flex-col">
-      {/* multibot: bezramkowy pasek funkcyjny (min/max/close + przyciski) */}
-      <TopBar />
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
       {/* multibot: Cmd/Ctrl+K command palette — fixed overlay, renders null until opened */}
       <CmdK />
       <div className="relative flex min-h-0 flex-1">
-      <Sidebar />
-      {state.roomOpen ? (
-        <RoomPanel />
-      ) : state.groupOpen ? (
-        <GroupPanel key={state.groupOpen.id} group={state.groupOpen} />
-      ) : bot ? (
-        <ChatView bot={bot} />
-      ) : (
-        <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
-          <Loader2 size={20} className="animate-spin" />
-          <div className="text-[14px]">
-            {state.connected ? (polish ? "Brak botów" : "No bots yet") : polish ? "Łączenie z serwerem botów…" : "Connecting to the bot server…"}
-          </div>
-          {!state.connected && (
-            <div className="text-[12px]">
-              {polish ? "Uruchom:" : "Start it with"} <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
-            </div>
-          )}
-        </main>
-      )}
-      {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
-      {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
-      {state.computerOpen && bot && <ComputerPanel bot={bot} />}
-      {/* multibot: routines are harness-owned and available for every driver. */}
-      {state.routinesOpen && bot && <RoutinesPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}
-      {state.skillsOpen && bot && <SkillsPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}
-      {/* multibot: live team map (port z OpenMausBot) — globalny overlay */}
-      {state.teamMapOpen && (
-        <TeamMapPanel onClose={() => dispatch({ type: "toggleTeamMap", open: false })} />
-      )}
-      {/* multibot: F9-FE — pokój grupowy; otwierany wyłącznie z sekcji Groups
-          (widocznej tylko przy botach slafy), klucz per grupę = świeży mount */}
-      {state.appSettingsOpen && <AppSettingsPanel />}
-      {state.pluginsOpen && <PluginsPanel />}
+        {state.appSettingsOpen ? (
+          <AppSettingsPanel />
+        ) : (
+          <>
+            <Sidebar />
+            {state.roomOpen ? (
+              <RoomPanel />
+            ) : state.groupOpen ? (
+              <GroupPanel key={state.groupOpen.id} group={state.groupOpen} />
+            ) : bot ? (
+              <ChatView bot={bot} />
+            ) : (
+              <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+                <Loader2 size={20} className="animate-spin" />
+                <div className="text-[14px]">
+                  {state.connected ? (polish ? "Brak botów" : "No bots yet") : polish ? "Łączenie z serwerem botów…" : "Connecting to the bot server…"}
+                </div>
+                {!state.connected && (
+                  <div className="text-[12px]">
+                    {polish ? "Uruchom:" : "Start it with"} <code className="rounded bg-raised px-1.5 py-0.5">pnpm dev:server</code>
+                  </div>
+                )}
+              </main>
+            )}
+            {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
+            {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
+            {state.computerOpen && bot && <ComputerPanel bot={bot} />}
+            {/* multibot: routines are harness-owned and available for every driver. */}
+            {state.routinesOpen && bot && <RoutinesPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}
+            {state.skillsOpen && bot && <SkillsPanel key={`${bot.id}-${state.workspaceVersion}`} bot={bot} />}
+            {/* multibot: live team map (port z OpenMausBot) — globalny overlay */}
+            {state.teamMapOpen && (
+              <TeamMapPanel onClose={() => dispatch({ type: "toggleTeamMap", open: false })} />
+            )}
+            {/* multibot: F9-FE — pokój grupowy; otwierany wyłącznie z sekcji Groups
+                (widocznej tylko przy botach slafy), klucz per grupę = świeży mount */}
+            {state.pluginsOpen && <PluginsPanel />}
+          </>
+        )}
       </div>
     </div>
   );

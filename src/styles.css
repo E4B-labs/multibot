@@ -72,6 +72,7 @@ body {
   body { overflow: auto; }
   #root { min-height: 100%; height: auto; }
   .multibot-shell { min-height: 100dvh; }
+  .multibot-shell .app-settings-screen { min-height: 100dvh; height: 100dvh; }
   .multibot-shell > .relative { flex-direction: column; }
   .multibot-shell aside:first-child {
     width: 100%;

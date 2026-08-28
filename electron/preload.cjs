@@ -38,15 +38,6 @@ contextBridge.exposeInMainWorld("ogb", {
   setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
 
-  /** Custom window controls — the app runs frameless (frame:false), so the
-   * React TopBar drives minimize/maximize/close through these. No-ops in a
-   * plain browser where window.ogb.window is never defined. */
-  window: {
-    minimize: () => ipcRenderer.send("window:minimize"),
-    toggleMaximize: () => ipcRenderer.send("window:toggle-maximize"),
-    close: () => ipcRenderer.send("window:close"),
-  },
-
   /** In-app auto-update. State object:
    *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",
    *    version?, percent?, message? }. onState fires immediately with the

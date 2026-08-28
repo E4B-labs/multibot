@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Upload, Wand2 } from "lucide-react";
+import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, ScanSearch, Search, Upload, Wand2 } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
 import { SkillPill } from "./SkillPill";
@@ -23,6 +23,7 @@ import { SecretRequestCard } from "./SecretRequestCard";
 import { Composer } from "./Composer";
 // multibot: TTS głośniczek przy wiadomościach bota (tylko driver slafy)
 import { SpeakButton } from "./SpeakButton";
+import { ModelPicker } from "./ModelPicker";
 import { cn } from "@/lib/cn";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
@@ -383,16 +384,6 @@ export function ChatView({ bot }: { bot: Bot }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  // multibot: TopBar otwiera find-in-chat przez custom event (jak CmdK),
-  // żeby nie przerabiać propsów.
-  useEffect(() => {
-    const onFind = () => {
-      setFollow(false);
-      setFindOpen(true);
-    };
-    window.addEventListener("mb:find:open", onFind);
-    return () => window.removeEventListener("mb:find:open", onFind);
-  }, []);
   const latestSkillEvent = [...bot.messages].reverse().find((message) => message.event?.type === "skill-created")?.id;
 
   useEffect(() => setFollow(true), [bot.id]);
@@ -478,6 +469,63 @@ export function ChatView({ bot }: { bot: Bot }) {
           </span>
           <span className="text-[15px] font-semibold text-ink">{botDisplayName(bot, polish ? "pl" : "en")}</span>
         </button>
+        <div className="flex items-center gap-2">
+          <ModelPicker bot={bot} />
+          <button
+            onClick={() => {
+              setFollow(false);
+              setFindOpen((open) => !open);
+            }}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title={polish ? "Szukaj w rozmowie (Ctrl+F)" : "Find in chat (Ctrl+F)"}
+            aria-label={polish ? "Szukaj w rozmowie" : "Find in chat"}
+          >
+            <Search size={18} />
+          </button>
+          <button
+            onClick={() => dispatch({ type: "toggleInspector" })}
+            className={cn("rounded-md p-1.5 hover:bg-raised", state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink")}
+            title={polish ? "Inspector runtime" : "Runtime inspector"}
+            aria-label={polish ? "Inspector runtime" : "Runtime inspector"}
+          >
+            <ScanSearch size={18} />
+          </button>
+          <button
+            onClick={() => dispatch({ type: "toggleComputer" })}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title={polish ? "Komputer bota" : "Bot's computer"}
+          >
+            <Monitor size={18} />
+          </button>
+          <button
+            onClick={() => dispatch({ type: "toggleRoutines" })}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              state.routinesOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title={polish ? "Rutyny bota" : "Bot routines"}
+            aria-label={polish ? "Rutyny bota" : "Bot routines"}
+          >
+            <CalendarClock size={18} />
+          </button>
+          <button
+            onClick={() => dispatch({ type: "toggleSkills" })}
+            className={cn(
+              "rounded-md p-1.5 hover:bg-raised",
+              state.skillsOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+            )}
+            title={polish ? "Umiejętności bota" : "Bot skills"}
+            aria-label={polish ? "Umiejętności bota" : "Bot skills"}
+          >
+            <Wand2 size={18} />
+          </button>
+        </div>
       </div>
 
       {/* Error banner */}

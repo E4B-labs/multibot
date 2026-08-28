@@ -314,9 +314,8 @@ function createWindow() {
     minHeight: 600,
     icon: APP_ICON,
     backgroundColor: "#070707",
-    // multibot: ramka systemowa (biały pasek tytułu z ikoną i min/max/close)
-    // zdjęta — kontrolki okna rysujemy sami w TopBar (src/components/TopBar.tsx).
-    frame: false,
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 16, y: 16 },
     // Pasek menu (File/Edit/View/Host/Window) schowany — Kacper 21.08. Menu
     // zostaje zbudowane, bo niesie role schowka i skrót Ctrl+Shift+H do
     // zmiany hosta; Alt pokazuje pasek na chwilę, gdy ktoś go potrzebuje.
@@ -380,16 +379,6 @@ function createWindow() {
   void loadActiveTarget(win);
   return win;
 }
-
-// multibot: własne kontrolki okna (min/max/close) — zdjęliśmy ramkę systemową
-// (frame:false), więc TopBar wysyła te zdarzenia, a my wykonujemy je tu.
-ipcMain.on("window:minimize", () => mainWindow?.minimize());
-ipcMain.on("window:toggle-maximize", () => {
-  if (!mainWindow) return;
-  if (mainWindow.isMaximized()) mainWindow.unmaximize();
-  else mainWindow.maximize();
-});
-ipcMain.on("window:close", () => mainWindow?.close());
 
 // multibot (C2): small native window for switching between the local
 // harness and a saved remote host. Separate from the harness UI itself

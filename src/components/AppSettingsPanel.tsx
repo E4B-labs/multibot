@@ -1,7 +1,7 @@
-// App-level settings, in the right-side slot: who you are + credentials
+// App-level settings screen: who you are + credentials
 // shared by all bots. Per-bot settings (name, persona, model, computer)
 // live in SettingsPanel; contextual Box-token entry stays in ComputerPanel.
-import { FileDown, Loader2, Plus, QrCode, Trash2, X } from "lucide-react";
+import { FileDown, Loader2, Plus, QrCode, RefreshCw, SlidersHorizontal, Trash2, Wrench, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useStore } from "@/state/store";
 import { ApiKeyRow } from "./ApiKeys";
@@ -812,39 +812,93 @@ function UpdatesRow() {
   );
 }
 
+const settingsTabs = [
+  {
+    id: "general",
+    Icon: SlidersHorizontal,
+    pl: "Ogólne",
+    en: "General",
+    descriptionPl: "Język, profil, wygląd i połączenia.",
+    descriptionEn: "Language, profile, appearance, and connections.",
+  },
+  {
+    id: "update",
+    Icon: RefreshCw,
+    pl: "Aktualizacje",
+    en: "Updates",
+    descriptionPl: "Sprawdź i zainstaluj aktualizacje aplikacji.",
+    descriptionEn: "Check for and install app updates.",
+  },
+  {
+    id: "other",
+    Icon: Wrench,
+    pl: "Narzędzia",
+    en: "Tools",
+    descriptionPl: "Dostęp, modele, usługa lokalna i diagnostyka.",
+    descriptionEn: "Access, models, local service, and diagnostics.",
+  },
+] as const;
+type AppSettingsTab = (typeof settingsTabs)[number]["id"];
+
 export function AppSettingsPanel() {
   const { dispatch } = useStore();
   const language = useLanguage();
   const polish = language === "pl";
-  const [tab, setTab] = useState<"general" | "update" | "other">("general");
-
-  const tabClass = (value: typeof tab) =>
-    cn(
-      "w-full rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors",
-      tab === value ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50",
-    );
+  const [tab, setTab] = useState<AppSettingsTab>("general");
+  const currentTab = settingsTabs.find((item) => item.id === tab) ?? settingsTabs[0];
 
   return (
-    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
-      <div className="flex items-center justify-between px-4 py-3">
-        <span className="w-6" />
-        <span className="text-[15px] font-semibold text-ink">{polish ? "Ustawienia aplikacji" : "App Settings"}</span>
+    <main className="app-settings-screen animate-panel-in flex min-h-0 min-w-0 flex-1 flex-col bg-app">
+      <header className="flex shrink-0 items-center justify-between border-b border-hairline/40 bg-panel px-6 py-4 lg:px-10">
+        <div>
+          <h1 className="text-[18px] font-semibold tracking-[-0.02em] text-ink">{polish ? "Ustawienia aplikacji" : "App Settings"}</h1>
+          <p className="mt-1 text-[13px] text-ink-secondary">{polish ? "Konfiguracja wspólna dla całego MultiBota." : "Settings shared across your MultiBot workspace."}</p>
+        </div>
         <button
           onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-lg p-2 text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
+          title={polish ? "Zamknij ustawienia" : "Close settings"}
+          aria-label={polish ? "Zamknij ustawienia" : "Close settings"}
         >
           <X size={18} />
         </button>
-      </div>
+      </header>
 
-      <div className="flex flex-1 min-h-0">
-        <nav className="flex w-44 shrink-0 flex-col gap-1 border-r border-hairline/40 px-2 py-3">
-          <button type="button" className={tabClass("general")} onClick={() => setTab("general")}>{polish ? "Ogólne" : "General"}</button>
-          <button type="button" className={tabClass("update")} onClick={() => setTab("update")}>{polish ? "Update" : "Update"}</button>
-          <button type="button" className={tabClass("other")} onClick={() => setTab("other")}>{polish ? "Inne" : "Other"}</button>
+      <div className="flex min-h-0 flex-1">
+        <nav
+          aria-label={polish ? "Sekcje ustawień" : "Settings sections"}
+          className="flex w-[72px] shrink-0 flex-col items-center gap-2 border-r border-hairline/40 bg-panel px-2 py-5"
+        >
+          {settingsTabs.map(({ id, Icon, pl, en }) => {
+            const label = polish ? pl : en;
+            const active = tab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                title={label}
+                aria-label={label}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "relative flex size-11 items-center justify-center rounded-xl transition-colors before:absolute before:left-0 before:h-5 before:w-0.5 before:rounded-full",
+                  active
+                    ? "bg-raised text-accent before:bg-accent"
+                    : "text-ink-secondary hover:bg-raised/70 hover:text-ink before:bg-transparent",
+                )}
+              >
+                <Icon size={19} strokeWidth={2} />
+              </button>
+            );
+          })}
         </nav>
 
-        <div className="flex-1 overflow-y-auto px-5 pb-5">
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-4xl px-6 py-7 lg:px-10">
+            <div className="mb-6">
+              <h2 className="text-[22px] font-semibold tracking-[-0.025em] text-ink">{polish ? currentTab.pl : currentTab.en}</h2>
+              <p className="mt-1 text-[13px] text-ink-secondary">{polish ? currentTab.descriptionPl : currentTab.descriptionEn}</p>
+            </div>
           {tab === "general" && (
             <>
               <div className="mt-2 flex items-center justify-between gap-4 rounded-xl bg-card p-4">
@@ -917,8 +971,9 @@ export function AppSettingsPanel() {
               <DiagnosticsRow />
             </>
           )}
+          </div>
         </div>
       </div>
-    </aside>
+    </main>
   );
 }
