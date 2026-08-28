@@ -230,6 +230,55 @@ body {
   75% { transform: rotate(6deg); }
 }
 
+/* == multibot: rozwijanie menu „trzy kropki" w nagłówku czatu =============
+   Trzy fazy po sekundzie, sterowane z ChatHeaderMenu.tsx (UNROLL_MS, FLY_MS,
+   TYPE_MS). Czasy tutaj i tam muszą się zgadzać — pilnuje tego
+   ChatHeaderMenu.test.ts.
+
+   Zwój przycinamy clip-path, a nie skalą ani wysokością: panel ma od razu
+   docelowy rozmiar, więc nic pod nim nie skacze, a zaokrąglone rogi nie
+   rozjeżdżają się po drodze. Klasa żyje tylko w pierwszej fazie, bo
+   „inset(0 0 0 0)” przyciąłby potem kropki lecące spoza obrysu panelu. */
+.menu-unroll {
+  animation: menu-unroll 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes menu-unroll {
+  from { clip-path: inset(0 0 100% 0 round 0.75rem); }
+  to { clip-path: inset(0 0 0 0 round 0.75rem); }
+}
+
+/* Kropka leci z przycisku na miejsce ikony. Wektor liczy komponent z układu
+   strony i podaje w --dot-dx/--dot-dy, więc trafia niezależnie od czcionki. */
+.menu-dot {
+  animation: menu-dot-fly 1s cubic-bezier(0.34, 0.9, 0.3, 1) both;
+}
+@keyframes menu-dot-fly {
+  from { opacity: 0; transform: translate(var(--dot-dx), var(--dot-dy)) scale(0.5); }
+  12% { opacity: 1; }
+  to { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+
+/* Ikona siada tam, gdzie wylądowała kropka. */
+.menu-icon-in {
+  animation: menu-icon-in 0.28s ease-out both;
+}
+@keyframes menu-icon-in {
+  from { opacity: 0; transform: scale(0.55); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Litera po literze. inline-block, bo transform nie działa na elementach
+   inline; po sekwencji napis wraca do jednego węzła tekstowego, więc te
+   opakowania nie mają wpływu na wygląd końcowy. */
+.menu-letter {
+  display: inline-block;
+  animation: menu-letter-in 0.18s ease-out both;
+}
+@keyframes menu-letter-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* SupaMaus vector motion. The fast horizontal compression is the edge-on
    moment of a turn; face parallax, surface lighting, and orbiting vector marks
    sell the 3D rotation without duplicate silhouettes, raster frames, or WebGL. */
@@ -698,6 +747,15 @@ body {
      nie zjeżdża. */
   [data-settings-tab-icon] * { animation: none !important; }
   [data-settings-tab] { transition: none; }
+
+  /* Menu „trzy kropki" i tak omija sekwencję w komponencie; to jest zapasowa
+     blokada, gdyby ktoś kiedyś podał fazę z zewnątrz. */
+  .menu-unroll,
+  .menu-dot,
+  .menu-icon-in,
+  .menu-letter {
+    animation: none !important;
+  }
 
   .maus-orbit {
     display: none;
