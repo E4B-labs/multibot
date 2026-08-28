@@ -9,6 +9,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy, Wand2 } from "lucide-react";
 import { useLanguage } from "@/lib/language";
+import { cn } from "@/lib/cn";
 import { normalizeState } from "@/lib/mascot";
 import { MausAvatar } from "./Avatar";
 import { useStore } from "@/state/store";
@@ -34,7 +35,7 @@ const hash = (s: string) => {
 // potrzebuje więcej niż imienia. Sama wtyczka siedzi w `@/lib/mentions`.
 type MentionBot = ReturnType<typeof useStore>["state"]["bots"][number];
 
-function CodeBlock({ code, lang, streaming }: { code: string; lang: string; streaming: boolean }) {
+function CodeBlock({ code, lang, streaming, compact }: { code: string; lang: string; streaming: boolean; compact: boolean }) {
   const polish = useLanguage() === "pl";
   const [html, setHtml] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -78,28 +79,34 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
   return (
     <div className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
       <div className="flex items-center justify-between border-b border-hairline/30 px-3 py-1">
-        <span className="text-[11px] uppercase tracking-wide text-ink-secondary">{lang || "code"}</span>
+        <span className={cn("uppercase tracking-wide text-ink-secondary", compact ? "text-[8px]" : "text-[11px]")}>{lang || "code"}</span>
         <button
           onClick={copy}
-          className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className={cn("rounded text-ink-secondary hover:bg-raised hover:text-ink", compact ? "p-0.5" : "p-1")}
           title={polish ? "Kopiuj kod" : "Copy code"}
         >
-          {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
+          {copied
+            ? <Check size={compact ? 10 : 13} className="text-success" />
+            : <Copy size={compact ? 10 : 13} />}
         </button>
       </div>
       {html ? (
         <div
-          className="overflow-x-auto text-[13px] leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3"
+          className={cn("overflow-x-auto leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3", compact ? "text-[9.5px]" : "text-[13px]")}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed text-ink">{code}</pre>
+        <pre className={cn("overflow-x-auto p-3 leading-relaxed text-ink", compact ? "text-[9.5px]" : "text-[13px]")}>{code}</pre>
       )}
     </div>
   );
 }
 
-function ChatMarkdownComponent({ text, streaming = false }: { text: string; streaming?: boolean }) {
+/** multibot: `compact` = wariant do dymków czatu — ten sam markup, tylko czcionki
+ * i ikonki przeskalowane współczynnikiem ~0,73 (13→9,5; 13,5→10; 16→12; 15,5→11,5;
+ * 12,5→9; 11→8). Panele (GroupPanel, RoomPanel, SkillsPanel) renderują BEZ tej
+ * flagi, więc zostają w dotychczasowych rozmiarach. */
+function ChatMarkdownComponent({ text, streaming = false, compact = false }: { text: string; streaming?: boolean; compact?: boolean }) {
   const { state, dispatch } = useStore();
   const bots = useMemo<MentionBot[]>(() => state.bots, [state.bots]);
   const skillNames = state.skillNames;
@@ -123,10 +130,13 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
                   <button
                     type="button"
                     onClick={() => dispatch({ type: "toggleSkills", open: true })}
-                    className="inline-flex h-6 translate-y-px items-center gap-1.5 rounded-full bg-[#111] px-2.5 align-middle text-[12.5px] font-semibold text-[#ffb700] hover:brightness-110"
+                    className={cn(
+                      "inline-flex translate-y-px items-center gap-1.5 rounded-full bg-[#111] align-middle font-semibold text-[#ffb700] hover:brightness-110",
+                      compact ? "h-[18px] px-2 text-[9px]" : "h-6 px-2.5 text-[12.5px]",
+                    )}
                     title={skillRef}
                   >
-                    <Wand2 size={11} className="shrink-0 text-[#ffb700]" />
+                    <Wand2 size={compact ? 8 : 11} className="shrink-0 text-[#ffb700]" />
                     {children}
                   </button>
                 );
@@ -134,8 +144,8 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
               return <span>{children}</span>;
             }
             return (
-              <span className="inline-flex translate-y-px items-center gap-1 rounded-full bg-raised px-2 py-0.5 align-middle text-[13px] font-medium text-ink">
-                <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? "happy"} size={16} animated={false} />
+              <span className={cn("inline-flex translate-y-px items-center gap-1 rounded-full bg-raised px-2 py-0.5 align-middle font-medium text-ink", compact ? "text-[9.5px]" : "text-[13px]")}>
+                <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? "happy"} size={compact ? 12 : 16} animated={false} />
                 {children}
               </span>
             );
@@ -146,11 +156,11 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             const className: string = child?.props?.className ?? "";
             const lang = /language-([\w-]+)/.exec(className)?.[1] ?? "";
             const code = String(child?.props?.children ?? "").replace(/\n$/, "");
-            return <CodeBlock code={code} lang={lang} streaming={streaming} />;
+            return <CodeBlock code={code} lang={lang} streaming={streaming} compact={compact} />;
           },
           code({ children }: { children?: ReactNode }) {
             return (
-              <code className="rounded bg-inset px-1 py-px text-[13px]">{children}</code>
+              <code className={cn("rounded bg-inset px-1 py-px", compact ? "text-[9.5px]" : "text-[13px]")}>{children}</code>
             );
           },
           a({ href, children }: { href?: string; children?: ReactNode }) {
@@ -168,7 +178,7 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
           table({ children }: { children?: ReactNode }) {
             return (
               <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-[13.5px]">{children}</table>
+                <table className={cn("w-full border-collapse", compact ? "text-[10px]" : "text-[13.5px]")}>{children}</table>
               </div>
             );
           },
@@ -187,10 +197,10 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             return <ol className="list-decimal space-y-1 pl-5">{children}</ol>;
           },
           h1({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[16px] font-semibold">{children}</div>;
+            return <div className={cn("mt-2 font-semibold", compact ? "text-[12px]" : "text-[16px]")}>{children}</div>;
           },
           h2({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[15.5px] font-semibold">{children}</div>;
+            return <div className={cn("mt-2 font-semibold", compact ? "text-[11.5px]" : "text-[15.5px]")}>{children}</div>;
           },
           h3({ children }: { children?: ReactNode }) {
             return <div className="mt-1.5 font-semibold">{children}</div>;

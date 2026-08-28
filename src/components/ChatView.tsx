@@ -143,7 +143,8 @@ function Bubble({
     >
       <div
         className={cn(
-          "max-w-[70%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
+          // multibot: dymek o połowę mniejszy (PC) — szerokość, padding i tekst
+          "max-w-[35%] rounded-2xl px-2 py-[5px] text-[11px] leading-relaxed",
           user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
           message.pending && "opacity-60",
         )}
@@ -169,35 +170,41 @@ function Bubble({
             >
               {text}
             </div>
+            {/* multibot: 12,5 → 9px, tym samym wsp. co reszta treści dymka */}
             {collapsible && (
-              <button onClick={() => setExpanded(true)} className="mt-1 text-[12.5px] text-ink-secondary hover:text-ink">
+              <button onClick={() => setExpanded(true)} className="mt-1 text-[9px] text-ink-secondary hover:text-ink">
                 {polish ? "Pokaż całą wiadomość" : "Show full message"}
               </button>
             )}
           </>
         ) : (
-          <>
-            <ChatMarkdown text={text} />
-            {/* multibot: TTS — see SpeakButton.tsx; renders null off-slafy */}
-            <SpeakButton text={text} />
-          </>
+          <ChatMarkdown text={text} compact />
         )}
-        {/* multibot: flat reply — przycisk na hover, jak SpeakButton */}
-        {onReply && message.kind === "text" && (
-          <div className="mt-1 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100">
+        {/* multibot: stopka dymka — godzina i sterowanie hover (TTS, Odpowiedz)
+            w JEDNYM rzędzie. Wcześniej przyciski z `opacity-0` stały w osobnych
+            wierszach i mimo niewidoczności zajmowały miejsce w układzie, przez co
+            między treścią a godziną robiła się pusta linijka. */}
+        <div
+          className={cn(
+            "mt-1 flex items-center gap-1.5 text-[8px] leading-none",
+            user ? "justify-end text-right text-ink/55" : "justify-start text-left text-ink-secondary/60",
+          )}
+        >
+          <span>{formatTime(message.at)}</span>
+          {/* multibot: TTS — see SpeakButton.tsx; renders null off-slafy */}
+          {!user && <SpeakButton text={text} />}
+          {/* multibot: flat reply — przycisk na hover, jak SpeakButton */}
+          {onReply && message.kind === "text" && (
             <button
               type="button"
               onClick={() => onReply(message)}
               aria-label={polish ? "Odpowiedz" : "Reply"}
               title={polish ? "Odpowiedz" : "Reply"}
-              className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+              className="rounded-md p-0.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/msg:opacity-100"
             >
-              <ReplyIcon size={13} />
+              <ReplyIcon size={10} />
             </button>
-          </div>
-        )}
-        <div className={cn("mt-1.5 text-[11px] leading-none", user ? "text-right text-ink/55" : "text-left text-ink-secondary/60")}>
-          {formatTime(message.at)}
+          )}
         </div>
       </div>
     </div>
@@ -297,9 +304,11 @@ function ScreenFrame({ png, mime }: { png: string; mime?: string }) {
 function StreamingBubble({ text }: { text: string }) {
   return (
     <div className="flex w-full justify-start">
-      <div className="max-w-[70%] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
-        <ChatMarkdown text={text} streaming />
-        <span className="ml-0.5 inline-block h-[14px] w-[2px] animate-pulse bg-ink-secondary align-middle" />
+      {/* multibot: ten sam rozmiar co Bubble — inaczej tekst „skakałby" po
+          zakończeniu strumienia */}
+      <div className="max-w-[35%] rounded-2xl bg-card px-2 py-[5px] text-[11px] leading-relaxed text-ink">
+        <ChatMarkdown text={text} streaming compact />
+        <span className="ml-0.5 inline-block h-[10px] w-[1.5px] animate-pulse bg-ink-secondary align-middle" />
       </div>
     </div>
   );

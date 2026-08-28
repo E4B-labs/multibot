@@ -108,7 +108,10 @@ export function SpeakButton({ text }: { text: string }) {
     <button
       onClick={() => (phase === "loading" || phase === "playing" ? stop() : void play())}
       className={cn(
-        "mt-1 rounded p-1 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/msg:opacity-100",
+        // multibot: bez `mt-1` i z mniejszym paddingiem — przycisk siedzi teraz
+        // w jednym rzędzie ze znacznikiem czasu (stopka dymka w ChatView),
+        // więc nie może dokładać własnego odstępu ani rozpychać wiersza.
+        "rounded p-0.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/msg:opacity-100",
         phase === "error" ? "text-danger" : "text-ink-secondary hover:bg-raised hover:text-ink",
         phase !== "idle" && "opacity-100",
       )}
@@ -122,14 +125,15 @@ export function SpeakButton({ text }: { text: string }) {
               : polish ? "Czytaj na głos" : "Read aloud"
       }
     >
+      {/* multibot: ikony 13 → 10, proporcjonalnie do zmniejszonego dymka */}
       {phase === "loading" ? (
-        <Loader2 size={13} className="animate-spin" />
+        <Loader2 size={10} className="animate-spin" />
       ) : phase === "playing" ? (
-        <Square size={13} className="fill-current" />
+        <Square size={10} className="fill-current" />
       ) : phase === "error" ? (
-        <VolumeX size={13} />
+        <VolumeX size={10} />
       ) : (
-        <Volume2 size={13} />
+        <Volume2 size={10} />
       )}
     </button>
   );
