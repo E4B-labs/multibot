@@ -9,6 +9,7 @@ import { SHAPE, type CursorShape } from "@/components/CursorAvatar";
  * z gradientem instancji.
  */
 export const MASCOT_SHAPES = [
+  "blob",
   "leaf",
   "cursor",
   "circle",
@@ -42,11 +43,20 @@ const simple = (name: Exclude<MascotShape, "cursor">, body: string): CursorShape
   anchor: { x: BOX, y: BOX, scale: 0.86 },
 });
 
+const BLOB_BODY = '<path xmlns="http://www.w3.org/2000/svg" fill="{{GRADIENT}}" d="M175.67 108.19Q175.61 116.39 172.02 124.18Q168.43 131.97 161.78 138.28Q155.12 144.60 146.59 148.97Q138.07 153.35 128.74 155.97Q119.40 158.60 109.70 159.75Q100.00 160.91 90.06 160.47Q80.13 160.02 70.49 157.45Q60.85 154.88 52.66 149.91Q44.48 144.93 38.95 138.01Q33.43 131.10 30.99 123.29Q28.55 115.49 28.58 107.75Q28.60 100.00 30.14 92.59Q31.67 85.18 34.36 77.89Q37.04 70.59 41.46 63.40Q45.88 56.21 52.83 49.91Q59.77 43.62 69.21 39.57Q78.65 35.52 89.33 34.75Q100.00 33.97 110.12 36.42Q120.24 38.88 128.62 43.52Q136.99 48.15 143.59 53.77Q150.20 59.38 155.64 65.42Q161.09 71.46 165.59 78.13Q170.09 84.80 172.91 92.40Q175.72 100.00 175.67 108.19Z"/>';
+
 // Zaokrąglenia siedzą w geometrii ścieżki, nie w obrysie. `clip` to clipPath,
 // a clipPath liczy wyłącznie wypełnienie — obrys z `stroke-linejoin="round"`
 // dałby zaokrągloną sylwetkę i ostry obszar przycięcia, więc twarz maskotki
 // ucinałaby się w rogach inaczej, niż widać kształt.
 const SHAPES: Record<Exclude<MascotShape, "cursor">, CursorShape> = {
+  blob: {
+    name: "blob",
+    fit: "translate(-44.4052 -37.3374) scale(1.553736)",
+    body: BLOB_BODY,
+    clip: BLOB_BODY.replace(/ fill="\{\{GRADIENT\}\}"/, ""),
+    anchor: { x: 116, y: 108, scale: 1.09 },
+  },
   // Soczewka: dwa łuki o tym samym promieniu, oba wybrzuszone na zewnątrz.
   // Promień steruje grubością i jest odwrotny do intuicji — im MNIEJSZY, tym
   // soczewka pełniejsza. Nie może zejść poniżej połowy cięciwy (127), bo wtedy

@@ -132,7 +132,7 @@ export type MausAvatarProps = {
 function MausAvatarComponent(
   {
     color,
-    shape = "cursor",
+    shape = "blob",
     state = "idle",
     expression,
     size = 44,

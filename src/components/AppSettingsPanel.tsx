@@ -1,7 +1,7 @@
 // App-level settings screen: who you are + credentials
 // shared by all bots. Per-bot settings (name, persona, model, computer)
 // live in SettingsPanel; contextual Box-token entry stays in ComputerPanel.
-import { FileDown, Loader2, Plus, QrCode, RefreshCw, SlidersHorizontal, Trash2, Wrench, X } from "lucide-react";
+import { ArrowLeft, FileDown, Loader2, Plus, QrCode, RefreshCw, SlidersHorizontal, Trash2, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useStore } from "@/state/store";
 import { ApiKeyRow } from "./ApiKeys";
@@ -856,11 +856,11 @@ export function AppSettingsPanel() {
         </div>
         <button
           onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
-          className="rounded-lg p-2 text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
-          title={polish ? "Zamknij ustawienia" : "Close settings"}
-          aria-label={polish ? "Zamknij ustawienia" : "Close settings"}
+          className="mr-1 rounded-lg p-2.5 text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
+          title={polish ? "Wróć" : "Back"}
+          aria-label={polish ? "Wróć" : "Back"}
         >
-          <X size={18} />
+          <ArrowLeft size={18} />
         </button>
       </header>
 

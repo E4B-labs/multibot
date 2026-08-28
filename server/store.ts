@@ -253,8 +253,8 @@ export class Store {
       description: "",
       notifications: true,
       color: COLORS[this.bots.length % COLORS.length],
-      // multibot: ikona nr 1 z wyboru (mascotShapes.ts) jako domyślna sylwetka
-      mascotShape: "leaf",
+      // multibot: Blob — pierwsza ikona z wyboru i domyślna sylwetka nowych botów
+      mascotShape: "blob",
       unread: false,
       modelSelection: this.defaultSelection(),
       resumeCursors: {},

@@ -34,75 +34,6 @@ function Field({
 const inputCls =
   "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline";
 
-// multibot: F10 — licznik zużycia tokenów silnika slafy, karta pod EngineAutonomy.
-// Jeden GET przy otwarciu panelu (mount; karta keyowana bot.id jak F4), zero
-// pollingu:
-//   GET /api/engine/bots/mb-<threadId>/usage — {prompt_tokens, completion_tokens,
-//     total_tokens, turns} (engine/server/usage.py).
-// 404 = bot silnika jeszcze nie istnieje (wstaje leniwie przy pierwszej
-// wiadomości) = zero użycia, nie błąd; 502/503/błąd sieci = "Engine offline". Kosztu nie
-// pokazujemy — silnik zlicza wyłącznie tokeny.
-interface EngineUsageOut {
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  turns: number;
-}
-
-const ZERO_USAGE: EngineUsageOut = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, turns: 0 };
-
-function EngineUsage({ bot }: { bot: Bot }) {
-  const polish = useLanguage() === "pl";
-  const usagePath = `/api/bots/${bot.id}/usage`;
-  const [status, setStatus] = useState<"loading" | "offline" | "ready">("loading");
-  const [usage, setUsage] = useState<EngineUsageOut>(ZERO_USAGE);
-
-  useEffect(() => {
-    authFetch(usagePath)
-      .then((res) => {
-        if (res.status === 404) return ZERO_USAGE; // brak bota = brak użycia
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<EngineUsageOut>;
-      })
-      .then((u) => {
-        setUsage(u);
-        setStatus("ready");
-      })
-      .catch(() => setStatus("offline"));
-  }, [usagePath]);
-
-  const fmt = (n: number) => n.toLocaleString(polish ? "pl-PL" : "en-US");
-  const stat = (value: string, label: string) => (
-    <div>
-      <div className="text-[20px] font-semibold tabular-nums text-ink">{value}</div>
-      <div className="text-[12px] text-ink-secondary">{label}</div>
-    </div>
-  );
-
-  return (
-    <div className="rounded-xl bg-card p-4">
-      <div className="text-[15px] font-medium text-ink">{polish ? "Zużycie" : "Usage"}</div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">
-        {polish ? "Tokeny użyte przez tego bota" : "Tokens this bot has used"}
-      </div>
-      {status === "offline" ? (
-        <div className="mt-3 flex items-center gap-2 text-[13px] text-ink-secondary">
-          <span className="size-1.5 rounded-full bg-raised-hover" />
-          {polish ? "Usługa offline" : "Service offline"}
-        </div>
-      ) : status === "ready" && usage.turns === 0 ? (
-        <div className="mt-3 text-[13px] text-ink-secondary">{polish ? "Brak użycia" : "No usage yet"}</div>
-      ) : status === "ready" ? (
-        <div className="mt-3 flex gap-6">
-          {stat(fmt(usage.prompt_tokens), polish ? "Tokeny wejściowe" : "Tokens in")}
-          {stat(fmt(usage.completion_tokens), polish ? "Tokeny wyjściowe" : "Tokens out")}
-          {stat(fmt(usage.turns), polish ? "Tury" : "Turns")}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function ComposioAccountSelector({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const polish = useLanguage() === "pl";
@@ -261,7 +192,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                 Bot
               </span>
               <button
-                onClick={() => patch({ color: "green", mascotExpression: null, mascotShape: "cursor" })}
+                onClick={() => patch({ color: "green", mascotExpression: null, mascotShape: "blob" })}
                 className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
               >
                 {polish ? "Resetuj" : "Reset"}
@@ -279,7 +210,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                     onClick={() => patch({ mascotShape: shape })}
                     className={cn(
                       "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
-                      (bot.mascotShape ?? "cursor") === shape && "ring-2 ring-accent-border",
+                      (bot.mascotShape ?? "blob") === shape && "ring-2 ring-accent-border",
                     )}
                     title={shape}
                     aria-label={`${polish ? "Użyj kształtu ikony" : "Use"} ${shape}`}
@@ -354,8 +285,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               {polish ? <>Zawsze włączone. Oznacz bota przez <code className="rounded bg-inset px-1">@nazwa</code>. Dostępne narzędzia peer są używane, gdy provider je obsługuje; w innym razie harness przekazuje żądanie i odpowiedź.</> : <>Always on. Mention another bot with <code className="rounded bg-inset px-1">@name</code> to delegate. Native peer tools are used when provider supports them; otherwise harness routes request and reply.</>}
             </div>
           </div>
-          <EngineUsage key={`usage-${bot.id}`} bot={bot} />
-
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
             <div>
               <div className="text-[15px] font-medium text-ink">
