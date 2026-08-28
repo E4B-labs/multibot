@@ -2,7 +2,7 @@
 // clicking the "X texted Y" chip in a conversation; the user watches the bots
 // work on the task together but cannot post. Live updates ride the SSE "room"
 // frames into store.roomOpen.
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useRef, useState, Fragment } from "react";
 import { ArrowLeftRight, Eye, Loader2, Users, X } from "lucide-react";
 import { useStore, formatTime, type Room } from "@/state/store";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -27,6 +27,9 @@ export function RoomPanel() {
   const polish = useLanguage() === "pl";
   const room = state.roomOpen;
   const [gone, setGone] = useState(false);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const [follow, setFollow] = useState(true);
+  const touchY = useRef(0);
 
   // Refresh the transcript once on mount in case the chip's snapshot is stale.
   useEffect(() => {
@@ -40,6 +43,16 @@ export function RoomPanel() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room?.id]);
+
+  useEffect(() => setFollow(true), [room?.id]);
+  useEffect(() => {
+    if (follow) transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
+  }, [room?.id, room?.transcript.length, room?.status, follow]);
+
+  const atEnd = () => {
+    const el = transcriptRef.current;
+    return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
 
   if (!room) return null;
   const members = room.bot_ids
@@ -110,7 +123,23 @@ export function RoomPanel() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-3">
+      <div
+        ref={transcriptRef}
+        className="flex-1 overflow-y-auto px-5 pb-3 [overflow-anchor:none]"
+        onWheel={(event) => {
+          if (event.deltaY < 0) setFollow(false);
+          else if (atEnd()) setFollow(true);
+        }}
+        onTouchStart={(event) => (touchY.current = event.touches[0]?.clientY ?? 0)}
+        onTouchMove={(event) => {
+          const y = event.touches[0]?.clientY ?? 0;
+          if (y > touchY.current + 4) setFollow(false);
+          else if (atEnd()) setFollow(true);
+        }}
+        onScroll={() => {
+          if (!follow && atEnd()) setFollow(true);
+        }}
+      >
         {gone ? (
           <div className="mt-8 flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
             <Users size={22} />
@@ -126,7 +155,7 @@ export function RoomPanel() {
             {room.status === "running" && <Loader2 size={14} className="animate-spin" />}
           </div>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-4">
             {room.transcript.map((entry) => {
               const entryBot = members.find((b) => b.id === entry.from);
               return (
@@ -166,7 +195,13 @@ export function RoomPanel() {
       <div className="border-t border-hairline/40 px-4 py-3">
         <div className="flex items-center justify-center gap-2 text-[12px] text-ink-secondary">
           <Eye size={14} />
-          {polish ? "Tylko do odczytu — boty pracują nad zadaniem." : "Read-only — the bots are working on the task."}
+          {polish ? "Ten czat jest tylko do wyświetlania" : "This chat is read-only"}
+          <button
+            onClick={() => dispatch({ type: "toggleRoom", room: null })}
+            className="rounded-full bg-raised px-3 py-1 text-[12px] text-ink hover:bg-raised-hover"
+          >
+            {polish ? "Zamknij czat" : "Close chat"}
+          </button>
         </div>
       </div>
     </main>

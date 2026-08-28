@@ -368,8 +368,14 @@ export function ChatView({ bot }: { bot: Bot }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const latestSkillEvent = [...bot.messages].reverse().find((message) => message.event?.type === "skill-created")?.id;
+  const lastMessage = bot.messages[bot.messages.length - 1];
 
   useEffect(() => setFollow(true), [bot.id]);
+  useEffect(() => {
+    // Własna wiadomość zawsze wraca do live view; przychodzące odpowiedzi nie
+    // wyrywają użytkownika z historii, jeśli czyta starsze wiadomości.
+    if (lastMessage?.role === "user") setFollow(true);
+  }, [lastMessage?.id, lastMessage?.role]);
   useEffect(() => {
     // zmiana bota zamyka find — trafienia należą do starego transkryptu
     setFindOpen(false);

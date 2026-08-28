@@ -1,6 +1,6 @@
 // Saved window geometry for the desktop shell — plain CJS so the parse /
 // resolve rules stay unit-testable without Electron (same split as OMB).
-const DEFAULT_BOUNDS = Object.freeze({ width: 1440, height: 920 });
+const DEFAULT_BOUNDS = Object.freeze({ width: 1040, height: 760 });
 const MIN_BOUNDS = Object.freeze({ width: 900, height: 600 });
 
 const integer = (value) => Number.isFinite(value) && Number.isInteger(value);

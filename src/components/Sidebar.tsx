@@ -37,12 +37,32 @@ import { botDisplayName } from "@/lib/botNames";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
-// multibot: przy wąskim oknie sidebar sam zwija się do szyny z samymi
-// awatarami. Dolna granica nie jest ozdobna: poniżej 700 px `styles.css` ma
-// układ telefonu, który kładzie sidebar na całą szerokość nad czatem — szyna
-// biłaby się z nim o tę samą właściwość. Górna to moment, w którym 320 px
-// listy plus 400 px panelu po prawej przestaje zostawiać czatowi miejsce.
-const RAIL_QUERY = "(min-width: 701px) and (max-width: 1100px)";
+const DEFAULT_SIDEBAR_WIDTH = 240;
+const COLLAPSED_SIDEBAR_WIDTH = 80;
+const MIN_SIDEBAR_WIDTH = 160;
+const MAX_SIDEBAR_WIDTH = 420;
+const COLLAPSE_THRESHOLD = 112;
+const SIDEBAR_WIDTH_KEY = "multibot.sidebarWidth";
+const SIDEBAR_EXPANDED_WIDTH_KEY = "multibot.sidebarExpandedWidth";
+
+export function clampSidebarWidth(width: number): number {
+  if (width <= COLLAPSE_THRESHOLD) return COLLAPSED_SIDEBAR_WIDTH;
+  return Math.min(Math.max(Math.round(width), MIN_SIDEBAR_WIDTH), MAX_SIDEBAR_WIDTH);
+}
+
+export function sidebarWidthFromDrag(startWidth: number, deltaX: number): number {
+  return clampSidebarWidth(startWidth + deltaX);
+}
+
+function readSidebarWidth(key: string, fallback: number): number {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const stored = Number(window.localStorage.getItem(key));
+    return Number.isFinite(stored) ? clampSidebarWidth(stored) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 /** Two name words → initials, first email character → initial, unset → "?". */
 function profileInitials(profile?: { name?: string; email?: string }): string {
@@ -812,22 +832,46 @@ export function Sidebar() {
     hoverTimer.current = null;
     setHover(null);
   };
-  // multibot: `matchMedia` zamiast nasłuchu `resize` — budzi się na przejściu
-  // progu, nie na każdym pikselu ciągnięcia ramki okna.
-  const [autoRail, setAutoRail] = useState(() => window.matchMedia(RAIL_QUERY).matches);
-  // Ręczny wybór ma pierwszeństwo, ale tylko do najbliższej zmiany szerokości
-  // okna — inaczej jedno kliknięcie zabijałoby automat na zawsze.
-  const [override, setOverride] = useState<boolean | null>(null);
-  const collapsed = override ?? autoRail;
+  const [sidebarWidth, setSidebarWidth] = useState(() => readSidebarWidth(SIDEBAR_WIDTH_KEY, DEFAULT_SIDEBAR_WIDTH));
+  const expandedWidth = useRef(
+    Math.max(MIN_SIDEBAR_WIDTH, readSidebarWidth(SIDEBAR_EXPANDED_WIDTH_KEY, DEFAULT_SIDEBAR_WIDTH)),
+  );
+  const [resizing, setResizing] = useState(false);
+  const resizeRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  const collapsed = sidebarWidth === COLLAPSED_SIDEBAR_WIDTH;
 
   useEffect(() => {
-    const mq = window.matchMedia(RAIL_QUERY);
-    const onChange = () => {
-      setAutoRail(mq.matches);
-      setOverride(null);
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+      if (!collapsed) window.localStorage.setItem(SIDEBAR_EXPANDED_WIDTH_KEY, String(expandedWidth.current));
+    } catch {
+      // Private browsing/storage-disabled: sidebar still works for this run.
+    }
+  }, [collapsed, sidebarWidth]);
+
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      const drag = resizeRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const width = sidebarWidthFromDrag(drag.startWidth, event.clientX - drag.startX);
+      setSidebarWidth(width);
+      if (width !== COLLAPSED_SIDEBAR_WIDTH) expandedWidth.current = width;
     };
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    const onStop = (event: PointerEvent) => {
+      if (!resizeRef.current || resizeRef.current.pointerId !== event.pointerId) return;
+      resizeRef.current = null;
+      setResizing(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onStop);
+    window.addEventListener("pointercancel", onStop);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onStop);
+      window.removeEventListener("pointercancel", onStop);
+    };
   }, []);
 
   // multibot: zwinięcie zamyka wysuwane menu, obojętne czy zwinął je
@@ -934,11 +978,48 @@ export function Sidebar() {
       // rozwijała się tak samo jak panele po prawej. `panel-in` to keyframe
       // od zamontowania, więc szerokości nie da się nim animować.
       className={cn(
-        "flex h-full shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel",
-        "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        collapsed ? "w-[80px]" : "w-[320px]",
+        "relative flex h-full shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel",
+        !resizing && "transition-[width] duration-[240ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "w-[var(--sidebar-width)]",
       )}
+      style={{ "--sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}
     >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-valuemin={COLLAPSED_SIDEBAR_WIDTH}
+        aria-valuemax={MAX_SIDEBAR_WIDTH}
+        aria-valuenow={sidebarWidth}
+        aria-label={polish ? "Zmień szerokość panelu botów" : "Resize bot panel"}
+        tabIndex={0}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebarWidth };
+          setResizing(true);
+          document.body.style.cursor = "col-resize";
+          document.body.style.userSelect = "none";
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+        }}
+        onKeyDown={(event) => {
+          const next = event.key === "Home"
+            ? COLLAPSED_SIDEBAR_WIDTH
+            : event.key === "End"
+              ? MAX_SIDEBAR_WIDTH
+              : event.key === "ArrowLeft"
+                ? clampSidebarWidth(sidebarWidth - 16)
+                : event.key === "ArrowRight"
+                  ? clampSidebarWidth(sidebarWidth + 16)
+                  : null;
+          if (next == null) return;
+          event.preventDefault();
+          setSidebarWidth(next);
+          if (next !== COLLAPSED_SIDEBAR_WIDTH) expandedWidth.current = next;
+        }}
+        className="group absolute inset-y-0 right-0 z-20 flex w-2 cursor-col-resize touch-none items-center justify-center"
+      >
+        <span className="h-full w-px bg-transparent transition-colors group-hover:bg-accent/50 group-focus-visible:bg-accent" />
+      </div>
       {/* Titlebar: real traffic lights in Electron, faux ones in the browser.
           multibot: data-shell-rail-top = przy oknie bez ramki ten rząd rośnie
           o 4 px, żeby jego przyciski stanęły w linii z kontrolkami okna
@@ -964,7 +1045,10 @@ export function Sidebar() {
         )}
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setOverride(!collapsed)}
+            onClick={() => {
+              if (collapsed) setSidebarWidth(expandedWidth.current);
+              else setSidebarWidth(COLLAPSED_SIDEBAR_WIDTH);
+            }}
             className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
             style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
             title={polish ? (collapsed ? "Rozwiń panel" : "Zwiń panel") : collapsed ? "Expand panel" : "Collapse panel"}
@@ -1064,7 +1148,7 @@ export function Sidebar() {
             >
               {rowBots.map((b) => {
                 const isSelected = state.selectedId === b.id && !state.groupOpen;
-                const avatarSize = 72;
+                const avatarSize = sidebarWidth < 280 ? 56 : 72;
                 return (
                   <button
                     key={b.id}
