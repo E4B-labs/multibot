@@ -24,6 +24,10 @@ import { Composer } from "./Composer";
 // multibot: TTS głośniczek przy wiadomościach bota (tylko driver slafy)
 import { SpeakButton } from "./SpeakButton";
 import { ModelPicker } from "./ModelPicker";
+import { ChatHeaderMenu } from "./ChatHeaderMenu";
+// multibot: czwarta kopia tej samej linii (App.tsx, Onboarding.tsx,
+// Sidebar.tsx). Tu decyduje o jednym: czy pięć akcji bota chowa się pod „⋮".
+const isElectron = navigator.userAgent.includes("Electron");
 import { cn } from "@/lib/cn";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
@@ -462,60 +466,75 @@ export function ChatView({ bot }: { bot: Bot }) {
         </button>
         <div className="flex items-center gap-2">
           <ModelPicker bot={bot} />
-          <button
-            onClick={() => {
-              setFollow(false);
-              setFindOpen((open) => !open);
-            }}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title={polish ? "Szukaj w rozmowie (Ctrl+F)" : "Find in chat (Ctrl+F)"}
-            aria-label={polish ? "Szukaj w rozmowie" : "Find in chat"}
-          >
-            <Search size={18} />
-          </button>
-          <button
-            onClick={() => dispatch({ type: "toggleInspector" })}
-            className={cn("rounded-md p-1.5 hover:bg-raised", state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink")}
-            title={polish ? "Inspector runtime" : "Runtime inspector"}
-            aria-label={polish ? "Inspector runtime" : "Runtime inspector"}
-          >
-            <ScanSearch size={18} />
-          </button>
-          <button
-            onClick={() => dispatch({ type: "toggleComputer" })}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title={polish ? "Komputer bota" : "Bot's computer"}
-          >
-            <Monitor size={18} />
-          </button>
-          <button
-            onClick={() => dispatch({ type: "toggleRoutines" })}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.routinesOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title={polish ? "Rutyny bota" : "Bot routines"}
-            aria-label={polish ? "Rutyny bota" : "Bot routines"}
-          >
-            <CalendarClock size={18} />
-          </button>
-          <button
-            onClick={() => dispatch({ type: "toggleSkills" })}
-            className={cn(
-              "rounded-md p-1.5 hover:bg-raised",
-              state.skillsOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
-            )}
-            title={polish ? "Umiejętności bota" : "Bot skills"}
-            aria-label={polish ? "Umiejętności bota" : "Bot skills"}
-          >
-            <Wand2 size={18} />
-          </button>
+          {/* multibot: na pulpicie pięć akcji bota chowa się pod „⋮" na końcu
+              rzędu, czyli tuż na lewo od kontrolek okna — układ przeniesiony
+              z aplikacji mobilnej. W przeglądarce i na serwerze telefonu
+              zostają ikony, bo tam nagłówka nic nie ściska. */}
+          {isElectron ? (
+            <ChatHeaderMenu
+              onToggleFind={() => {
+                setFollow(false);
+                setFindOpen((open) => !open);
+              }}
+            />
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  setFollow(false);
+                  setFindOpen((open) => !open);
+                }}
+                className={cn(
+                  "rounded-md p-1.5 hover:bg-raised",
+                  findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+                )}
+                title={polish ? "Szukaj w rozmowie (Ctrl+F)" : "Find in chat (Ctrl+F)"}
+                aria-label={polish ? "Szukaj w rozmowie" : "Find in chat"}
+              >
+                <Search size={18} />
+              </button>
+              <button
+                onClick={() => dispatch({ type: "toggleInspector" })}
+                className={cn("rounded-md p-1.5 hover:bg-raised", state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink")}
+                title={polish ? "Inspector runtime" : "Runtime inspector"}
+                aria-label={polish ? "Inspector runtime" : "Runtime inspector"}
+              >
+                <ScanSearch size={18} />
+              </button>
+              <button
+                onClick={() => dispatch({ type: "toggleComputer" })}
+                className={cn(
+                  "rounded-md p-1.5 hover:bg-raised",
+                  state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+                )}
+                title={polish ? "Komputer bota" : "Bot's computer"}
+              >
+                <Monitor size={18} />
+              </button>
+              <button
+                onClick={() => dispatch({ type: "toggleRoutines" })}
+                className={cn(
+                  "rounded-md p-1.5 hover:bg-raised",
+                  state.routinesOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+                )}
+                title={polish ? "Rutyny bota" : "Bot routines"}
+                aria-label={polish ? "Rutyny bota" : "Bot routines"}
+              >
+                <CalendarClock size={18} />
+              </button>
+              <button
+                onClick={() => dispatch({ type: "toggleSkills" })}
+                className={cn(
+                  "rounded-md p-1.5 hover:bg-raised",
+                  state.skillsOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+                )}
+                title={polish ? "Umiejętności bota" : "Bot skills"}
+                aria-label={polish ? "Umiejętności bota" : "Bot skills"}
+              >
+                <Wand2 size={18} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
