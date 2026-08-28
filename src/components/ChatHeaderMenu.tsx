@@ -22,6 +22,7 @@ import { CalendarClock, Monitor, MoreVertical, ScanSearch, Search, Wand2 } from 
 import { useStore } from "@/state/store";
 import { useLanguage } from "@/lib/language";
 import { cn } from "@/lib/cn";
+import { motionIsReduced } from "@/lib/motion";
 
 /** Kolejność jak na telefonie. Lista jest jawna, żeby po schowaniu ikon żadna
  * funkcja nie wyparowała — pilnuje tego ChatHeaderMenu.test.ts. */
@@ -48,10 +49,6 @@ export function letterDelay(index: number, count: number): number {
   const step = Math.min(Math.max(index, 0), count - 1) / (count - 1);
   return (step * span) / 1000;
 }
-
-const prefersReducedMotion = () =>
-  typeof window !== "undefined" &&
-  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
 export function ChatHeaderMenu({ onToggleFind }: { onToggleFind: () => void }) {
   const { dispatch } = useStore();
@@ -80,7 +77,7 @@ export function ChatHeaderMenu({ onToggleFind }: { onToggleFind: () => void }) {
   // Sekwencja faz. Kto prosi system o mniej ruchu, dostaje panel od razu gotowy.
   useEffect(() => {
     if (!open) return;
-    if (prefersReducedMotion()) {
+    if (motionIsReduced()) {
       setPhase("done");
       return;
     }

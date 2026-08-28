@@ -738,32 +738,23 @@ body {
   43%, 58% { opacity: 1; transform: translate(18px, -15px) scale(0.42); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .maus-motion *,
-  .maus-motion {
-    animation: none !important;
-  }
-
-  /* Kto prosi system o mniej ruchu, dostaje sam kolor — ikony stoją, przycisk
-     nie zjeżdża. */
-  [data-settings-tab-icon] * { animation: none !important; }
-  [data-settings-tab] { transition: none; }
-
-  /* Menu „trzy kropki" i tak omija sekwencję w komponencie; to jest zapasowa
-     blokada, gdyby ktoś kiedyś podał fazę z zewnątrz. */
-  .menu-unroll,
-  .menu-dot,
-  .menu-icon-in,
-  .menu-letter {
-    animation: none !important;
-  }
-
-  .maus-orbit {
-    display: none;
-  }
-
-  .maus-eyes { transform: none; }
+:root[data-motion="reduced"] .maus-motion *,
+:root[data-motion="reduced"] .maus-motion {
+  animation: none !important;
 }
+
+:root[data-motion="reduced"] [data-settings-tab-icon] * { animation: none !important; }
+:root[data-motion="reduced"] [data-settings-tab] { transition: none; }
+
+:root[data-motion="reduced"] .menu-unroll,
+:root[data-motion="reduced"] .menu-dot,
+:root[data-motion="reduced"] .menu-icon-in,
+:root[data-motion="reduced"] .menu-letter {
+  animation: none !important;
+}
+
+:root[data-motion="reduced"] .maus-orbit { display: none; }
+:root[data-motion="reduced"] .maus-eyes { transform: none; }
 
 /* ── multibot: wskaźnik rozmów bot-bot (PeerChatIndicator) ──────────────
    Scena wchodzi łagodnie, wychodzi z fade/scale; partner wskakuje małym
@@ -852,13 +843,11 @@ body {
   to { stroke-dashoffset: 0; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .peer-chat-enter,
-  .peer-chat-leave,
-  .peer-chat-burst,
-  .peer-chat-spark,
-  .peer-chat-wave {
-    animation-duration: 1ms !important;
-    animation-delay: 0ms !important;
-  }
+:root[data-motion="reduced"] .peer-chat-enter,
+:root[data-motion="reduced"] .peer-chat-leave,
+:root[data-motion="reduced"] .peer-chat-burst,
+:root[data-motion="reduced"] .peer-chat-spark,
+:root[data-motion="reduced"] .peer-chat-wave {
+  animation-duration: 1ms !important;
+  animation-delay: 0ms !important;
 }

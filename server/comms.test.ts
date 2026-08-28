@@ -101,6 +101,16 @@ describe("comms e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "ask-user" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          grokMail: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "happy" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
+          grokMailSend: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "send-mail" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           // trzeci tryb: bot oddaje komputer człowiekowi (logowanie/2FA/captcha)
           grokHandoff: {
             driver: "grokAgent",
@@ -261,6 +271,42 @@ describe("comms e2e (fake ACP fleet)", () => {
     const room = rooms.find((r: any) => r.ownerBotId === askerId);
     expect(room?.status).toBe("done");
   });
+
+  it(
+    "delivers asynchronous mail to a fresh target turn and keeps it durable",
+    async () => {
+      const senderSelection = { instanceId: "grokMailSend", model: "fake-model" };
+      // Both sides send mail. This covers the real round trip A -> B -> A,
+      // including delivery after the original sender finishes its turn.
+      const receiverSelection = { instanceId: "grokMailSend", model: "fake-model" };
+      const sender = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${sender.id}`, { name: "Mail Sender", modelSelection: senderSelection });
+      const receiver = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${receiver.id}`, { name: "Mail Receiver", modelSelection: receiverSelection });
+
+      const sent = await api("POST", `/api/bots/${sender.id}/messages`, { text: "send mail to the receiver" });
+      expect(sent.status).toBe(202);
+
+      const deadline = Date.now() + 25_000;
+      let receiverBot: any;
+      for (;;) {
+        receiverBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === receiver.id);
+        if (!receiverBot?.busy && receiverBot?.messages.some((m: any) => m.text?.includes("[Agent mail from @Mail Sender]"))) break;
+        if (Date.now() > deadline) throw new Error(`mail target never settled. stderr: ${stderr.slice(-2000)}`);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      const thread = (await api("GET", "/api/mail")).body.threads.find((t: any) => t.messages?.some((m: any) => m.text === "async ping"));
+      expect(thread).toBeTruthy();
+      expect(thread.messages).toHaveLength(2);
+      expect(thread.messages[0]).toMatchObject({ from: sender.id, to: receiver.id, text: "async ping", status: "delivered" });
+      expect(thread.messages[1]).toMatchObject({ from: receiver.id, to: sender.id, text: "async ping", status: "delivered" });
+      expect(receiverBot.messages.some((m: any) => m.text?.includes("[Agent mail from @Mail Sender]"))).toBe(true);
+      const senderBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === sender.id);
+      expect(senderBot.messages.some((m: any) => m.text?.includes("[Agent mail from @Mail Receiver]"))).toBe(true);
+    },
+    40_000,
+  );
 
   // multibot: wymiana bot→bot nie może zostawić ŻADNEGO śladu na głównym
   // kanacie adresata — żadnej koperty "[Message from @…]", żadnej odpowiedzi,

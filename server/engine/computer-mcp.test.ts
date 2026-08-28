@@ -180,7 +180,15 @@ describe("computer on a claude-style driver (live harness)", () => {
       setTimeout(() => (child.kill("SIGKILL"), resolve()), 5_000).unref?.();
     });
     await engine?.close();
-    if (home) rmSync(home, { recursive: true, force: true });
+    if (home) {
+      try {
+        rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      } catch (error) {
+        // Windows can retain a dead worker's HOME handle after its parent exits.
+        // This is disposable test state; do not turn it into a suite failure.
+        if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      }
+    }
   });
 
   // multibot (H1): wyboru źródła komputera już nie ma. Kontener stoi zawsze,

@@ -146,7 +146,7 @@ export function botSystemPrompt(
     agents &&
       "Attachments — files the user sends arrive as an \"Attached files\" list with a path; open them with read_file (images are usually already visible to you).",
     agents &&
-      "Other bots and groups — list_bots shows who is available, ask_bot sends one of them a message and returns their reply, start_collab and the group tools run a shared room, create_agent makes a new bot. Delegate when work can run in parallel or belongs to another specialisation; a simple task you do yourself.",
+      "Other bots and groups — every bot has its own persona, chat and memory. list_bots shows who is available. send_bot_mail sends asynchronous mail and returns immediately; the recipient gets a fresh turn and may reply later, so do not wait or poll. read_bot_mail reads your durable inbox. Use send_bot_mail for useful side work, ask_bot only when this turn needs an immediate answer, start_collab for a shared task, and group tools for a room. create_agent makes a new bot. Delegate when work belongs to another specialisation; do simple work yourself. Do not spam peers or send acknowledgement-only mail.",
     agents &&
       "The device — for questions about the host device call get_device_info first and report the returned manufacturer/model/platform exactly; never infer a phone model from a chat claim.",
   ].filter(Boolean).join("\n\n");

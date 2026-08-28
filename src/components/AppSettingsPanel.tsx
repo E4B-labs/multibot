@@ -15,6 +15,7 @@ import { authFetch, setAuthToken } from "@/lib/auth";
 import { engineOnline } from "@/lib/engineStatus";
 import { languageLabel, setLanguage, useLanguage, type Language } from "@/lib/language";
 import { SkinPicker } from "./SkinPicker";
+import { applyMotionMode, readMotionMode, type MotionMode } from "@/lib/motion";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -896,6 +897,37 @@ function UpdatesRow() {
   );
 }
 
+function MotionSettings({ polish }: { polish: boolean }) {
+  const [mode, setMode] = useState<MotionMode>(() => readMotionMode());
+  const enabled = mode === "full";
+  const toggle = () => {
+    const next: MotionMode = enabled ? "reduced" : "full";
+    applyMotionMode(next);
+    setMode(next);
+  };
+
+  return (
+    <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/40 pt-4">
+      <div>
+        <div className="text-[15px] font-medium text-ink">{polish ? "Animacje interfejsu" : "Interface animations"}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">
+          {polish ? "Ruch maskotek, ikon ustawień i menu." : "Mascot, settings icon, and menu motion."}
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={polish ? "Animacje interfejsu" : "Interface animations"}
+        onClick={toggle}
+        className={cn("relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors", enabled ? "bg-accent" : "bg-raised")}
+      >
+        <span className={cn("absolute top-[3px] size-5 rounded-full bg-white transition-[left]", enabled ? "left-[21px]" : "left-[3px]")} />
+      </button>
+    </div>
+  );
+}
+
 const settingsTabs = [
   {
     id: "general",
@@ -1028,6 +1060,7 @@ export function AppSettingsPanel() {
                 <div className="text-[15px] font-medium text-ink">{polish ? "Skórka" : "Skin"}</div>
                 <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Kolory interfejsu zapisują się lokalnie." : "Interface colors are stored locally."}</div>
                 <div className="mt-3"><SkinPicker /></div>
+                <MotionSettings polish={polish} />
               </div>
 
               <div className="mt-4 rounded-xl bg-card p-4">

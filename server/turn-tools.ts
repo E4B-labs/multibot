@@ -6,7 +6,7 @@
 //
 // Listy są statyczne — mirror z dwóch miejsc, żeby nie importować spawnerów
 // (agents-proxy.ts to skrypt z runem, nie moduł):
-//   - AGENTS_MCP_TOOLS  = TOOLS w server/drivers/agents-proxy.ts (22 narzędzia)
+//   - AGENTS_MCP_TOOLS  = TOOLS w server/drivers/agents-proxy.ts (28 narzędzi)
 //   - COMPUTER_MCP_TOOLS = @mcp.tool() w engine/server/computer_mcp.py (10)
 // Staleness pilnuje test, który czyta oba źródła z dysku (tak samo, jak test
 // pilnuje CURSOR_COLORS).
@@ -44,6 +44,8 @@ export const AGENTS_TOOLS_VERSION = 8;
 export const AGENTS_MCP_TOOLS = [
   "list_bots",
   "ask_bot",
+  "send_bot_mail",
+  "read_bot_mail",
   "start_collab",
   "get_my_profile",
   "update_my_profile",

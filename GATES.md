@@ -1,40 +1,41 @@
-# Gates: UI/UX paczka 0.1.44 (avatar, powłoka, grupy, kolejka, composer, pokój, prompt)
+# MultiBot B+C+D completion ledger
 
-Scope: wszystkie 7 pozycji celu + wydanie desktop 0.1.44.
-
-- [x] G1: Avatar agenta nad composereem mniejszy (77→60px, mt dopasowane)
-  CHECK: rg -n "size-\[60px\]|size=\{60\}|md:mt-\[68px\]" src/components/Composer.tsx
-  EXPECT: 3 trafienia, zero "size-\[77px\]"
-- [x] G2: Niebieska powłoka zniknęła — brak pingu accent wokół avatara w nagłówku czatu
-  CHECK: rg -n "header-avatar-ping|border-accent/35" src/components/ChatView.tsx
-  EXPECT: brak trafień
-- [x] G3: Przycisk Stop/kwadrat usunięty z nagłówka i composera
-  CHECK: rg -n "Square" src/components/ChatView.tsx src/components/Composer.tsx
-  EXPECT: brak trafień
-- [x] G4: Przycisk Send dodany po prawej, voice+effort na lewo od niego
-  CHECK: rg -n "ArrowUp|Wyślij|Send\"" src/components/Composer.tsx
-  EXPECT: przycisk Send za mikiem w JSX
-- [x] G5: Kolejka wiadomości: POST przy zajęcym bocie zapisuje bubel + kolejkę; drain skleja i odpala jedną turę
-  CHECK: npx vitest run server/queued-turns.test.ts
-  EXPECT: testy przechodzą (combine + FIFO clear)
-- [x] G6: Drain podłączony we wszystkich 3 miejscach końca tury
-  CHECK: rg -n "drainQueuedUserMessages" server/index.ts
-  EXPECT: >=4 trafienia (def + turn.completed + error + interrupt)
-- [x] G7: "New group" usunięte z menu +; pusty klik LPM w sidebar otwiera formularz grupy
-  CHECK: rg -n "Nowa grupa|New group" src/components/Sidebar.tsx
-  EXPECT: tylko etykiety wewnątrz formularza/create, zero przycisków otwierających
-- [x] G8: Wiersz grupy lokalnej: pigułka + chevron + nazwa + kółka-inicjały bez łapki/żółtego; kosz na hover
-  CHECK: rg -n "group-hover:opacity-100|rounded-full bg-raised/50" src/components/Sidebar.tsx
-  EXPECT: trafienia w LocalGroupsSection
-- [x] G9: Nagłówek pokoju bot-vs-bot: [avatar] NazwaA ⇄ [avatar] NazwaB; nieznany id ≠ surowy UUID
-  CHECK: rg -n "ArrowLeftRight|deleted bot|usunięty bot" src/components/RoomPanel.tsx
-  EXPECT: trafienia; brak nameOf fallbacku zwracającego botId
-- [x] G10: System prompt silnika mówi wprost o tworzeniu agentów (create_agent)
-  CHECK: rg -n "create_agent" engine/server/bots.py
-  EXPECT: >=1 trafienie w bloku tożsamości
-- [x] G11: Bramki repo: tsc -b czysto, vitest całość, vite build, tsc server.build
-  CHECK: npx tsc -b; npx vitest run; npx vite build; npx tsc -p tsconfig.server.build.json
-  EXPECT: exit 0 wszędzie, vitest 0 fail
-- [x] G12: Wydanie desktop 0.1.44 na GitHub Releases (exe + blockmap + latest.yml, Latest)
-  CHECK: gh release view v0.1.44 --repo E4B-labs/multibot --json tagName,assets
-  EXPECT: tag v0.1.44, 3 assety
+- [x] B-CREDENTIAL — credential request reaches authenticated server boundary, renders request card, never logs or persists credential value.
+  CHECK: `npx vitest run server/ src/`
+  EVIDENCE: targeted port feature test plus full suite; credential values stay in request body/config allowlist only.
+- [x] B-CHIEFS — optional section chief metadata and delegation path work with existing BotRecord persistence and security checks.
+  CHECK: `npx vitest run server/`
+  EVIDENCE: `port-features.test.ts` 3/3; full server suite passed.
+- [x] B-INSPECTOR — inspector shows live events and can replay captured native protocol without changing production behavior.
+  CHECK: `npx vitest run server/ src/`
+  EVIDENCE: `port-features.test.ts` 3/3; replay uses captured safe summaries only.
+- [x] C-DIAGNOSTICS — Electron diagnostics export redacts secrets and downloads a usable report.
+  CHECK: `npx vitest run electron/ src/`
+  EVIDENCE: diagnostics tests passed; manual detector returned `[]`.
+- [x] C-SKINS — midnight, atelier, foundry and lagoon skins apply at boot, persist, and pass contrast checks.
+  CHECK: `node scripts/check-skin-contrast.mjs`
+  EVIDENCE: command exits 0; atelier/foundry/lagoon pass, midnight upstream advisory only.
+- [x] C-AUTOCOMPLETE — connected bot face/autocomplete behavior works in sidebar with keyboard access.
+  CHECK: `npx vitest run src/`
+  EVIDENCE: `botAutocomplete.test.ts` passed; Cmd-K uses keyboard-selectable bot rows.
+- [x] D-COMPOSIO — Gmail account mapping supports multiple accounts, explicit account selection, and safe missing-account errors.
+  CHECK: `npx vitest run server/ src/`
+  EVIDENCE: `composio-accounts.test.ts` 1/1; account mapping stored per bot; delete proves service ownership.
+- [x] TYPECHECK — all TypeScript gates pass.
+  CHECK: `npx tsc -b && npx tsc -p tsconfig.server.build.json`
+  EVIDENCE: both commands exit 0.
+- [x] TESTS — complete Vitest suite passes.
+  CHECK: `$env:MULTIBOT_COMPUTER='off'; npx vitest run`
+  EVIDENCE: 72 passed, 1 skipped files; 484 passed, 5 skipped tests.
+- [x] BUILD — frontend build passes.
+  CHECK: `npx vite build`
+  EVIDENCE: exit 0, 2364 modules.
+- [x] PACKAGE — Windows package passes using D: temporary paths.
+  CHECK: `$env:TEMP='D:\\tmp'; $env:TMP='D:\\tmp'; $env:ELECTRON_BUILDER_CACHE='D:\\electron-builder-cache'; pnpm package:win`
+  EVIDENCE: exit 0; `MultiBot-0.1.70-x64-setup.exe`, `latest.yml`, blockmap present.
+- [x] RELEASE — v0.1.70 points at released HEAD with all updater assets.
+  CHECK: `gh release view v0.1.70 --repo E4B-labs/multibot`
+  EVIDENCE: published at https://github.com/E4B-labs/multibot/releases/tag/v0.1.70; target `afda62665a7739bff762a885fd1812a5178cd699`; all three updater assets uploaded.
+- [x] E-DECISION — companion cloud/iOS/ACP/skill-recorder/boxAgent/VPS ports remain rejected because multibot architecture has no matching runtime.
+  EVIDENCE: `PORT-HANDOFF.md` section E plus implementation report.
+  ABANDON: E-DECISION not implementing unrelated architecture ports; add only after owner supplies concrete runtime/use case.

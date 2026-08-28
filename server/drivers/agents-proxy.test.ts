@@ -142,7 +142,7 @@ describe("agents-proxy MCP surface", () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(expect.arrayContaining(["list_bots", "ask_bot", "remember", "create_skill", "create_routine", "create_agent", "list_groups", "delete_group", "read_file", "run_command"]));
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(expect.arrayContaining(["list_bots", "ask_bot", "send_bot_mail", "read_bot_mail", "remember", "create_skill", "create_routine", "create_agent", "list_groups", "delete_group", "read_file", "run_command"]));
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -192,6 +192,23 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.content[0].text).toContain("Helper replied:");
     expect(res.result.content[0].text).toContain("hi from helper");
     expect(lastAskBody).toMatchObject({ fromBotId: "bot-asker", toBotId: "bot-helper", message: "ping", depth: 0 });
+  });
+
+  it("send_bot_mail returns an asynchronous acknowledgement", async () => {
+    const res = await callTool("send_bot_mail", { bot_id: "bot-helper", message: "later" });
+    expect(res.result.content[0].text).toContain("Mail sent to bot-helper");
+    expect(lastActionBody).toMatchObject({
+      fromBotId: "bot-asker",
+      action: "mail.send",
+      toBotId: "bot-helper",
+      message: "later",
+    });
+  });
+
+  it("reads durable agent mail through the local action API", async () => {
+    const res = await callTool("read_bot_mail", {});
+    expect(res.result.content[0].text).toContain("No agent mail yet");
+    expect(lastActionBody).toMatchObject({ fromBotId: "bot-asker", action: "mail.inbox" });
   });
 
   it("renders a busy peer as a clean answer, not an error", async () => {

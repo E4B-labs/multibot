@@ -509,6 +509,11 @@ async def _handle_mentions(from_bot: str, message: str) -> list[dict]:
     `session_id` zostają odpowiedzią zaadresowanego bota (kontrakt POST /chat
     nietknięty), a pingi lądują w `delegated`. Każda delegacja emituje event WS
     `interbot` (transparency #34 — UI rysuje "Messaged ●B" i otwiera wątek §5)."""
+    # Harness-managed profiles have their own async `send_bot_mail` transport.
+    # Running legacy synchronous `interbot.delegate` as well made an @mention
+    # wait for a second full bot turn and could leave the caller looking hung.
+    if from_bot.startswith("mb-") or plugins.has_bot_server(from_bot, "mb-agents"):
+        return []
     delegated = []
     for to_bot in interbot.find_mentions(message, from_bot):
         out = await asyncio.to_thread(interbot.delegate, from_bot, to_bot, message)

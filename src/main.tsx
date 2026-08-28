@@ -4,9 +4,11 @@ import App from "./App";
 import { bootstrapLocalAuthToken, ensureBrowserSession } from "./lib/auth";
 import "./styles.css";
 import { applySkin, readSkin } from "./lib/skins";
+import { applyMotionMode, readMotionMode } from "./lib/motion";
 
 bootstrapLocalAuthToken();
 applySkin(readSkin());
+applyMotionMode(readMotionMode());
 // multibot (H4): the computer screen rides a cookie, so mint it up front —
 // the panel can then attach to the iframe without a round trip of its own.
 void ensureBrowserSession();

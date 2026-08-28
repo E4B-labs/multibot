@@ -5,6 +5,8 @@
 //
 //   list_bots()            → the other bots in this workspace + their status
 //   ask_bot(bot_id, msg)   → send msg to that bot, wait, return its reply
+//   send_bot_mail(bot_id, msg) → queue durable asynchronous mail
+//   read_bot_mail()        → read durable mail threads
 //
 // Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
 // computer-proxy / permission-proxy). All state comes from env, injected by
@@ -41,6 +43,25 @@ const TOOLS = [
       },
       required: ["bot_id", "message"],
     },
+  },
+  {
+    name: "send_bot_mail",
+    description:
+      "Send asynchronous mail to another bot. It returns immediately; the target gets a fresh turn and can reply later. Do not wait or poll for a reply, and do not send acknowledgement-only mail.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        bot_id: { type: "string", description: "The target bot's id (from list_bots)." },
+        message: { type: "string", description: "A concise useful message or request." },
+      },
+      required: ["bot_id", "message"],
+    },
+  },
+  {
+    name: "read_bot_mail",
+    description:
+      "Read your durable agent mailbox: recent messages and replies from other bots. Each bot has a separate mailbox and memory.",
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "start_collab",
@@ -82,7 +103,9 @@ const TOOLS = [
   { name: "run_command", description: "Run a host command with arguments.", inputSchema: { type: "object", properties: { command: { type: "string" }, args: { type: "array", items: { type: "string" } }, cwd: { type: "string" } }, required: ["command"] } },
   { name: "get_device_info", description: "Read verified host device facts (platform, Android model, Termux, RAM and installed runtimes).", inputSchema: { type: "object", properties: {} } },
   { name: "send_file", description: "Send a file to the chat so the user can download or open it — an HTML report, an export, any artifact you produced. Preferred way: write the file to disk first, then pass its `path` and let the server read it. Do NOT base64 a file through your shell output: that output is capped and silently truncates, which corrupts anything past a few dozen kilobytes. Use `content_base64` only for content you are generating inline and never wrote to disk.", inputSchema: { type: "object", properties: { path: { type: "string", description: "Path to the file as YOU see it, e.g. /root/report.html. Preferred over content_base64." }, name: { type: "string", description: "File name shown in the chat. Defaults to the file name from path." }, mime: { type: "string", description: "MIME type, e.g. text/html" }, content_base64: { type: "string", description: "File bytes as base64. Only when there is no file on disk." } }, required: ["mime"] } },
-].filter((tool) => DEPTH < 1 || !["list_bots", "ask_bot", "start_collab"].includes(tool.name));
+// A mail wake turn can send one explicit reply at depth 1; its recipient is
+// woken at depth 2 and receives no peer-sending tools, which stops ping-pong.
+].filter((tool) => DEPTH < 2 || !["list_bots", "ask_bot", "send_bot_mail", "start_collab"].includes(tool.name));
 
 type Json = Record<string, unknown>;
 const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -135,6 +158,30 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     if (r.busy) return { text: `That bot is busy right now — try again after it finishes.` };
     if (r.error) return { text: `Couldn't reach that bot: ${r.error}`, isError: true };
     return { text: `${r.botName ?? "Bot"} replied:\n${r.text ?? "(no reply)"}` };
+  }
+  if (name === "send_bot_mail") {
+    const toBotId = String(args.bot_id ?? "").trim();
+    const message = String(args.message ?? "").trim();
+    if (!toBotId || !message) return { text: "send_bot_mail needs bot_id and message.", isError: true };
+    const r = await api("/api/internal/agent-action", {
+      method: "POST",
+      body: JSON.stringify({ fromBotId: BOT_ID, action: "mail.send", toBotId, message, depth: DEPTH }),
+    });
+    if (r.error) return { text: `Couldn't send mail: ${r.error}`, isError: true };
+    return { text: `Mail sent to ${r.botName ?? toBotId}. It will receive a fresh turn${r.queued ? " when it is free" : ""}.` };
+  }
+  if (name === "read_bot_mail") {
+    const r = await api("/api/internal/agent-action", {
+      method: "POST",
+      body: JSON.stringify({ fromBotId: BOT_ID, action: "mail.inbox" }),
+    });
+    const threads = (r.threads as Array<Json>) ?? [];
+    if (!threads.length) return { text: "No agent mail yet." };
+    const lines = threads.flatMap((thread) => {
+      const messages = (thread.messages as Array<Json>) ?? [];
+      return [`Thread ${thread.id}:`, ...messages.slice(-20).map((message) => `- ${message.from} -> ${message.to}: ${message.text}`)];
+    });
+    return { text: lines.join("\n") };
   }
   if (name === "ask_user") {
     // Harness trzyma odpowiedź, aż człowiek kliknie albo minie jego limit, więc

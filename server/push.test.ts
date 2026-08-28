@@ -13,8 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
-const PUSH_PORT = PORT + 1;
+const PORT = 24_000 + Math.floor(Math.random() * 5_000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = "push-test-access-token";
 
@@ -23,6 +22,7 @@ type Push = { title: string; body: string; data?: { botId?: string; kind?: strin
 describe("push na telefon (fake ACP fleet)", () => {
   let child: ChildProcess;
   let expo: Server;
+  let pushPort = 0;
   let home: string;
   let stderr = "";
   const pushes: Push[] = [];
@@ -63,7 +63,13 @@ describe("push na telefon (fake ACP fleet)", () => {
         res.writeHead(200, { "content-type": "application/json" }).end("{}");
       });
     });
-    await new Promise<void>((r) => expo.listen(PUSH_PORT, "127.0.0.1", r));
+    await new Promise<void>((resolve, reject) => {
+      expo.once("error", reject);
+      expo.listen(0, "127.0.0.1", () => {
+        pushPort = (expo.address() as { port: number }).port;
+        resolve();
+      });
+    });
 
     home = mkdtempSync(join(tmpdir(), "omb-push-test-"));
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
@@ -96,7 +102,7 @@ describe("push na telefon (fake ACP fleet)", () => {
         USERPROFILE: home,
         OMB_PORT: String(PORT),
         MULTIBOT_COMPUTER: "off",
-        MULTIBOT_EXPO_PUSH_URL: `http://127.0.0.1:${PUSH_PORT}/push`,
+        MULTIBOT_EXPO_PUSH_URL: `http://127.0.0.1:${pushPort}/push`,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });

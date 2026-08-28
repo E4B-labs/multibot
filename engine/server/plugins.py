@@ -196,6 +196,18 @@ def set_bot_server(bot_id: str, name: str, spec: dict) -> None:
     _merge_config(bot_id, {name: spec})
 
 
+def has_bot_server(bot_id: str, name: str) -> bool:
+    """Czy profil ma przypięty serwer MCP o podanej nazwie."""
+    path = profile_dir(bot_id) / "config.yaml"
+    if not path.exists():
+        return False
+    try:
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    return name in (cfg.get("mcp_servers") or {})
+
+
 def list_installed() -> list[dict]:
     return [_info(name, spec) for name, spec in sorted(_read().items())]
 

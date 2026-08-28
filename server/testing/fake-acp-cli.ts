@@ -6,7 +6,7 @@
 // turn. Failure modes mirror how real ACP agents misbehave:
 //
 //   FAKE_ACP_MODE   happy (default) | exit-early | hang | no-auth | permission
-//                   | ask-peer (spawn the injected "agents" MCP server from
+//                   | ask-peer/send-mail (spawn the injected "agents" MCP server from
 //                     session/new's mcpServers, call list_bots + ask_bot on a
 //                     peer, and reply with what the peer said — the comms e2e)
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
@@ -213,6 +213,24 @@ function handle(msg: any) {
           params: { update: { sessionUpdate: "agent_message_chunk", content: { text: done ? "goal work from fake step 2\n[GOAL COMPLETE]" : "goal work from fake step 1" } } },
         });
         complete();
+        return;
+      }
+      if (mode === "send-mail" && agentsMcp) {
+        void driveMcp(agentsMcp, [
+          { name: "list_bots", args: () => ({}) },
+          {
+            name: "send_bot_mail",
+            args: (list) => ({ bot_id: /id: ([\w-]+)/.exec(list)?.[1] ?? "", message: "async ping" }),
+          },
+        ])
+          .then((ack) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `sent: ${ack}` } } } });
+            complete();
+          })
+          .catch((e) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `mail error: ${(e as Error).message}` } } } });
+            complete();
+          });
         return;
       }
       if (mode === "ask-peer" && agentsMcp) {

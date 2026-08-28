@@ -20,6 +20,7 @@
  * Made with Blob Studio.
  */
 import React, { useEffect, useId, useMemo, useRef } from 'react'
+import { motionIsReduced } from '@/lib/motion'
 
 /* ------------------------------------------------------------------- shape */
 
@@ -1305,14 +1306,9 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     const confettiLayer = useRef<SVGGElement | null>(null)
     const glyphLayer = useRef<SVGGElement | null>(null)
 
-    // Respect the OS setting unless the caller states a preference explicitly.
-    const prefersReducedMotion = useMemo(
-      () =>
-        typeof window !== 'undefined' &&
-        typeof window.matchMedia === 'function' &&
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-      []
-    )
+    // MultiBot exposes its own animation switch. Default stays animated even
+    // when Windows has globally disabled window transitions.
+    const prefersReducedMotion = useMemo(motionIsReduced, [])
     const motionStrength = motion ?? (prefersReducedMotion ? 0 : 1)
 
     // Frame-loop state lives in a ref so prop changes never restart a morph.

@@ -14,6 +14,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+import { motionIsReduced } from "@/lib/motion";
 import { mascotShape, type MascotShape } from "@/lib/mascotShapes";
 import { CursorAvatar, SHAPE, type CursorAvatarHandle, type CursorShape } from "./CursorAvatar";
 
@@ -177,6 +178,7 @@ function MausAvatarComponent(
   // Pointer-follow gaze, composed with any gaze the caller pins.
   const [pointer, setPointer] = useState({ x: 0, y: 0 });
   const range = forward ? POINTER_GAZE.forward : POINTER_GAZE.authored;
+  const reduceMotion = motionIsReduced();
   const onPointerMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
     if (!trackPointer || !animated) return;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -213,12 +215,12 @@ function MausAvatarComponent(
       {motion === "thinking-dots" && animated && (
         <span
           aria-label="Thinking"
-          className="pointer-events-none absolute -bottom-0.5 -right-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/70 px-1.5 py-1 motion-reduce:animate-none"
+          className="pointer-events-none absolute -bottom-0.5 -right-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/70 px-1.5 py-1"
         >
           {[0, 1, 2].map((dot) => (
             <span
               key={dot}
-              className="size-1.5 rounded-full bg-white/90 animate-pulse motion-reduce:animate-none"
+              className={`size-1.5 rounded-full bg-white/90 ${reduceMotion ? "" : "animate-pulse"}`}
               style={{ animationDelay: `${dot * 120}ms` }}
             />
           ))}

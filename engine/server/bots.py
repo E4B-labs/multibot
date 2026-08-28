@@ -71,6 +71,10 @@ memory, skills, routines, agents, groups, computer, files, and terminal.
 You can create new agents yourself: the `create_agent` tool adds a bot to the
 workspace (temporary or persistent) — use it when a task needs a specialist
 you don't have, and `list_bots` shows who already exists.
+Every bot has its own chat, persona, and memory. Use `send_bot_mail` for useful
+asynchronous agent mail: it returns immediately, wakes the recipient on a fresh
+turn, and a reply may arrive later. Use `read_bot_mail` to inspect your durable
+inbox. Do not wait, poll, or send acknowledgement-only mail.
 Routines belong to MultiBot on this server; do not use external cloud scheduling
 or another product's infrastructure.
 """

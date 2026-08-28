@@ -69,6 +69,7 @@ import { HarnessRoutines, routineTurnText, verifyWebhookSignature, type HarnessR
 import { runGroupRound } from "./group-round.ts";
 import { GroupStore } from "./group-store.ts";
 import { RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
+import { BotMailQueue, BotMailStore, botMailThreadId, type PendingBotMail } from "./bot-mail.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
@@ -474,6 +475,7 @@ async function runCollab(roomId: string): Promise<void> {
         rooms.append(roomId, botId, visible);
         broadcast({ kind: "room", room: rooms.get(roomId) });
       }
+      if (visible) recordCollabMail(current, botId, visible);
       anyReply = true;
       // 0.1.62: jesli zadanie mowi "5 tur" nie koncz przed 5 wiadomosciami - zapobiega halucynacji "5 tur" gdy atlas skip
       const needFive = current && /5\s*tur/i.test(current.task) && (current.transcript.length + (visible ? 1 : 0) < 5);
@@ -574,6 +576,131 @@ const pendingBotAttachments = new Map<string, ReturnType<AttachmentStore["add"]>
 // ląduje w wątku i w kolejce; koniec tury odpala drain — bot dostaje je wszystkie
 // naraz i odpowiada JEDNĄ odpowiedzią na wszystko.
 const queuedUserMessages = new QueuedUserMessages();
+// Durable asynchronous agent mail. The queue only covers a target already
+// occupied by another turn; mail itself is persisted before delivery starts.
+const botMail = new BotMailStore();
+const queuedBotMail = new BotMailQueue();
+const activeMailTurns = new Map<string, PendingBotMail[]>();
+
+function broadcastMail(threadId: string): void {
+  const thread = botMail.get(threadId);
+  if (thread) broadcast({ kind: "mail", thread });
+}
+
+function removeBotMail(botId: string): void {
+  const threads = botMail.forBot(botId);
+  botMail.deleteBot(botId);
+  queuedBotMail.deleteBot(botId);
+  for (const thread of threads) broadcast({ kind: "mail.deleted", threadId: thread.id, bot_ids: thread.bot_ids });
+}
+
+function appendBotMail(input: Parameters<BotMailStore["append"]>[0]) {
+  const message = botMail.append(input);
+  broadcastMail(botMailThreadId(input.from, input.to));
+  return message;
+}
+
+function settleMailTurn(threadId: string, status: "delivered" | "failed"): void {
+  const pending = activeMailTurns.get(threadId);
+  if (!pending) return;
+  activeMailTurns.delete(threadId);
+  for (const item of pending) {
+    const updated = botMail.setStatus(botMailThreadId(item.fromBotId, item.toBotId), item.messageId, status);
+    if (updated) broadcastMail(botMailThreadId(item.fromBotId, item.toBotId));
+  }
+}
+
+function recordCollabMail(room: RoomRecord, fromBotId: string, text: string): void {
+  const recipients = room.bot_ids
+    .filter((id) => id !== fromBotId)
+    .map((id) => store.bot(id))
+    .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot));
+  const mentioned = mentionedBots(text, recipients);
+  const targets = mentioned.length ? mentioned : recipients;
+  for (const target of targets) {
+    appendBotMail({ from: fromBotId, to: target.id, text, status: "delivered" });
+  }
+}
+
+function startMailTurn(botId: string, pending: PendingBotMail[]): void {
+  const bot = store.bot(botId);
+  if (!bot || bot.busy) {
+    for (const item of pending) queuedBotMail.push(item);
+    return;
+  }
+  const delivered: PendingBotMail[] = [];
+  const prompts: string[] = [];
+  for (const item of pending) {
+    const sender = store.bot(item.fromBotId);
+    if (!sender) {
+      const failed = botMail.setStatus(botMailThreadId(item.fromBotId, item.toBotId), item.messageId, "failed");
+      if (failed) broadcastMail(botMailThreadId(item.fromBotId, item.toBotId));
+      continue;
+    }
+    const visible = `[Agent mail from @${sender.name}] ${item.text}`;
+    const userMessage = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: visible });
+    broadcast({ kind: "message", threadId: bot.threadId, message: userMessage });
+    const updated = botMail.setStatus(botMailThreadId(item.fromBotId, item.toBotId), item.messageId, "delivered");
+    if (updated) broadcastMail(botMailThreadId(item.fromBotId, item.toBotId));
+    delivered.push(item);
+    prompts.push(`${sender.name} (id: ${sender.id}): ${item.text}`);
+  }
+  if (!delivered.length) return;
+  activeMailTurns.set(bot.threadId, delivered);
+  const prompt = [
+    "[agent] Asynchronous mail arrived from another MultiBot agent.",
+    prompts.join("\n\n"),
+    "If useful, reply with send_bot_mail. Do not send acknowledgement-only mail.",
+  ].join("\n\n");
+  const depth = Math.max(...delivered.map((item) => item.depth + 1), 1);
+  startTurn(bot.id, prompt, { commsDepth: depth, userMessagePosted: true, origin: "bot", mailTurn: true }).catch(() => {
+    settleMailTurn(bot.threadId, "failed");
+  });
+}
+
+function drainQueuedBotMail(botId: string): void {
+  const bot = store.bot(botId);
+  if (!bot || bot.busy) return;
+  const pending = queuedBotMail.take(botId);
+  if (pending) startMailTurn(botId, pending);
+}
+
+function recoverQueuedBotMail(): void {
+  const targets = new Set<string>();
+  for (const thread of botMail.list()) {
+    for (const message of thread.messages) {
+      if (message.status !== "queued" || !store.bot(message.from) || !store.bot(message.to)) continue;
+      queuedBotMail.push({
+        messageId: message.id,
+        fromBotId: message.from,
+        toBotId: message.to,
+        text: message.text,
+        depth: message.depth ?? 0,
+      });
+      targets.add(message.to);
+    }
+  }
+  for (const botId of targets) drainQueuedBotMail(botId);
+}
+
+function sendBotMail(fromBotId: string, toBotId: string, text: string, depth = 0) {
+  const from = store.bot(fromBotId);
+  const target = store.bot(toBotId);
+  if (!from) return { status: 404, body: { error: "no such caller bot" } };
+  if (!target) return { status: 404, body: { error: "no such target bot" } };
+  if (fromBotId === toBotId) return { status: 400, body: { error: "a bot cannot message itself" } };
+  const message = text.trim();
+  if (!message || message.length > 8_000) return { status: 422, body: { error: "message required (max 8000)" } };
+  if (depth >= MAX_COMMS_DEPTH + 1) return { status: 403, body: { error: "mail chains are limited to one reply" } };
+  const queued = Boolean(target.busy);
+  const mail = appendBotMail({ from: fromBotId, to: toBotId, text: message, status: "queued" });
+  queuedBotMail.push({ messageId: mail.id, fromBotId, toBotId, text: message, depth: Math.max(0, depth) });
+  drainQueuedBotMail(toBotId);
+  return {
+    status: 202,
+    body: { accepted: true, queued, messageId: mail.id, threadId: botMailThreadId(fromBotId, toBotId), botName: target.name },
+  };
+}
 
 function drainQueuedUserMessages(botId: string) {
   const queued = queuedUserMessages.take(botId);
@@ -700,6 +827,12 @@ function eventVisible(payload: unknown, actor: WorkspaceActor | null): boolean {
   if (event.kind === "group") {
     const ids = Array.isArray(event.group?.bot_ids) ? event.group.bot_ids : [];
     return ids.length === 0 || ids.every((id: unknown) => canAccessBot(botFor(id), actor));
+  }
+  if (event.kind === "mail" || event.kind === "mail.deleted") {
+    const ids = Array.isArray(event.thread?.bot_ids)
+      ? event.thread.bot_ids
+      : (Array.isArray(event.bot_ids) ? event.bot_ids : []);
+    return ids.length === 2 && ids.every((id: unknown) => canAccessBot(botFor(id), actor));
   }
   return true;
 }
@@ -946,6 +1079,7 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     }
     case "runtime.error":
+      settleMailTurn(event.threadId, "failed");
       pushMessage({ role: "bot", kind: "activity", tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false } });
       endTurnPush(bot.id, "failed", event.message.slice(0, 120));
       // watchdog: provider padl bez turn.completed -> zwolnij busy
@@ -957,6 +1091,7 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       break;
     case "turn.completed": {
+      settleMailTurn(event.threadId, "delivered");
       // the last live frame becomes a settled inline screen message —
       // the screenshot-in-chat moment
       const frame = stopScreenPoller(bot.id);
@@ -970,6 +1105,7 @@ bus.subscribe((event: RuntimeEvent) => {
       turnModelByThread.delete(event.threadId); // multibot (F12): sprzątanie badge
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
       drainQueuedUserMessages(bot.id); // multibot 0.1.44: spam użytkownika z trakcie tury
+      drainQueuedBotMail(bot.id);
       if (bot.temporary) {
         // Chwilowy podagent kończy życie po swoim zadaniu, nie dopiero po
         // restarcie serwera; inaczej zaśmieca listę i pliki transkryptu.
@@ -977,6 +1113,7 @@ bus.subscribe((event: RuntimeEvent) => {
         harnessRoutines.deleteBot(bot.id);
         attachments.deleteBot(bot.id);
         workspace.deleteBot(bot.id);
+        removeBotMail(bot.id);
         store.deleteBot(bot.id);
         broadcast({ kind: "bot.deleted", botId: bot.id, visibility: bot.visibility, ownerId: bot.ownerId, allowedUserIds: bot.allowedUserIds });
       }
@@ -1464,6 +1601,8 @@ opts?: {
     userMessagePosted?: boolean;
     /** multibot: kto zaczął turę — decyduje o pushach start/koniec. */
     origin?: TurnOrigin;
+    /** Mail wake turns may send one explicit reply at depth 1. */
+    mailTurn?: boolean;
     /** nazwa rutyny do treści pushu „rutyna X wystartowała" */
     routineName?: string;
     /** Authenticated human who started this turn. */
@@ -1620,7 +1759,7 @@ opts?: {
       // recursion.
       if (
         !isolated &&
-        commsDepth < MAX_COMMS_DEPTH &&
+        (commsDepth < MAX_COMMS_DEPTH || (opts?.mailTurn === true && commsDepth === MAX_COMMS_DEPTH)) &&
         instance.adapter.capabilities.agentsMcp === true
       ) {
         integrations.agents = agentsIntegration(bot.id, commsDepth);
@@ -1683,6 +1822,7 @@ opts?: {
         activeCommsDepth.delete(bot.id); // multibot (F9): tura padła — licznik też
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
         drainQueuedUserMessages(bot.id);
+        drainQueuedBotMail(bot.id);
       }
     }
   })();
@@ -2172,7 +2312,7 @@ const server = createServer(async (req, res) => {
         const caller = store.bot(fromBotId);
         if (!caller) return json(res, 404, { error: "no such caller bot" });
         const access = workspace.access(fromBotId).access;
-        const readOnlyActions = new Set(["profile.get", "memory.list", "memory.graph", "memory.markdown.get", "team.memory.list", "team.memory.graph", "team.memory.markdown.get", "skills.list", "routines.list", "groups.list", "device.info", "file.read"]);
+        const readOnlyActions = new Set(["profile.get", "memory.list", "memory.graph", "memory.markdown.get", "team.memory.list", "team.memory.graph", "team.memory.markdown.get", "mail.inbox", "skills.list", "routines.list", "groups.list", "device.info", "file.read"]);
         if (access === "read-only" && !readOnlyActions.has(action)) return json(res, 403, { error: "read-only access" });
         const requireFull = () => {
           if (access !== "full") throw Object.assign(new Error("Full Access required for this action"), { status: 403 });
@@ -2237,6 +2377,12 @@ const server = createServer(async (req, res) => {
           case "memory.list": return json(res, 200, workspace.facts(fromBotId, String(body.query ?? "")));
           case "memory.graph": return json(res, 200, workspace.graph(fromBotId));
           case "memory.markdown.get": return json(res, 200, workspace.markdown(fromBotId));
+          case "mail.inbox": return json(res, 200, { threads: botMail.forBot(fromBotId) });
+          case "mail.send": {
+            if (workspace.permissions(fromBotId).delegation === false) return json(res, 403, { error: "bot-to-bot delegation is disabled for this bot" });
+            const result = sendBotMail(fromBotId, String(body.toBotId ?? ""), String(body.message ?? ""), Number(body.depth) || 0);
+            return json(res, result.status, result.body);
+          }
           case "memory.add": { requireFull(); const fact = workspace.addFact(fromBotId, body); broadcast({ kind: "workspace", botId: fromBotId, resource: "memory" }); return json(res, 201, fact); }
           case "memory.markdown.set": { requireFull(); const markdown = workspace.putMarkdown(fromBotId, body.content); broadcast({ kind: "workspace", botId: fromBotId, resource: "memory" }); return json(res, 200, markdown); }
           case "team.memory.list": return json(res, 200, workspace.teamFacts(String(body.query ?? "")));
@@ -2401,6 +2547,10 @@ const server = createServer(async (req, res) => {
         if (!target) return json(res, 404, { error: "no such bot" });
         if (from.chiefOfStaff && (target.section?.trim() ?? "") !== (from.section?.trim() ?? "")) return json(res, 403, { error: "chief delegation is limited to its section" });
         if (target.busy) return json(res, 200, { busy: true });
+        // ask_bot is the synchronous compatibility path; persist it in the
+        // same mailbox as asynchronous send_bot_mail so no agent exchange is
+        // lost when its live room expires.
+        const mailRequest = appendBotMail({ from: fromBotId, to: toBotId, text: message, status: "delivered" });
         // multibot: widoczność wymiany ask_bot. Wcześniej szara pigułka
         // aktywności ukrywała odpowiedź bota na zawsze, choć jej tokeny były
         // już opłacone — teraz każda wymiana dostaje pełny, klikalny pokój
@@ -2439,6 +2589,7 @@ const server = createServer(async (req, res) => {
         });
         if (!liveMsgId) rooms.append(room.id, toBotId, reply);
         rooms.setStatus(room.id, "done");
+        appendBotMail({ from: toBotId, to: fromBotId, text: reply, status: "delivered", replyToId: mailRequest.id });
         broadcast({ kind: "room", room: rooms.get(room.id) });
         return json(res, 200, { botName: target.name, text: reply });
       }
@@ -2514,6 +2665,18 @@ const server = createServer(async (req, res) => {
           .filter((b) => canAccessBot(b, actor))
           .map((b) => ({ ...b, messages: store.messagesFor(b.threadId) })),
       });
+    }
+    // Durable agent mailbox. Unlike collaboration rooms, mail remains after
+    // reload and can be opened without entering either bot's main chat.
+    if (method === "GET" && path === "/api/mail") {
+      return json(res, 200, { threads: botMail.list().filter((thread) => thread.bot_ids.every((id) => canAccessBot(store.bot(id), actor))) });
+    }
+    const mailMatch = path.match(/^\/api\/mail\/([^/]+)$/);
+    if (mailMatch && method === "GET") {
+      const thread = botMail.get(decodeURIComponent(mailMatch[1]));
+      return thread?.bot_ids.every((id) => canAccessBot(store.bot(id), actor))
+        ? json(res, 200, thread)
+        : json(res, 404, { error: "no such mail thread" });
     }
     let m: RegExpMatchArray | null;
     // multibot: durable group rooms. Engine owns execution; harness owns the
@@ -2796,6 +2959,7 @@ const server = createServer(async (req, res) => {
       harnessRoutines.deleteBot(bot.id);
       attachments.deleteBot(bot.id);
       workspace.deleteBot(bot.id);
+      removeBotMail(bot.id);
       store.deleteBot(bot.id);
       // multibot (H1): the computer SURVIVES bot deletion. It belongs to the
       // installation and every other bot is still using it — its volume holds
@@ -3098,10 +3262,12 @@ const server = createServer(async (req, res) => {
       store.patchBot(bot.id, { busy: false });
       clearTurnPolicy(bot.threadId);
       activeCommsDepth.delete(bot.id);
+      settleMailTurn(bot.threadId, "failed");
       stopScreenPoller(bot.id);
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
       await instance?.adapter.interruptTurn(bot.threadId);
       drainQueuedUserMessages(bot.id);
+      drainQueuedBotMail(bot.id);
       return json(res, 200, { ok: true });
     }
 
@@ -4034,6 +4200,7 @@ server.listen(PORT, HOST, () => {
   // multibot (A2): rozgrzewka rusza PO podniesieniu HTTP i nie czeka na nic —
   // serwer odpowiada od pierwszej sekundy, a workery wstają w tle.
   void warmBots().catch((e) => console.warn("[multibot] warmup failed:", e));
+  recoverQueuedBotMail();
   // multibot: w trybie „każdy bot zawsze active" worker potrafi zniknąć bez
   // naszego udziału — Android przy braku pamięci ubija bezczynne procesy (LMK),
   // a wtedy bot cicho wraca do zimnego startu. Co minutę sprawdzamy więc, kto

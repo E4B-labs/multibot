@@ -152,6 +152,18 @@ def test_delegation_thread_is_written_for_the_harness_bot_ids(fleet, monkeypatch
     assert [m["from"] for m in thread["messages"]] == [BOT_A, BOT_B]
 
 
+def test_harness_profile_does_not_run_legacy_sync_mention_delegate(fleet, monkeypatch):
+    plugins.set_bot_server(BOT_A, "mb-agents", _agents_spec(BOT_A))
+    monkeypatch.setattr(app_module.gateway, "chat", lambda bid, msg: {"reply": "ok", "session_id": "s"})
+    monkeypatch.setattr(interbot, "delegate", lambda *args, **kwargs: pytest.fail("legacy delegate blocked the chat"))
+
+    with TestClient(app_module.app) as c:
+        response = c.post(f"/api/bots/{BOT_A}/chat", json={"message": f"@Beta sprawdź to"})
+
+    assert response.status_code == 200, response.text
+    assert "delegated" not in response.json()
+
+
 # --------------------------------------------------------------------------- #
 # Task 4: cap łańcucha delegacji po stronie silnika (harness ma własny, F9/index.ts)
 # --------------------------------------------------------------------------- #
