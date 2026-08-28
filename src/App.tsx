@@ -172,10 +172,6 @@ function Shell() {
     <div className={cn("multibot-shell flex h-full flex-col", frameless && "multibot-frameless")}>
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
-      {/* multibot: kontrolki okna siedzą poza układem, bo nagłówek czatu
-          znika przy ustawieniach aplikacji i przy pustym stanie, a zamknąć
-          okno trzeba dać się zawsze */}
-      <WindowControls />
       {/* multibot: Cmd/Ctrl+K command palette — fixed overlay, renders null until opened */}
       <CmdK />
       <div className="relative flex min-h-0 flex-1">
@@ -219,6 +215,18 @@ function Shell() {
           </>
         )}
       </div>
+      {/* multibot: kontrolki okna siedzą poza układem, bo nagłówek czatu znika
+          przy ustawieniach aplikacji i przy pustym stanie, a zamknąć okno
+          trzeba dać się zawsze.
+
+          MUSZĄ być OSTATNIE w drzewie. Chromium składa regiony
+          -webkit-app-region w kolejności drzewa i późniejszy `drag` nadpisuje
+          wcześniejszy `no-drag` na tym samym obszarze. Kontrolki leżą nad
+          nagłówkiem, który jest uchwytem do przeciągania okna — postawione
+          wyżej niż on stają się częścią uchwytu i klik w minimalizuj albo
+          zamknij tylko przeciąga okno, zamiast działać (0.1.90).
+          Pilnuje tego WindowControls.test.ts. */}
+      <WindowControls />
     </div>
   );
 }
