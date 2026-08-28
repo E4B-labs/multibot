@@ -1,5 +1,5 @@
-const CACHE = "multibot-shell-v5";
-const SHELL = ["/", "/index.html", "/app-icon.svg", "/manifest.webmanifest"];
+const CACHE = "multibot-shell-v6";
+const SHELL = ["/", "/index.html", "/app-icon.png", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -38,7 +38,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   // Hashed assets may stay cache-first. User data always stays network-only.
-  const cacheable = url.pathname.startsWith("/assets/") || url.pathname === "/app-icon.svg";
+  const cacheable = url.pathname.startsWith("/assets/") || url.pathname === "/app-icon.png";
   if (!cacheable) return;
   // Bez awaryjnego `/index.html`: paczka HTML-a oddana zamiast skryptu wywala
   // się w parserze jako SyntaxError. Nieudane pobranie ma zostać nieudane.

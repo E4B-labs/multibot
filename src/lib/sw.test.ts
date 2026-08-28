@@ -56,8 +56,8 @@ async function respond(handler: Handler, request: any) {
 const SW = new URL("../../public/sw.js", import.meta.url);
 
 describe.runIf(existsSync(SW))("service worker", () => {
-  it("forces shell cache v5", () => {
-    expect(readFileSync(SW, "utf8")).toContain('const CACHE = "multibot-shell-v5"');
+  it("forces shell cache v6", () => {
+    expect(readFileSync(SW, "utf8")).toContain('const CACHE = "multibot-shell-v6"');
   });
 
   it("zapisuje powłokę w cache'u mimo że przeglądarka czyta odpowiedź", async () => {
