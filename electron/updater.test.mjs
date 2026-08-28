@@ -33,6 +33,10 @@ function fakeUpdater() {
   const emitter = new EventEmitter();
   const autoUpdater = Object.assign(emitter, {
     checks: 0,
+    feed: null,
+    setFeedURL(feed) {
+      this.feed = feed;
+    },
     checkForUpdates() {
       this.checks += 1;
     },
@@ -49,6 +53,10 @@ test("pierwsze sprawdzenie rusza od razu przy starcie, nie po 15 s", async () =>
   startUpdater(win, { isPackaged: true, loadUpdater: () => ({ autoUpdater: fake }) });
   // bez czekania, w tym samym ticku: check już się odbył
   assert.equal(fake.checks, 1);
+  assert.deepEqual(fake.feed, {
+    provider: "generic",
+    url: "https://github.com/E4B-labs/multibot-releases/releases/latest/download",
+  });
 });
 
 test("apka niedopakowana zostaje uśpiona — zero checków", async () => {
@@ -76,7 +84,7 @@ test("porażka rutynowego sprawdzenia nie daje karty błędu i przywraca stan sp
   assert.equal(last.version, "0.1.43");
 });
 
-test("porażka sprawdzenia z kliknięcia użytkownika pokazuje kartę błędu", async () => {
+test("porażka z kliknięcia pokazuje krótki błąd bez nagłówków i cookies", async () => {
   const { startUpdater, checkNow } = await freshModule();
   const fake = fakeUpdater();
   const win = fakeWindow();
@@ -84,11 +92,12 @@ test("porażka sprawdzenia z kliknięcia użytkownika pokazuje kartę błędu", 
 
   fake.emit("checking-for-update");
   checkNow(); // foreground — jak klik w UpdatesRow
-  fake.emit("error", new Error("boom"));
+  fake.emit("error", new Error("404 Headers: { set-cookie: secret; authorization: Bearer secret }"));
 
   const last = win.sent.at(-1);
   assert.equal(last.status, "error");
-  assert.match(last.message, /boom/);
+  assert.equal(last.message, "Update failed. Check your connection and try again.");
+  assert.doesNotMatch(last.message, /cookie|authorization|secret/i);
 });
 
 test("po udanym sprawdzeniu bez aktualizacji wraca idle i karta milczy", async () => {

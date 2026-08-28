@@ -906,20 +906,20 @@ const settingsTabs = [
     descriptionEn: "Language, profile, appearance, and connections.",
   },
   {
-    id: "update",
-    Icon: RefreshTabIcon,
-    pl: "Aktualizacje",
-    en: "Updates",
-    descriptionPl: "Sprawdź i zainstaluj aktualizacje aplikacji.",
-    descriptionEn: "Check for and install app updates.",
-  },
-  {
     id: "other",
     Icon: WrenchTabIcon,
     pl: "Narzędzia",
     en: "Tools",
     descriptionPl: "Dostęp, modele, usługa lokalna i diagnostyka.",
     descriptionEn: "Access, models, local service, and diagnostics.",
+  },
+  {
+    id: "update",
+    Icon: RefreshTabIcon,
+    pl: "Aktualizacje",
+    en: "Updates",
+    descriptionPl: "Sprawdź i zainstaluj aktualizacje aplikacji.",
+    descriptionEn: "Check for and install app updates.",
   },
 ] as const;
 type AppSettingsTab = (typeof settingsTabs)[number]["id"];

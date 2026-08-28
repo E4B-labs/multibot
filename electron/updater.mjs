@@ -23,12 +23,13 @@ const electronApi =
     ? electronNs.default
     : electronNs;
 const { app, ipcMain } = electronApi;
+const UPDATE_FEED_URL = "https://github.com/E4B-labs/multibot-releases/releases/latest/download";
+const UPDATE_ERROR_MESSAGE = "Update failed. Check your connection and try again.";
 
 let autoUpdater = null;
 let win = null;
 // status: idle | checking | available | downloading | downloaded | error
 let state = { status: "idle" };
-// set by the renderer's "Aktualizuj" click — one button downloads AND installs
 // stan sprzed rutynowego sprawdzenia w tle — gdy ono polegnie, wracamy do niego,
 // żeby nie zgubić np. „available" z wcześniejszego udanego sprawdzenia
 let preCheckState = null;
@@ -70,7 +71,7 @@ function checkFailed(e) {
     return;
   }
   preCheckState = null;
-  setState({ status: "error", message: String(e?.message ?? e) });
+  setState({ status: "error", message: UPDATE_ERROR_MESSAGE });
 }
 
 export function registerUpdaterIpc() {
@@ -81,23 +82,23 @@ export function registerUpdaterIpc() {
   // No local-origin guard here (unlike screen/mic/speech in main.mjs): in C2
   // remote mode the window shows the remote host's page, so the guard just
   // swallowed the user's "Aktualizuj" click. Safe to drop — the update feed is
-  // pinned in the main process (GitHub E4B-labs/multibot, sha512 verified
+  // pinned in the main process (public E4B-labs/multibot-releases, sha512 verified
   // against latest.yml), so the renderer can at most trigger the one
   // legitimate update; it never picks what gets installed.
   ipcMain.handle("update:download", () => {
     if (state.status !== "available") return;
     try {
       autoUpdater?.downloadUpdate();
-    } catch (e) {
-      setState({ status: "error", message: String(e?.message ?? e) });
+    } catch {
+      setState({ status: "error", message: UPDATE_ERROR_MESSAGE });
     }
   });
   ipcMain.handle("update:install", () => {
     if (state.status !== "downloaded") return;
     try {
       autoUpdater?.quitAndInstall(false, true);
-    } catch (e) {
-      setState({ status: "error", message: String(e?.message ?? e) });
+    } catch {
+      setState({ status: "error", message: UPDATE_ERROR_MESSAGE });
     }
   });
 }
@@ -121,6 +122,7 @@ export function startUpdater(mainWindow, deps = {}) {
   autoUpdater.autoDownload = false; // button-driven download
   autoUpdater.autoInstallOnAppQuit = false; // button-driven install
   autoUpdater.logger = null;
+  autoUpdater.setFeedURL({ provider: "generic", url: UPDATE_FEED_URL });
 
   autoUpdater.on("checking-for-update", () => setState({ status: "checking" }));
   autoUpdater.on("update-available", (info) =>

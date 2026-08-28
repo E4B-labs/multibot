@@ -98,4 +98,8 @@ describe("animacje ikon w szynie ustawień", () => {
     expect(icons).toContain("data-playing");
     expect(css).toContain("[data-settings-tab-icon][data-playing]");
   });
+
+  it("narzędzia są pośrodku, a aktualizacje na dole", () => {
+    expect(panel.indexOf('id: "other"')).toBeLessThan(panel.indexOf('id: "update"'));
+  });
 });

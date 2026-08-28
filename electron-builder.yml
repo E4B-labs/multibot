@@ -3,14 +3,11 @@ appId: com.e4b-labs.multibot
 productName: MultiBot
 artifactName: MultiBot-${version}-${arch}.${ext}
 
-# In-app auto-update reads latest-mac.yml + the .zip from this PUBLIC releases
-# repo (separate from the source repo). Public → no token on users' machines.
-# Baked into app-update.yml; `latest-mac.yml` is emitted here even with
-# --publish never, and uploaded to the GitHub release alongside the artifacts.
+# Source repo stays private. Update binaries live in a separate public repo,
+# so installed apps never need a GitHub token.
 publish:
-  - provider: github
-    owner: E4B-labs
-    repo: multibot
+  - provider: generic
+    url: https://github.com/E4B-labs/multibot-releases/releases/latest/download
 
 directories:
   buildResources: build

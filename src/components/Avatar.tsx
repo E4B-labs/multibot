@@ -218,7 +218,7 @@ function MausAvatarComponent(
           {[0, 1, 2].map((dot) => (
             <span
               key={dot}
-              className="size-1.5 rounded-full bg-white/90 animate-bounce motion-reduce:animate-none"
+              className="size-1.5 rounded-full bg-white/90 animate-pulse motion-reduce:animate-none"
               style={{ animationDelay: `${dot * 120}ms` }}
             />
           ))}
