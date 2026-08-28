@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Check, AlertTriangle, Loader2, Mic } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, Loader2, Mic } from "lucide-react";
 import { MausAvatar } from "./Avatar";
+import { WorkspaceAccessSettings } from "./AppSettingsPanel";
 import { identifyEmail, setEmailGateDone, track } from "@/lib/analytics";
 import { authFetch } from "@/lib/auth";
 
@@ -35,8 +36,16 @@ type DeviceInfo = {
 };
 
 type Progress = { id?: string; step?: string; message?: string; done?: boolean; error?: string };
-const isElectron = navigator.userAgent.includes("Electron");
+const isElectron = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
 const inputClass = "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
+
+type OnboardingEntry = "choice" | "server" | "connect";
+
+export function previousOnboardingStep(entry: OnboardingEntry, step: number, electron: boolean): { entry: OnboardingEntry; step: number } {
+  if (entry === "connect" || step <= 0) return { entry: "choice", step: 0 };
+  // Browser setup skips Electron-only permissions, so back must skip that step too.
+  return { entry: "server", step: step === 5 && !electron ? 3 : step - 1 };
+}
 
 function StatusRow({ ok, warn, title, detail, action }: { ok: boolean; warn?: boolean; title: string; detail: string; action?: React.ReactNode }) {
   return (
@@ -98,7 +107,7 @@ function connectTo(url: string) {
 
 export function Onboarding({ onDone }: { onDone: () => void }) {
   const polish = useLanguage() === "pl";
-  const [entry, setEntry] = useState<"choice" | "server" | "connect">("choice");
+  const [entry, setEntry] = useState<OnboardingEntry>("choice");
   const [step, setStep] = useState(0);
   const [device, setDevice] = useState<DeviceInfo | null>(null);
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -115,6 +124,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [modelError, setModelError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [perms, setPerms] = useState<{ mic: string } | null>(null);
   const [manualAddress, setManualAddress] = useState("");
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
@@ -159,10 +169,18 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     }
   };
 
-  const saveProfile = () => {
+  const saveProfile = async () => {
+    if (!valid) return;
+    setProfileError(null);
     identifyEmail(email.trim().toLowerCase());
-    void authFetch("/api/config", { method: "PUT", body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }) });
-    setStep(2);
+    try {
+      const response = await authFetch("/api/config", { method: "PUT", body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? `Profile save failed (${response.status})`);
+      setStep(2);
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const installCli = async (id: string) => {
@@ -213,14 +231,21 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     onDone();
   };
 
+  const goBack = () => {
+    const previous = previousOnboardingStep(entry, step, isElectron);
+    setEntry(previous.entry);
+    setStep(previous.step);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-app py-6">
       <div role="dialog" aria-modal="true" aria-label={polish ? "Konfiguracja MultiBota" : "Multibot setup"} className="mx-4 flex w-full max-w-[460px] flex-col rounded-2xl border border-hairline/40 bg-panel p-8">
+        {entry !== "choice" && <button type="button" onClick={goBack} aria-label={polish ? "Wstecz" : "Back"} className="mb-5 flex w-fit items-center gap-1.5 text-[13px] text-ink-secondary hover:text-ink"><ArrowLeft size={16} />{polish ? "Wstecz" : "Back"}</button>}
         {entry === "choice" && <div className="flex flex-col">
           <MausAvatar color="green" state="happy" size={72} />
           <h1 className="mt-4 text-[20px] font-semibold text-ink">MultiBot</h1>
           <p className="mt-1.5 text-[14px] text-ink-secondary">{polish ? "Zacznij od jednej z dwóch rzeczy." : "Start with one of two things."}</p>
-          <button onClick={() => setEntry("server")} className="mt-6 rounded-xl bg-raised p-4 text-left text-ink hover:bg-raised-hover"><div className="font-semibold">{polish ? "Postaw serwer" : "Set up a server"}</div><div className="mt-1 text-[12.5px] text-ink-secondary">{polish ? "To urządzenie będzie serwerem. Tutaj mieszkają boty i ich pamięć." : "This device will be the server. Bots and their memory live here."}</div></button>
+          <button onClick={() => { setStep(0); setEntry("server"); }} className="mt-6 rounded-xl bg-raised p-4 text-left text-ink hover:bg-raised-hover"><div className="font-semibold">{polish ? "Postaw serwer" : "Set up a server"}</div><div className="mt-1 text-[12.5px] text-ink-secondary">{polish ? "To urządzenie będzie serwerem. Tutaj mieszkają boty i ich pamięć." : "This device will be the server. Bots and their memory live here."}</div></button>
           <button onClick={() => setEntry("connect")} className="mt-3 rounded-xl bg-raised p-4 text-left text-ink"><div className="font-semibold">{polish ? "Zaloguj się do serwera" : "Sign in to a server"}</div><div className="mt-1 text-[12.5px] text-ink-secondary">{polish ? "Serwer już gdzieś stoi. To urządzenie tylko się do niego łączy." : "A server already exists somewhere. This device only connects to it."}</div></button>
         </div>}
 
@@ -228,7 +253,6 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           <h1 className="text-[18px] font-semibold text-ink">{polish ? "Zaloguj się do serwera" : "Sign in to a server"}</h1>
           <p className="mt-1 text-[13.5px] text-ink-secondary">{polish ? "Wpisz adres serwera." : "Enter the server address."}</p>
           <div className="mt-2 flex gap-2"><input value={manualAddress} onChange={(event) => setManualAddress(event.target.value)} placeholder="https://server.example" className={`min-w-0 flex-1 ${inputClass}`} /><button onClick={() => manualAddress.trim() && connectTo(manualAddress.trim())} className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink">{polish ? "Połącz" : "Connect"}</button></div>
-          <button onClick={() => setEntry("choice")} className="mt-4 text-[12px] text-ink-secondary hover:text-ink">{polish ? "Wstecz" : "Back"}</button>
         </div>}
 
         {entry === "server" && step === 0 && <div className="flex flex-col">
@@ -259,11 +283,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         </div>}
 
         {step === 1 && <div className="flex flex-col">
-          <h1 className="text-[18px] font-semibold text-ink">{polish ? "O Tobie" : "About you"}</h1>
-          <p className="mt-1 text-[13.5px] text-ink-secondary">{polish ? "Podaj, jak mamy się do Ciebie zwracać." : "Choose how we should address you."}</p>
+          <h1 className="text-[18px] font-semibold text-ink">{polish ? "Utwórz swój profil" : "Create your profile"}</h1>
+          <p className="mt-1 text-[13.5px] text-ink-secondary">{polish ? "Ten profil podpisuje Twoje wiadomości i pokazuje, kto pracuje w workspace." : "This profile labels your messages and shows who is working in the workspace."}</p>
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={polish ? "Twoje imię" : "Your name"} className={`mt-5 ${inputClass}`} />
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && valid && saveProfile()} placeholder="you@example.com" className={`mt-3 ${inputClass}`} />
-          <button onClick={saveProfile} disabled={!valid} className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white disabled:opacity-40">{polish ? "Dalej" : "Continue"}</button>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && valid && void saveProfile()} placeholder="you@example.com" className={`mt-3 ${inputClass}`} />
+          <button onClick={() => void saveProfile()} disabled={!valid} className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white disabled:opacity-40">{polish ? "Dalej" : "Continue"}</button>
+          {profileError && <div role="alert" className="mt-2 text-[12px] text-danger">{profileError}</div>}
           <button onClick={() => setStep(2)} className="mt-3 text-[12px] text-ink-secondary hover:text-ink">{polish ? "Może później" : "Maybe later"}</button>
         </div>}
 
@@ -295,10 +320,18 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
           <h1 className="text-[18px] font-semibold text-ink">{polish ? "Uprawnienia" : "Permissions"}</h1>
           <p className="mt-1 text-[13.5px] text-ink-secondary">{polish ? "Opcjonalne, używane tylko po wybraniu funkcji." : "Optional, and only used when you ask for the feature."}</p>
           <div className="mt-4 flex items-center justify-between gap-3 rounded-xl bg-card p-3.5"><div className="flex items-start gap-3"><Mic size={18} className="mt-0.5 shrink-0 text-ink-secondary" /><div><div className="text-[14px] font-medium text-ink">{polish ? "Mikrofon i mowa" : "Microphone & speech"}</div><div className="mt-0.5 text-[12.5px] text-ink-secondary">{polish ? "Dyktowanie głosowe w polu wiadomości." : "Voice dictation into the composer."}</div></div></div>{perms?.mic === "granted" ? <Check size={16} className="text-[#38d591]" /> : <button onClick={() => window.ogb?.permRequestMic?.().then(() => window.ogb?.permStatus?.().then(setPerms))} className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink">{polish ? "Włącz" : "Enable"}</button>}</div>
-          <button onClick={finish} className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white">{polish ? "Uruchom MultiBot" : "Start using Multibot"}</button>
-          <button onClick={finish} className="mt-3 text-[12px] text-ink-secondary hover:text-ink">{polish ? "Pomiń" : "Skip for now"}</button>
+          <button onClick={() => setStep(5)} className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white">{polish ? "Dalej" : "Continue"}</button>
+          <button onClick={() => setStep(5)} className="mt-3 text-[12px] text-ink-secondary hover:text-ink">{polish ? "Pomiń" : "Skip for now"}</button>
         </div>}
-        {step === 5 && <div className="flex flex-col"><h1 className="text-[18px] font-semibold text-ink">{polish ? "Gotowe" : "Ready"}</h1><p className="mt-2 text-[13.5px] text-ink-secondary">{polish ? "Workspace jest gotowy." : "Your workspace is ready."}</p><button onClick={finish} className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white">{polish ? "Uruchom MultiBot" : "Start using Multibot"}</button></div>}
+        {step === 5 && <div className="flex flex-col">
+          <h1 className="text-[18px] font-semibold text-ink">{polish ? "Wspólny workspace" : "Shared workspace"}</h1>
+          <p className="mt-1 text-[13.5px] text-ink-secondary">{polish ? "Każda osoba loguje się na własne konto. Boty i sekcje są wspólne, a prywatne boty mają własne ACL." : "Each person signs in with their own account. Bots and sections are shared; private bots use their own ACL."}</p>
+          <div className="mt-3 rounded-xl bg-inset p-3 text-[12.5px] leading-relaxed text-ink-secondary">{polish ? "Każdy bot ma własną pamięć. Pamięć zespołu jest wspólna dla botów i członków workspace." : "Each bot has its own memory. Team memory is shared by bots and workspace members."}</div>
+          <WorkspaceAccessSettings />
+          <button onClick={() => setStep(6)} className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white">{polish ? "Dalej" : "Continue"}</button>
+          <button onClick={() => setStep(6)} className="mt-3 text-[12px] text-ink-secondary hover:text-ink">{polish ? "Pomiń na razie" : "Skip for now"}</button>
+        </div>}
+        {step === 6 && <div className="flex flex-col"><h1 className="text-[18px] font-semibold text-ink">{polish ? "Gotowe" : "Ready"}</h1><p className="mt-2 text-[13.5px] text-ink-secondary">{polish ? "Profil i workspace są gotowe." : "Your profile and workspace are ready."}</p><button onClick={finish} className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white">{polish ? "Uruchom MultiBot" : "Start using Multibot"}</button></div>}
       </div>
     </div>
   );
