@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -120,22 +120,21 @@ function trackWindowForState(win) {
   });
 }
 
-// multibot: nieprzeczytane rozmowy na pasku zadań (Windows overlay icon,
-// macOS/Linux dock badge). Liczbę przelicza renderer i tu ją wysyła.
-let unreadOverlayIcon = null;
+// multibot: nieprzeczytane rozmowy jako plakietka doku (macOS, Linux).
+// Liczbę przelicza renderer i tu ją wysyła.
+//
+// Windows celowo bez plakietki: setOverlayIcon dostawał tę samą ikonę
+// aplikacji przeskalowaną do 16 px, więc przy nieprzeczytanych rozmowach
+// pasek zadań pokazywał ikonę MultiBota, a w jej rogu drugą, mniejszą kopię
+// tej samej ikony. Wyglądało to na dwie ikony jednej aplikacji, a nie na
+// licznik. Kacper 28.08 — zdejmujemy; wróci dopiero z osobną grafiką
+// plakietki (kropka albo liczba), nie z miniaturą ikony.
 ipcMain.on("desktop:unread-count", (_event, rawCount) => {
   const count = normalizeUnreadCount(rawCount);
   if (process.platform === "darwin") {
     app.setBadgeCount(count === 999 ? 999 : count);
   } else if (process.platform === "linux") {
     app.setBadgeCount(count);
-  } else if (process.platform === "win32" && mainWindow) {
-    if (!count) {
-      mainWindow.setOverlayIcon(null, "");
-      return;
-    }
-    unreadOverlayIcon ??= nativeImage.createFromPath(APP_ICON).resize({ width: 16, height: 16 });
-    mainWindow.setOverlayIcon(unreadOverlayIcon, `${count} unread conversations`);
   }
 });
 
