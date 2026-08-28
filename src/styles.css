@@ -273,7 +273,7 @@ body {
    opakowania nie mają wpływu na wygląd końcowy. */
 .menu-letter {
   display: inline-block;
-  animation: menu-letter-in 0.18s ease-out both;
+  animation: menu-letter-in 0.12s ease-out both;
 }
 @keyframes menu-letter-in {
   from { opacity: 0; transform: translateY(2px); }

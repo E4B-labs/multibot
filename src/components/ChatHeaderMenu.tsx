@@ -7,11 +7,11 @@
 // otwarte, szare gdy zamknięte. Otwarty panel bota NIE podświetla przycisku —
 // tak jest na telefonie.
 //
-// Otwarcie gra sekwencję na 2 s (Kacper 28.08):
-//   1. panel rozwija się jak zwój, od góry do dołu, jeszcze pusty — 0,5 s,
-//   2. z przycisku „⋮" wylatuje pięć kropek i siada na miejscach ikon — 0,5 s,
-//   3. z każdej kropki wychodzi w prawo etykieta, litera po literze — 1 s.
-// Zwój i lot skrócone z sekundy: przy 1 s jedno i drugie było za wolne.
+// Otwarcie gra sekwencję na 1,5 s (Kacper 28.08), po pół sekundy na fazę:
+//   1. panel rozwija się jak zwój, od góry do dołu, jeszcze pusty,
+//   2. z przycisku „⋮" wylatuje pięć kropek i siada na miejscach ikon,
+//   3. z każdej kropki wychodzi w prawo etykieta, litera po literze.
+// Wszystkie trzy skrócone z sekundy: przy 1 s każda była za wolna.
 // Po sekwencji panel renderuje się dokładnie tak jak przedtem — bez opakowań
 // na litery i bez klas animacji, żeby stan końcowy był identyczny.
 //
@@ -34,9 +34,10 @@ export type ChatHeaderAction = (typeof CHAT_HEADER_ACTIONS)[number];
  * rozjazd widać jako przeskok w połowie ruchu. */
 export const UNROLL_MS = 500;
 export const FLY_MS = 500;
-export const TYPE_MS = 1000;
-/** Ile trwa pojawienie się jednej litery. Reszta okna to rozjazd opóźnień. */
-export const LETTER_MS = 180;
+export const TYPE_MS = 500;
+/** Ile trwa pojawienie się jednej litery. Reszta okna to rozjazd opóźnień —
+ * przy 0,5 s na całą fazę zostaje go 0,38 s, więc litera musi być krótka. */
+export const LETTER_MS = 120;
 
 export type MenuPhase = "unroll" | "fly" | "type" | "done";
 
