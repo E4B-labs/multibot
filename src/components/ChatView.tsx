@@ -12,7 +12,8 @@ import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote, replyTargetOf } from "./ReplyQuote";
 import { routineStartName, slashCommandLabel } from "@/lib/transcriptChips";
 import { useStore, type Bot, type Message } from "@/state/store";
-import { formatPeerEnvelope } from "@/lib/peerEnvelope";
+import { formatPeerEnvelope, parsePeerEnvelope } from "@/lib/peerEnvelope";
+import { PeerBadge } from "./PeerBadge";
 import { formatChatSessionTime, shouldStartChatSession } from "@/lib/chatSessions";
 import { MausAvatar } from "./Avatar";
 import { busyMascotMotion, stateForBot } from "@/lib/mascot";
@@ -131,10 +132,13 @@ function Bubble({
   const polish = useLanguage() === "pl";
   const user = message.role === "user";
   const [expanded, setExpanded] = useState(false);
-  // multibot: koperta rozmowy bot↔bot rozwijana do „@Nazwa: treść" — patrz
-  // lib/peerEnvelope.ts. Robimy to przy wyświetlaniu, bo silnik musi dostać
-  // kopertę w całości.
+  // multibot: koperta rozmowy bot↔bot — patrz lib/peerEnvelope.ts. Rozbieramy
+  // ją przy wyświetlaniu, bo silnik musi dostać kopertę w całości.
+  // `text` idzie do TTS i do liczenia długości dymka, więc zostaje sklejone;
+  // do rysowania bierzemy nadawcę osobno, bo dostaje plakietkę z awatarem.
+  const envelope = parsePeerEnvelope(message.text ?? "");
   const text = formatPeerEnvelope(message.text ?? "");
+  const body = envelope ? envelope.body : text;
   const collapsible =
     user && !expanded && (text.length > USER_COLLAPSE_CHARS || text.split("\n").length > USER_COLLAPSE_LINES);
   return (
@@ -176,7 +180,8 @@ function Bubble({
             <div
               className={cn(collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
             >
-              {text}
+              {envelope && <PeerBadge name={envelope.from} />}
+              {body}
             </div>
             {/* multibot: skalowane tym samym wsp. co reszta treści dymka */}
             {collapsible && (

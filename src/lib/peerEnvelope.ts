@@ -5,8 +5,14 @@
 // dostawać komplet. Usuwamy je wyłącznie przy WYŚWIETLANIU, bo w dymku surowa
 // koperta jest długa, angielska i nic użytkownikowi nie mówi.
 //
-// Wynik ma kształt `@Nazwa: treść`. W dymkach bota `@Nazwa` łapie się jeszcze
-// na wtyczkę wzmianek z ChatMarkdown i renderuje jako pigułka z awatarem.
+// Dwa wyjścia, bo dymek nadawcy i dymek odbiorcy renderują się inaczej:
+//   - `parsePeerEnvelope` oddaje nadawcę osobno od treści. Bierze je dymek
+//     roli „user", który leci czystym tekstem bez markdowna — nadawcę rysuje
+//     tam plakietka z awatarem (components/PeerBadge.tsx).
+//   - `formatPeerEnvelope` skleja `@Nazwa treść` dla ścieżek markdownowych,
+//     gdzie `@Nazwa` łapie się na wtyczkę wzmianek z ChatMarkdown i sama
+//     staje się pigułką z awatarem.
+// W obu wypadkach po nazwie NIE ma dwukropka — treść idzie od razu.
 
 /** Koperta rozmowy bot↔bot: `[Message from @X, another bot in this MultiBot
  * workspace. Reply to them.]` + pusta linia + treść. */
@@ -15,20 +21,29 @@ const PEER_MESSAGE = /^\[Message from @(.+?), another bot in this MultiBot works
 /** Koperta delegacji: `[Delegation from @X] treść`. */
 const DELEGATION = /^\[Delegation from @(.+?)\]\s*/;
 
+export type PeerEnvelope = { from: string; body: string };
+
 /**
- * Zamienia kopertę na `@Nazwa: treść`. Tekst bez koperty wraca nietknięty —
+ * Rozbiera kopertę na nadawcę i treść. `null`, gdy wiadomość nie jest kopertą —
  * funkcja biegnie po KAŻDEJ wiadomości w czacie, więc nie może niczego psuć
  * przy okazji.
  */
-export function formatPeerEnvelope(text: string): string {
+export function parsePeerEnvelope(text: string): PeerEnvelope | null {
   for (const pattern of [PEER_MESSAGE, DELEGATION]) {
     const match = pattern.exec(text);
     if (!match) continue;
-    const name = match[1];
-    const body = text.slice(match[0].length);
-    // Sama koperta bez treści zdarza się przy pustym pytaniu — wtedy dwukropek
-    // wisiałby w powietrzu.
-    return body ? `@${name}: ${body}` : `@${name}`;
+    return { from: match[1], body: text.slice(match[0].length) };
   }
-  return text;
+  return null;
+}
+
+/**
+ * Zamienia kopertę na `@Nazwa treść`. Tekst bez koperty wraca nietknięty.
+ * Sama koperta bez treści zdarza się przy pustym pytaniu — wtedy zostaje samo
+ * `@Nazwa`, bez wiszącej spacji.
+ */
+export function formatPeerEnvelope(text: string): string {
+  const envelope = parsePeerEnvelope(text);
+  if (!envelope) return text;
+  return envelope.body ? `@${envelope.from} ${envelope.body}` : `@${envelope.from}`;
 }
