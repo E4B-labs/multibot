@@ -240,7 +240,7 @@ body {
    rozjeżdżają się po drodze. Klasa żyje tylko w pierwszej fazie, bo
    „inset(0 0 0 0)” przyciąłby potem kropki lecące spoza obrysu panelu. */
 .menu-unroll {
-  animation: menu-unroll 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: menu-unroll 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes menu-unroll {
   from { clip-path: inset(0 0 100% 0 round 0.75rem); }
@@ -248,9 +248,10 @@ body {
 }
 
 /* Kropka leci z przycisku na miejsce ikony. Wektor liczy komponent z układu
-   strony i podaje w --dot-dx/--dot-dy, więc trafia niezależnie od czcionki. */
+   strony i podaje w --dot-dx/--dot-dy, więc trafia niezależnie od czcionki.
+   0,5 s, nie sekunda: przy sekundzie lot był wyraźnie za wolny. */
 .menu-dot {
-  animation: menu-dot-fly 1s cubic-bezier(0.34, 0.9, 0.3, 1) both;
+  animation: menu-dot-fly 0.5s cubic-bezier(0.34, 0.9, 0.3, 1) both;
 }
 @keyframes menu-dot-fly {
   from { opacity: 0; transform: translate(var(--dot-dx), var(--dot-dy)) scale(0.5); }

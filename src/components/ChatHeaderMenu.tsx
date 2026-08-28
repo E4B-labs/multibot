@@ -7,10 +7,11 @@
 // otwarte, szare gdy zamknięte. Otwarty panel bota NIE podświetla przycisku —
 // tak jest na telefonie.
 //
-// Otwarcie gra trzysekundową sekwencję (Kacper 28.08), po sekundzie na fazę:
-//   1. panel rozwija się jak zwój, od góry do dołu, jeszcze pusty,
-//   2. z przycisku „⋮" wylatuje pięć kropek i siada na miejscach ikon,
-//   3. z każdej kropki wychodzi w prawo etykieta, litera po literze.
+// Otwarcie gra sekwencję na 2 s (Kacper 28.08):
+//   1. panel rozwija się jak zwój, od góry do dołu, jeszcze pusty — 0,5 s,
+//   2. z przycisku „⋮" wylatuje pięć kropek i siada na miejscach ikon — 0,5 s,
+//   3. z każdej kropki wychodzi w prawo etykieta, litera po literze — 1 s.
+// Zwój i lot skrócone z sekundy: przy 1 s jedno i drugie było za wolne.
 // Po sekwencji panel renderuje się dokładnie tak jak przedtem — bez opakowań
 // na litery i bez klas animacji, żeby stan końcowy był identyczny.
 //
@@ -27,10 +28,11 @@ import { cn } from "@/lib/cn";
 export const CHAT_HEADER_ACTIONS = ["computer", "routines", "skills", "find", "inspector"] as const;
 export type ChatHeaderAction = (typeof CHAT_HEADER_ACTIONS)[number];
 
-/** Każda faza trwa sekundę. Te same liczby stoją w klatkach CSS
- * (src/styles.css: menu-unroll, menu-dot-fly, menu-letter-in). */
-export const UNROLL_MS = 1000;
-export const FLY_MS = 1000;
+/** Czasy faz. Te same liczby stoją w klatkach CSS (src/styles.css:
+ * menu-unroll, menu-dot-fly, menu-letter-in) i muszą się zgadzać —
+ * rozjazd widać jako przeskok w połowie ruchu. */
+export const UNROLL_MS = 500;
+export const FLY_MS = 500;
 export const TYPE_MS = 1000;
 /** Ile trwa pojawienie się jednej litery. Reszta okna to rozjazd opóźnień. */
 export const LETTER_MS = 180;
