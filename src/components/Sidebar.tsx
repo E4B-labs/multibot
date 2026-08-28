@@ -1,10 +1,8 @@
 import { track } from "@/lib/analytics";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bot as BotIcon,
   BellDot,
-  ChevronDown,
-  ChevronRight,
   ClipboardCopy,
   Copy,
   Crown,
@@ -578,294 +576,6 @@ function GroupContextMenu({ menu, onClose }: { menu: GroupMenuState; onClose: ()
   );
 }
 
-// multibot: lokalne grupy agentów — kategoryzacja botów po imieniu, zwijane,
-// własna nazwa, clean UI. Trzymane w localStorage (brak backendu), per instalacja.
-interface LocalGroup {
-  id: string;
-  name: string;
-  botIds: string[];
-  collapsed?: boolean;
-}
-
-const LOCAL_GROUPS_KEY = "multibot-local-groups";
-
-function loadLocalGroups(): LocalGroup[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_GROUPS_KEY);
-    return raw ? (JSON.parse(raw) as LocalGroup[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveLocalGroups(groups: LocalGroup[]) {
-  try {
-    localStorage.setItem(LOCAL_GROUPS_KEY, JSON.stringify(groups));
-  } catch {
-    /* storage full/blocked — grupy zostają tylko w pamięci tej sesji */
-  }
-}
-
-
-function LocalGroupsSection({
-  groups,
-  setGroups,
-  onMenu,
-  collapsed,
-  createOpen,
-  onCreateOpenChange,
-  onHover,
-  onUnhover,
-}: {
-  groups: LocalGroup[];
-  setGroups: React.Dispatch<React.SetStateAction<LocalGroup[]>>;
-  onMenu: (menu: MenuState) => void;
-  collapsed?: boolean;
-  createOpen: boolean;
-  onCreateOpenChange: (open: boolean) => void;
-  onHover: (botId: string, rect: DOMRect) => void;
-  onUnhover: () => void;
-}) {
-  const { state } = useStore();
-  const polish = useLanguage() === "pl";
-  const [name, setName] = useState("");
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [groupDragOverId, setGroupDragOverId] = useState<string | null>(null);
-
-  // Formularz tworzy tylko nazwę — skład buduje się przeciąganiem botów.
-  const create = () => {
-    if (!name.trim()) return;
-    setGroups((prev) => [...prev, { id: crypto.randomUUID(), name: name.trim(), botIds: [] }]);
-    setName("");
-    onCreateOpenChange(false);
-  };
-
-  const toggleCollapsed = (id: string) =>
-    setGroups((prev) => prev.map((g) => (g.id === id ? { ...g, collapsed: !g.collapsed } : g)));
-
-  const remove = (id: string) => setGroups((prev) => prev.filter((g) => g.id !== id));
-
-  /** Drop bota na grupę = przeniesienie tam (usuwa z pozostałych). */
-  const addToGroup = (groupId: string, botId: string) =>
-    setGroups((prev) =>
-      prev.map((g) => ({
-        ...g,
-        botIds:
-          g.id === groupId
-            ? [...g.botIds.filter((id) => id !== botId), botId]
-            : g.botIds.filter((id) => id !== botId),
-      })),
-    );
-
-  const moveGroup = (sourceId: string, targetId: string) => {
-    if (sourceId === targetId) return;
-    setGroups((prev) => {
-      const src = prev.findIndex((g) => g.id === sourceId);
-      const tgt = prev.findIndex((g) => g.id === targetId);
-      if (src === -1 || tgt === -1) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(src, 1);
-      next.splice(tgt, 0, moved);
-      return next;
-    });
-  };
-
-  useEffect(() => {
-    const hasBot = (e: DragEvent) =>
-      !!e.dataTransfer && (e.dataTransfer.types.includes("text/mb-bot-id") || e.dataTransfer.types.includes("text/plain"));
-    const onOver = (e: DragEvent) => {
-      if (hasBot(e)) e.preventDefault();
-    };
-    // Drop poza grupą = wyjęcie bota ze wszystkich lokalnych grup.
-    // Pasek/listy grupy robią stopPropagation, więc tu wpada tylko tło.
-    const onDropDoc = (e: DragEvent) => {
-      const botId = (e.dataTransfer?.getData("text/mb-bot-id") || e.dataTransfer?.getData("text/plain") || "").trim();
-      if (!botId) return;
-      const target = e.target as HTMLElement;
-      if (target.closest("[data-local-group]")) return;
-      e.preventDefault();
-      setDragOverId(null);
-      setGroups((cur) => cur.map((g) => ({ ...g, botIds: g.botIds.filter((id) => id !== botId) })));
-    };
-    const onDragEnd = () => {
-      setDragOverId(null);
-      setGroupDragOverId(null);
-    };
-    document.addEventListener("dragover", onOver);
-    document.addEventListener("drop", onDropDoc);
-    document.addEventListener("dragend", onDragEnd);
-    return () => {
-      document.removeEventListener("dragover", onOver);
-      document.removeEventListener("drop", onDropDoc);
-      document.removeEventListener("dragend", onDragEnd);
-    };
-  }, []);
-
-  return (
-    <div
-      className={cn("flex flex-col gap-0.5")}
-      onContextMenu={(e) => {
-        // multibot 0.1.46: PPM w pustą część sekcji otwiera formularz grupy
-        // lokalnej; LPM w tło nic nie otwiera.
-        if (!collapsed && e.target === e.currentTarget) {
-          e.preventDefault();
-          onCreateOpenChange(true);
-        }
-      }}
-    >
-      {!collapsed &&
-        groups.map((group) => {
-          const members = group.botIds
-            .map((id) => state.bots.find((b) => b.id === id))
-            .filter((b): b is Bot => Boolean(b));
-          const open = !group.collapsed;
-          const isOver = dragOverId === group.id;
-          const isGroupOver = groupDragOverId === group.id;
-          return (
-            <div
-              key={group.id}
-              data-local-group={group.id}
-              className={cn(
-                "mt-1 rounded-2xl p-1",
-                isOver && "ring-1 ring-accent",
-                isGroupOver && "ring-1 ring-accent/60",
-              )}
-              onDragOver={(e) => {
-                const t = e.dataTransfer?.types ?? [];
-                const a = Array.from(t as unknown as string[]);
-                const isBot = a.some((x) => x === "text/mb-bot-id" || x === "text/plain");
-                const isGroup = a.includes("text/mb-local-group-id");
-                if (!isBot && !isGroup) return;
-                e.preventDefault();
-                if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-                if (isGroup) setGroupDragOverId(group.id);
-                else setDragOverId(group.id);
-              }}
-              onDragLeave={(e) => {
-                const next = e.relatedTarget as HTMLElement | null;
-                if (next && (e.currentTarget as HTMLElement).contains(next)) return;
-                setDragOverId((cur) => (cur === group.id ? null : cur));
-                setGroupDragOverId((cur) => (cur === group.id ? null : cur));
-              }}
-              onDrop={(e) => {
-                const groupId = (e.dataTransfer?.getData("text/mb-local-group-id") || "").trim();
-                if (groupId) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setGroupDragOverId(null);
-                  setDragOverId(null);
-                  moveGroup(groupId, group.id);
-                  return;
-                }
-                const botId = (e.dataTransfer?.getData("text/mb-bot-id") || e.dataTransfer?.getData("text/plain") || "").trim();
-                if (!botId) return;
-                e.preventDefault();
-                e.stopPropagation();
-                setDragOverId(null);
-                addToGroup(group.id, botId);
-              }}
-            >
-              <div
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData("text/mb-local-group-id", group.id);
-                  e.dataTransfer.effectAllowed = "move";
-                  e.stopPropagation();
-                }}
-                onDragEnd={() => {
-                  setGroupDragOverId(null);
-                  setDragOverId(null);
-                }}
-                className={cn(
-                  // multibot 0.1.46: pasek grupy — nazwa po lewej, kosz na hover
-                  // i strzałka zwijania po prawej; zero profilowych. Cel dropu (cały kafel, nie tylko pasek).
-                  // draggable: złap pasek i puść na innym kafelku by zmienić kolejność.
-                  "group flex w-full cursor-grab items-center gap-2 rounded-full py-1.5 pl-3 pr-2 hover:bg-raised/40 active:cursor-grabbing",
-                  isOver && "ring-1 ring-accent",
-                  isGroupOver && "ring-1 ring-accent/60",
-                )}
-              >
-                <button
-                  onClick={() => toggleCollapsed(group.id)}
-                  className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-ink"
-                >
-                  {group.name}
-                </button>
-                <button
-                  onClick={() => remove(group.id)}
-                  className="shrink-0 rounded p-0.5 text-ink-secondary opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
-                  title={polish ? "Usuń grupę" : "Delete group"}
-                >
-                  <Trash2 size={12} />
-                </button>
-                <button
-                  onClick={() => toggleCollapsed(group.id)}
-                  className="shrink-0 rounded p-0.5 text-ink-secondary hover:text-ink"
-                  title={open ? (polish ? "Zwiń" : "Collapse") : polish ? "Rozwiń" : "Expand"}
-                >
-                  {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                </button>
-              </div>
-              {open && (
-                <div className="ml-4 mt-1 flex flex-col gap-0.5 border-l border-hairline/40 pl-1">
-                  {members.length === 0 ? (
-                    <div className="py-2 text-center text-[12px] text-ink-secondary">
-                      {polish ? "Przeciągnij bota tutaj" : "Drag a bot here"}
-                    </div>
-                  ) : (
-                    members.map((b) => (
-                      <BotListItem
-                        key={`${group.id}-${b.id}`}
-                        bot={b}
-                        onMenu={onMenu}
-                        onHover={onHover}
-                        onUnhover={onUnhover}
-                      />
-                    ))
-                  )}
-                </div>
-              )}
-              {!open && isOver && (
-                <div className="mt-1 rounded-lg border border-dashed border-accent/40 bg-accent/5 py-2 text-center text-[12px] text-accent">
-                  {polish ? "Upuść, by dodać" : "Drop to add"}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-      {/* Create — PPM otwiera sam formularz nazwy; boty wpadają drag&dropem */}
-      {createOpen && !collapsed ? (
-        <div className="mx-1 mt-2 flex flex-col gap-2 rounded-xl bg-card p-3">
-          <input
-            autoFocus
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-            placeholder={polish ? "Nazwa grupy" : "Group name"}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && create()}
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={create}
-              disabled={!name.trim()}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {polish ? "Utwórz" : "Create"}
-            </button>
-            <button
-              onClick={() => { onCreateOpenChange(false); setName(""); }}
-              className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
-            >
-              {polish ? "Anuluj" : "Cancel"}
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 // multibot: F9-FE — grupy w sidebarze: każdy bot ma trwałą reprezentację
 // `mb-<threadId>` w transporcie grupowym, niezależnie od wybranego drivera.
 function GroupsSection({
@@ -1075,8 +785,6 @@ export function Sidebar() {
   const [groupMenu, setGroupMenu] = useState<GroupMenuState | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
-  // multibot 0.1.46: formularz grupy LOKALNEJ otwiera PPM w pustą część listy
-  const [localCreateOpen, setLocalCreateOpen] = useState(false);
   const [scoutOpen, setScoutOpen] = useState(false);
   // multibot 0.1.49: kafelek hovera — timer 350 ms gasi migotanie przy
   // przejeżdżaniu myszką przez listę; wyjazd z wiersza kasuje go natychmiast.
@@ -1112,7 +820,7 @@ export function Sidebar() {
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  // multibot: zwinięcie zamyka oba wysuwane menu, obojętne czy zwinął je
+  // multibot: zwinięcie zamyka wysuwane menu, obojętne czy zwinął je
   // użytkownik, czy zwężone okno. Szyna je i tak przestaje rysować, ale bez
   // tego wracają otwarte przy rozwinięciu — jakby wyskoczyły same.
   useEffect(() => {
@@ -1145,11 +853,6 @@ export function Sidebar() {
     };
   }, [hasLocalBot]);
 
-  const [localGroups, setLocalGroups] = useState<LocalGroup[]>(() => loadLocalGroups());
-  useEffect(() => {
-    saveLocalGroups(localGroups);
-  }, [localGroups]);
-
   // multibot: otwarty bot zostaje NA SWOIM MIEJSCU w liście pod wyszukiwarką.
   // Wcześniej dostawał osobny wiersz nad paskiem wyszukiwania i wypadał z listy,
   // więc samo wybranie bota wyrzucało go ponad wyszukiwarkę, a lista pod spodem
@@ -1160,10 +863,8 @@ export function Sidebar() {
   // nieprzeczytanego bota spychało go w dół — czyli dokładnie ten ruch, który
   // miał zniknąć. Sort w JS jest stabilny, więc poza przypiętymi kolejność
   // zostaje taka, jaka przyszła z serwera, i nie zmienia się przy klikaniu.
-  // multibot 0.1.54: bot w lokalnej grupie znika z listy głównej — tylko w grupie, nie dwa razy.
-  const localGroupBotIds = useMemo(() => new Set(localGroups.flatMap((g) => g.botIds)), [localGroups]);
   const visibleBots = state.bots
-    .filter((b) => !b.hidden && !localGroupBotIds.has(b.id))
+    .filter((b) => !b.hidden)
     .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
   // multibot: sekcje sidebaru (port z OpenMausBot #296) — przypięte zostają na
   // górze bez podziałów; reszta dzieli się na „bez sekcji" i grupy w kolejności
@@ -1376,14 +1077,6 @@ export function Sidebar() {
       {/* Unified conversation list: group rows sit with bots, above plugins. */}
       <div
         className={cn("flex-1 overflow-y-auto", collapsed ? "px-1 pt-2" : "px-2")}
-        onContextMenu={(e) => {
-          // multibot 0.1.46: PPM w pustą część listy (poza wierszami) otwiera
-          // formularz grupy lokalnej; LPM w tło nic nie otwiera.
-          if (!collapsed && e.target === e.currentTarget) {
-            e.preventDefault();
-            setLocalCreateOpen(true);
-          }
-        }}
       >
         {groupBots.length > 0 && (
           <GroupsSection
@@ -1394,16 +1087,6 @@ export function Sidebar() {
             collapsed={collapsed}
           />
         )}
-        <LocalGroupsSection
-          groups={localGroups}
-          setGroups={setLocalGroups}
-          onMenu={setMenu}
-          collapsed={collapsed}
-          createOpen={localCreateOpen}
-          onCreateOpenChange={setLocalCreateOpen}
-          onHover={showHoverCard}
-          onUnhover={hideHoverCard}
-        />
         <div className="flex flex-col gap-0.5">
           {flatBots.map((b) => (
             <BotListItem
