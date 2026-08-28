@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld("ogb", {
     check: () => ipcRenderer.invoke("update:check"),
     download: () => ipcRenderer.invoke("update:download"),
     install: () => ipcRenderer.invoke("update:install"),
+    currentVersion: () => ipcRenderer.invoke("update:app-version"),
     onState: (cb) => {
       ipcRenderer
         .invoke("update:get-state")

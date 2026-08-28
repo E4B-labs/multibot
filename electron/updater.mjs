@@ -76,6 +76,7 @@ function checkFailed(e) {
 
 export function registerUpdaterIpc() {
   ipcMain.handle("update:get-state", () => state);
+  ipcMain.handle("update:app-version", () => app.getVersion());
   // klik użytkownika (banner „Try again", UpdatesRow „Check for updates") —
   // foreground, więc ewentualna porażka jest widoczna jako karta błędu
   ipcMain.handle("update:check", () => checkNow());
@@ -96,9 +97,15 @@ export function registerUpdaterIpc() {
   ipcMain.handle("update:install", () => {
     if (state.status !== "downloaded") return;
     try {
-      autoUpdater?.quitAndInstall(false, true);
+      // multibot: NSIS per-user + silent (isSilent=true). Interaktywny dialog
+      // instalatora pod Windowsem wracał kodem 2 i ucinał relaunch, więc
+      // stara wersja wstawała z powrotem. Silent pomija ten dialog;
+      // forceRunAfter=true sam otwiera nową wersję po zamknięciu starej.
+      autoUpdater?.quitAndInstall(true, true);
     } catch {
-      setState({ status: "error", message: UPDATE_ERROR_MESSAGE });
+      // Przy awarii instalacji NIE pokazujemy karty błędu — wracamy do
+      // „downloaded", żeby użytkownik mógł ponowić z poziomu Updates.
+      setState({ status: "downloaded" });
     }
   });
 }

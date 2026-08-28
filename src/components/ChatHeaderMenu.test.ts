@@ -15,15 +15,15 @@ function rule(selector: string): string {
 // że któraś funkcja po cichu zniknie. Te testy pilnują kompletu i tego, że
 // nagłówek czatu oddał je menu wyłącznie na pulpicie.
 describe("menu akcji w nagłówku czatu", () => {
-  it("niesie wszystkie pięć funkcji, bez powtórzeń", () => {
+  it("niesie wszystkie funkcje, bez powtórzeń", () => {
     expect([...CHAT_HEADER_ACTIONS].sort()).toEqual(
-      ["computer", "find", "inspector", "routines", "skills"],
+      ["computer", "find", "inspector", "mail", "routines", "skills", "team"],
     );
   });
 
   it("kolejność jest ta sama co na telefonie", () => {
     expect([...CHAT_HEADER_ACTIONS]).toEqual(
-      ["computer", "routines", "skills", "find", "inspector"],
+      ["computer", "routines", "skills", "find", "inspector", "mail", "team"],
     );
   });
 

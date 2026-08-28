@@ -178,6 +178,7 @@ interface AppState {
   skillsOpen: boolean;
   // multibot: live team map (port z OpenMausBot)
   teamMapOpen: boolean;
+  serverAccessOpen: boolean;
   inspectorOpen: boolean;
   /** multibot: nazwy skilli do podświetlania w treści wiadomości (skillRefs) */
   skillNames: string[];
@@ -244,6 +245,8 @@ type Action =
   | { type: "toggleSkills"; open?: boolean }
   // multibot: team map (port z OpenMausBot)
   | { type: "toggleTeamMap"; open?: boolean }
+  // multibot: panel „Serwer i urządzenia" (profil/serwer) — otwierany z 3-kropek
+  | { type: "toggleServerAccess"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
   /** multibot: nazwy skilli do podświetlania w treści wiadomości */
   | { type: "setSkillNames"; names: string[] }
@@ -573,6 +576,8 @@ function reducer(state: AppState, action: Action): AppState {
     // multibot: team map — globalny overlay niezależny od prawego slotu
     case "toggleTeamMap":
       return { ...state, teamMapOpen: action.open ?? !state.teamMapOpen };
+    case "toggleServerAccess":
+      return { ...state, serverAccessOpen: action.open ?? !state.serverAccessOpen };
     case "toggleInspector": {
       const open = action.open ?? !state.inspectorOpen;
       return {
@@ -714,6 +719,7 @@ const initialState: AppState = {
   groupOpen: null,
   roomOpen: null,
   mailOpen: false,
+  serverAccessOpen: false,
   mailThreads: [],
   rooms: [],
   streaming: {},

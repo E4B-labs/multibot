@@ -47,6 +47,8 @@ declare global {
         download(): Promise<void>;
         /** quit-and-install the downloaded update */
         install(): Promise<void>;
+        /** currently installed app version */
+        currentVersion(): Promise<string>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
     };

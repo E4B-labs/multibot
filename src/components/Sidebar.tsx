@@ -11,7 +11,6 @@ import {
   EyeOff,
   FolderPlus,
   Loader2,
-  Mail,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -1241,29 +1240,8 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className={cn("pb-3 pt-2", collapsed ? "px-1" : "px-3")}>
-        <button
-          onClick={() => dispatch({ type: "toggleMail", open: true })}
-          title={collapsed ? (polish ? "Mail agentów" : "Agent mail") : undefined}
-          className={cn(
-            "flex w-full items-center rounded-xl py-2 text-left hover:bg-raised/50",
-            collapsed ? "justify-center px-0" : "gap-3 px-3",
-          )}
-        >
-          <Mail size={20} className="text-ink-secondary" />
-          {!collapsed && <span className="text-[14px] text-ink">{polish ? "Mail agentów" : "Agent mail"}</span>}
-        </button>
-        {/* multibot: live team map — globalny przycisk jak Wtyczki */}
-        <button
-          onClick={() => dispatch({ type: "toggleTeamMap", open: true })}
-          title={collapsed ? (polish ? "Mapa zespołu" : "Team map") : undefined}
-          className={cn(
-            "flex w-full items-center rounded-xl py-2 text-left hover:bg-raised/50",
-            collapsed ? "justify-center px-0" : "gap-3 px-3",
-          )}
-        >
-          <Users size={20} className="text-ink-secondary" />
-          {!collapsed && <span className="text-[14px] text-ink">{polish ? "Mapa zespołu" : "Team map"}</span>}
-        </button>
+        {/* multibot: Mail agentów i Mapa zespołu przeniesione do 3-kropek
+            w nagłówku czatu (prawy górny róg) — tu celowo puste. */}
         {/* multibot: F11 — subtelna kropka statusu silnika, tylko offline+slafy;
             szara bg-raised-hover = konwencja "Service offline" */}
         {engineOffline && (

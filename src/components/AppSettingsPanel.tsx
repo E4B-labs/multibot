@@ -1,7 +1,7 @@
 // App-level settings screen: who you are + credentials
 // shared by all bots. Per-bot settings (name, persona, model, computer)
 // live in SettingsPanel; contextual Box-token entry stays in ComputerPanel.
-import { ArrowLeft, FileDown, Loader2, Plus, QrCode, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronRight, FileDown, Loader2, Plus, QrCode, Trash2 } from "lucide-react";
 // multibot: ikony szyny sekcji przerysowane z lucide, żeby dało się animować
 // ich części na kliknięcie (suwaki jeżdżą, strzałki się kręcą, klucz dokręca).
 import { RefreshTabIcon, SlidersTabIcon, WrenchTabIcon } from "./SettingsTabIcons";
@@ -193,7 +193,7 @@ function ProfileFields() {
   );
 }
 
-function AccessTokenSettings() {
+export function AccessTokenSettings() {
   const polish = useLanguage() === "pl";
   const [token, setToken] = useState("");
   const [shown, setShown] = useState(false);
@@ -246,7 +246,7 @@ function AccessTokenSettings() {
   );
 }
 
-function WorkspaceAccessSettings() {
+export function WorkspaceAccessSettings() {
   const polish = useLanguage() === "pl";
   const [workspace, setWorkspace] = useState<{
     name?: string;
@@ -327,7 +327,7 @@ function WorkspaceAccessSettings() {
   );
 }
 
-function PairDeviceSettings() {
+export function PairDeviceSettings() {
   const polish = useLanguage() === "pl";
   const [pairing, setPairing] = useState<{ code: string; expiresAt: number; pairUrl: string; qrSvg: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -347,7 +347,7 @@ function PairDeviceSettings() {
   );
 }
 
-function InstallAppSettings() {
+export function InstallAppSettings() {
   const polish = useLanguage() === "pl";
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
@@ -850,6 +850,19 @@ function CommandLineTools() {
 function UpdatesRow() {
   const s = useUpdaterState();
   const polish = useLanguage() === "pl";
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    window.ogb?.updater
+      ?.currentVersion()
+      .then((v) => {
+        if (alive) setCurrentVersion(v);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   if (!window.ogb?.updater) return null;
   const updater = window.ogb.updater;
   const label =
@@ -867,6 +880,9 @@ function UpdatesRow() {
   return (
     <div className="mt-4 rounded-xl bg-card p-4">
       <div className="text-[15px] font-medium text-ink">{polish ? "Aktualizacje aplikacji" : "App updates"}</div>
+      <div className="mt-0.5 text-[13px] text-ink-secondary">
+        {polish ? "Bieżąca wersja" : "Current version"}: <span className="font-medium text-ink">{currentVersion ?? "…"}</span>
+      </div>
       <div className="mt-0.5 text-[13px] text-ink-secondary">{label}</div>
       <div className="mt-3 flex gap-2">
         {s?.status === "available" ? (
@@ -970,15 +986,20 @@ export function AppSettingsPanel() {
 
   return (
     <main className="app-settings-screen animate-panel-in flex min-h-0 min-w-0 flex-1 flex-col bg-app">
-      <header data-shell-header className="flex shrink-0 items-center gap-3 border-b border-hairline/40 bg-panel px-6 py-4 lg:px-10">
-        <button
-          onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
-          className="rounded-lg p-2.5 text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
-          title={polish ? "Wróć" : "Back"}
-          aria-label={polish ? "Wróć" : "Back"}
-        >
-          <ArrowLeft size={18} />
-        </button>
+      <header data-shell-header className="flex shrink-0 items-center gap-3 border-b border-hairline/40 bg-panel py-4 pr-6 lg:pr-10">
+        {/* multibot: back w jednej osi z ikonami szyny sekcji pod spodem —
+            ta sama 72px szerokość kolumny, żeby strzałka nie wisiała inaczej
+            niż przyciski sekcji (Kacper 28.08). */}
+        <div className="flex w-[72px] shrink-0 items-center justify-center">
+          <button
+            onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
+            className="rounded-lg p-2.5 text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
+            title={polish ? "Wróć" : "Back"}
+            aria-label={polish ? "Wróć" : "Back"}
+          >
+            <ArrowLeft size={18} />
+          </button>
+        </div>
         <div className="min-w-0">
           <h1 className="text-[18px] font-semibold tracking-[-0.02em] text-ink">{polish ? "Ustawienia aplikacji" : "App Settings"}</h1>
           <p className="mt-1 text-[13px] text-ink-secondary">{polish ? "Konfiguracja wspólna dla całego MultiBota." : "Settings shared across your MultiBot workspace."}</p>
@@ -1089,11 +1110,15 @@ export function AppSettingsPanel() {
 
           {tab === "other" && (
             <>
-              {/* multibot: G2 — server token, masked until explicitly shown. */}
-              <WorkspaceAccessSettings />
-              <AccessTokenSettings />
-              <PairDeviceSettings />
-              <InstallAppSettings />
+              {/* multibot: G2 — server token + parowanie urządzeń zebrane w
+                  jeden panel „Serwer i urządzenia" (otwierany stąd i z 3-kropek). */}
+              <button
+                onClick={() => dispatch({ type: "toggleServerAccess", open: true })}
+                className="flex w-full items-center justify-between rounded-xl bg-card px-4 py-3 text-left text-[14px] text-ink hover:bg-raised"
+              >
+                <span>{polish ? "Serwer i urządzenia" : "Server & devices"}</span>
+                <ChevronRight size={16} className="text-ink-secondary" />
+              </button>
 
               {/* multibot: G1 — custom model catalog lives at app level, never per bot. */}
               <CustomModels />

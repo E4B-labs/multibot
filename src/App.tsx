@@ -14,6 +14,7 @@ import { PluginsPanel } from "@/components/PluginsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
 import { AppSettingsPanel } from "@/components/AppSettingsPanel";
 import { TeamMapPanel } from "@/components/TeamMapPanel";
+import { ServerAccessPanel } from "@/components/ServerAccessPanel";
 import { InspectorPanel } from "@/components/InspectorPanel";
 // multibot: F6 — panel rutyn silnika slafy
 import { RoutinesPanel } from "@/components/RoutinesPanel";
@@ -225,6 +226,8 @@ function Shell() {
             {state.teamMapOpen && (
               <TeamMapPanel onClose={() => dispatch({ type: "toggleTeamMap", open: false })} />
             )}
+            {/* multibot: panel „Serwer i urządzenia" — z 3-kropek w nagłówku czatu */}
+            {state.serverAccessOpen && <ServerAccessPanel />}
             {/* multibot: F9-FE — pokój grupowy; otwierany wyłącznie z sekcji Groups
                 (widocznej tylko przy botach slafy), klucz per grupę = świeży mount */}
             {state.pluginsOpen && <PluginsPanel />}
