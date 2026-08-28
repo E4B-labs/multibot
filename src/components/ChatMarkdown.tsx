@@ -79,33 +79,33 @@ function CodeBlock({ code, lang, streaming, compact }: { code: string; lang: str
   return (
     <div className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
       <div className="flex items-center justify-between border-b border-hairline/30 px-3 py-1">
-        <span className={cn("uppercase tracking-wide text-ink-secondary", compact ? "text-[12px]" : "text-[11px]")}>{lang || "code"}</span>
+        <span className={cn("uppercase tracking-wide text-ink-secondary", compact ? "text-[9px]" : "text-[11px]")}>{lang || "code"}</span>
         <button
           onClick={copy}
           className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
           title={polish ? "Kopiuj kod" : "Copy code"}
         >
           {copied
-            ? <Check size={compact ? 15 : 13} className="text-success" />
-            : <Copy size={compact ? 15 : 13} />}
+            ? <Check size={compact ? 11 : 13} className="text-success" />
+            : <Copy size={compact ? 11 : 13} />}
         </button>
       </div>
       {html ? (
         <div
-          className={cn("overflow-x-auto leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3", compact ? "text-[14px]" : "text-[13px]")}
+          className={cn("overflow-x-auto leading-relaxed [&_pre]:!bg-transparent [&_pre]:m-0 [&_pre]:p-3", compact ? "text-[11px]" : "text-[13px]")}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <pre className={cn("overflow-x-auto p-3 leading-relaxed text-ink", compact ? "text-[14px]" : "text-[13px]")}>{code}</pre>
+        <pre className={cn("overflow-x-auto p-3 leading-relaxed text-ink", compact ? "text-[11px]" : "text-[13px]")}>{code}</pre>
       )}
     </div>
   );
 }
 
 /** multibot: `compact` = wariant do dymków czatu — ten sam markup, tylko własne
- * rozmiary czcionek i ikon. Wartości ustawił właściciel: najpierw zejście o połowę,
- * potem powrót o 1,5× (14px w kodzie i wzmiankach, 15px w tabelach, 18/17px
- * w nagłówkach). Panele (GroupPanel, RoomPanel, SkillsPanel) renderują BEZ tej
+ * rozmiary czcionek i ikon. Wartości ustawiał właściciel iteracyjnie; obecny
+ * zestaw odpowiada treści dymka 13px (11px w kodzie, wzmiankach i tabelach,
+ * 14/13px w nagłówkach). Panele (GroupPanel, RoomPanel, SkillsPanel) renderują BEZ tej
  * flagi, więc zostają w dotychczasowych rozmiarach. */
 function ChatMarkdownComponent({ text, streaming = false, compact = false }: { text: string; streaming?: boolean; compact?: boolean }) {
   const { state, dispatch } = useStore();
@@ -133,11 +133,11 @@ function ChatMarkdownComponent({ text, streaming = false, compact = false }: { t
                     onClick={() => dispatch({ type: "toggleSkills", open: true })}
                     className={cn(
                       "inline-flex translate-y-px items-center gap-1.5 rounded-full bg-[#111] align-middle font-semibold text-[#ffb700] hover:brightness-110",
-                      compact ? "h-[27px] px-3 text-[14px]" : "h-6 px-2.5 text-[12.5px]",
+                      compact ? "h-[21px] px-2 text-[11px]" : "h-6 px-2.5 text-[12.5px]",
                     )}
                     title={skillRef}
                   >
-                    <Wand2 size={compact ? 12 : 11} className="shrink-0 text-[#ffb700]" />
+                    <Wand2 size={compact ? 9 : 11} className="shrink-0 text-[#ffb700]" />
                     {children}
                   </button>
                 );
@@ -145,8 +145,8 @@ function ChatMarkdownComponent({ text, streaming = false, compact = false }: { t
               return <span>{children}</span>;
             }
             return (
-              <span className={cn("inline-flex translate-y-px items-center gap-1 rounded-full bg-raised px-2 py-0.5 align-middle font-medium text-ink", compact ? "text-[14px]" : "text-[13px]")}>
-                <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? "happy"} size={compact ? 18 : 16} animated={false} />
+              <span className={cn("inline-flex translate-y-px items-center gap-1 rounded-full bg-raised px-2 py-0.5 align-middle font-medium text-ink", compact ? "text-[11px]" : "text-[13px]")}>
+                <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? "happy"} size={compact ? 14 : 16} animated={false} />
                 {children}
               </span>
             );
@@ -161,7 +161,7 @@ function ChatMarkdownComponent({ text, streaming = false, compact = false }: { t
           },
           code({ children }: { children?: ReactNode }) {
             return (
-              <code className={cn("rounded bg-inset px-1 py-px", compact ? "text-[14px]" : "text-[13px]")}>{children}</code>
+              <code className={cn("rounded bg-inset px-1 py-px", compact ? "text-[11px]" : "text-[13px]")}>{children}</code>
             );
           },
           a({ href, children }: { href?: string; children?: ReactNode }) {
@@ -179,7 +179,7 @@ function ChatMarkdownComponent({ text, streaming = false, compact = false }: { t
           table({ children }: { children?: ReactNode }) {
             return (
               <div className="overflow-x-auto">
-                <table className={cn("w-full border-collapse", compact ? "text-[15px]" : "text-[13.5px]")}>{children}</table>
+                <table className={cn("w-full border-collapse", compact ? "text-[11px]" : "text-[13.5px]")}>{children}</table>
               </div>
             );
           },
@@ -198,10 +198,10 @@ function ChatMarkdownComponent({ text, streaming = false, compact = false }: { t
             return <ol className="list-decimal space-y-1 pl-5">{children}</ol>;
           },
           h1({ children }: { children?: ReactNode }) {
-            return <div className={cn("mt-2 font-semibold", compact ? "text-[18px]" : "text-[16px]")}>{children}</div>;
+            return <div className={cn("mt-2 font-semibold", compact ? "text-[14px]" : "text-[16px]")}>{children}</div>;
           },
           h2({ children }: { children?: ReactNode }) {
-            return <div className={cn("mt-2 font-semibold", compact ? "text-[17px]" : "text-[15.5px]")}>{children}</div>;
+            return <div className={cn("mt-2 font-semibold", compact ? "text-[13px]" : "text-[15.5px]")}>{children}</div>;
           },
           h3({ children }: { children?: ReactNode }) {
             return <div className="mt-1.5 font-semibold">{children}</div>;

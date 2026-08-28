@@ -6,6 +6,7 @@ import { useEffect, useState, Fragment } from "react";
 import { ArrowLeftRight, Eye, Loader2, Users, X } from "lucide-react";
 import { useStore, formatTime, type Room } from "@/state/store";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { formatPeerEnvelope } from "@/lib/peerEnvelope";
 import { MausAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { authFetch } from "@/lib/auth";
@@ -145,7 +146,7 @@ export function RoomPanel() {
                       <span className="text-[11px] text-ink-secondary">{formatTime(entry.at)}</span>
                     </div>
                     <div className="rounded-2xl rounded-tl-md bg-card px-3.5 py-2 text-[14px] leading-relaxed text-ink">
-                      <ChatMarkdown text={entry.text} />
+                      <ChatMarkdown text={formatPeerEnvelope(entry.text)} />
                     </div>
                   </div>
                 </div>

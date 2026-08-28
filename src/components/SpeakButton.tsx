@@ -127,13 +127,13 @@ export function SpeakButton({ text }: { text: string }) {
     >
       {/* multibot: ikony 13 → 10, proporcjonalnie do zmniejszonego dymka */}
       {phase === "loading" ? (
-        <Loader2 size={15} className="animate-spin" />
+        <Loader2 size={11} className="animate-spin" />
       ) : phase === "playing" ? (
-        <Square size={15} className="fill-current" />
+        <Square size={11} className="fill-current" />
       ) : phase === "error" ? (
-        <VolumeX size={15} />
+        <VolumeX size={11} />
       ) : (
-        <Volume2 size={15} />
+        <Volume2 size={11} />
       )}
     </button>
   );
