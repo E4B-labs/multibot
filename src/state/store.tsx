@@ -22,8 +22,8 @@ import { botNotificationIcon, notificationTag, notifyBrowser } from "@/lib/notif
 export type { MausColor } from "@/lib/mascot";
 
 const SELECTED_BOT_KEY = "multibot.selectedBot";
-// multibot: ile pokoi współpracy trzymamy w stanie. Serwer sam wyrzuca pokoje
-// 30 minut po ostatniej wiadomości; ten sufit to tylko bezpiecznik pamięci.
+// multibot: klient trzyma ostatnie pokoje współpracy dla wskaźnika aktywności;
+// pełne transkrypty serwer trzyma na dysku, ten sufit ogranicza tylko pamięć UI.
 const MAX_KNOWN_ROOMS = 40;
 
 export interface OptionCardData {
@@ -130,7 +130,7 @@ export interface EngineGroup {
   messages?: Array<{ id: string; from: "you" | string; text: string; at: number }>;
 }
 
-/** Ephemeral bot-to-bot collaboration room (read-only for the user). */
+/** Durable bot-to-bot collaboration room (read-only for the user). */
 export interface Room {
   id: string;
   name: string;
@@ -581,8 +581,8 @@ function reducer(state: AppState, action: Action): AppState {
         skillsOpen: open ? false : state.skillsOpen,
       };
     }
-    // multibot: hydratacja listy pokoi — nadmiar obcinamy, bo wskaźnik rozmów
-    // czyta tylko "running", a done/failed potrzebne są chwilę (animacja wyjścia).
+    // multibot: hydratacja listy pokoi — klient trzyma ostatnie N do wskaźnika,
+    // ale pełne transkrypty pozostają dostępne z wiadomości pokoju.
     case "roomsSet":
       return { ...state, rooms: action.rooms.slice(-MAX_KNOWN_ROOMS) };
     case "roomUpsert": {

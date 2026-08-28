@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   Bot as BotIcon,
   BellDot,
+  ChevronDown,
+  ChevronRight,
   ClipboardCopy,
   Copy,
   Crown,
@@ -197,12 +199,20 @@ function BotContextMenu({
 }
 
 // multibot: nagłówek sekcji botów na liście (port z OpenMausBot #296)
-function SectionDivider({ name }: { name: string }) {
+function SectionDivider({ name, collapsed, onToggle, polish }: { name: string; collapsed: boolean; onToggle: () => void; polish: boolean }) {
   return (
-    <div className="flex items-center gap-2 px-3 pb-1 pt-3">
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? polish ? `Rozwiń sekcję ${name}` : `Expand section ${name}` : polish ? `Zwiń sekcję ${name}` : `Collapse section ${name}`}
+      title={collapsed ? polish ? "Rozwiń sekcję" : "Expand section" : polish ? "Zwiń sekcję" : "Collapse section"}
+      className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 pb-1 pt-3 text-left hover:bg-raised/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+    >
+      {collapsed ? <ChevronRight size={14} className="shrink-0 text-ink-secondary" /> : <ChevronDown size={14} className="shrink-0 text-ink-secondary" />}
       <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{name}</span>
-      <div className="h-px flex-1 bg-hairline/40" />
-    </div>
+      <span className="h-px flex-1 bg-hairline/40" />
+    </button>
   );
 }
 
@@ -870,6 +880,15 @@ export function Sidebar() {
   // górze bez podziałów; reszta dzieli się na „bez sekcji" i grupy w kolejności
   // pierwszego wystąpienia. W zwiniętej szynie podziałów nie rysujemy.
   const [sectionPicker, setSectionPicker] = useState<{ botId: string; x: number; y: number } | null>(null);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
+  const toggleSection = (name: string) => {
+    setCollapsedSections((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
   const unpinned = visibleBots.filter((b) => !b.pinned);
   // multibot: przypięty bot — duży awatar 1:1 pod wyszukiwarką, bez szpilki (wzór z foty)
   const pinnedBots = visibleBots.filter((b) => b.pinned);
@@ -1107,19 +1126,26 @@ export function Sidebar() {
         {!collapsed &&
           sectionedBots.map((group) => (
             <div key={group.name}>
-              <SectionDivider name={group.name} />
-              <div className="flex flex-col gap-0.5">
-                {group.bots.map((b) => (
-                  <BotListItem
-                    key={b.id}
-                    bot={b}
-                    onMenu={setMenu}
-                    collapsed={collapsed}
-                    onHover={showHoverCard}
-                    onUnhover={hideHoverCard}
-                  />
-                ))}
-              </div>
+              <SectionDivider
+                name={group.name}
+                collapsed={collapsedSections.has(group.name)}
+                onToggle={() => toggleSection(group.name)}
+                polish={polish}
+              />
+              {!collapsedSections.has(group.name) && (
+                <div className="flex flex-col gap-0.5">
+                  {group.bots.map((b) => (
+                    <BotListItem
+                      key={b.id}
+                      bot={b}
+                      onMenu={setMenu}
+                      collapsed={collapsed}
+                      onHover={showHoverCard}
+                      onUnhover={hideHoverCard}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
       </div>

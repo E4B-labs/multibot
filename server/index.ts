@@ -130,10 +130,9 @@ process.env.MULTIBOT_HARNESS_TOKEN = access.token;
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 await registry.load(instanceConfigs(cfg));
 const groupStore = new GroupStore();
-// Ephemeral bot-to-bot collaboration rooms; a pruner drops them 30 min after
-// the last message (running ones too — idle = dead).
+// Collaboration rooms stay durable so their read-only transcripts remain
+// available from old chat chips after completion and server restarts.
 const rooms = new RoomStore();
-setInterval(() => rooms.pruneExpired(), 60_000).unref?.();
 // Durable /goal sessions; pruned to the latest 20 settled per bot.
 const goals = new GoalStore();
 setInterval(() => goals.prune(), 5 * 60_000).unref?.();
@@ -384,8 +383,8 @@ function collabRoundPrompt(freshFromPeers: string): string {
 }
 
 /** Run a room to completion: sequential rounds, each bot replies once per
- * round, until a bot marks the task done, the TTL lapses (30 min idle) or the
- * safety ceiling (2 h) hits. Busy bots are skipped for that round. */
+ * round, until a bot marks the task done or the safety ceiling (2 h) hits.
+ * Busy bots are skipped for that round. */
 async function runCollab(roomId: string): Promise<void> {
   const started = Date.now();
   // multibot: 2 h, nie 20 min — zadanie z prawdziwego świata (komputer,
@@ -398,7 +397,6 @@ async function runCollab(roomId: string): Promise<void> {
   for (;;) {
     const room = rooms.get(roomId);
     if (!room || room.status !== "running") break;
-    if (Date.now() >= room.expiresAt) break; // idle — TTL elapsed
     if (Date.now() - started >= SAFETY_MS) break;
     let anyReply = false;
     let finished = false;
@@ -2177,7 +2175,7 @@ const server = createServer(async (req, res) => {
             for (const turn of turns) groupStore.append(group.id, { from: turn.bot_id, text: turn.reply });
             return json(res, 200, { turns, owner: turns[0]?.bot_id ?? null, messages: groupStore.get(group.id)?.messages ?? [] });
           }
-          // multibot: bot opens a temporary collaboration room with another bot
+          // multibot: bot opens a durable collaboration room with another bot
           // to work on a task TOGETHER (read-only for the user). Runs async —
           // the caller keeps its own turn; the room's final report is appended
           // to the caller's chat when it settles.
@@ -2262,7 +2260,7 @@ const server = createServer(async (req, res) => {
         // aktywności ukrywała odpowiedź bota na zawsze, choć jej tokeny były
         // już opłacone — teraz każda wymiana dostaje pełny, klikalny pokój
         // (dokładnie ten sam widok co przy start_collab), a transkrypt żyje
-        // 30 minut od ostatniej wiadomości.
+        // Trwały transkrypt zostaje dostępny z pigułki w historii.
         const room = rooms.create({
           task: message,
           bot_ids: [fromBotId, toBotId],
@@ -2486,7 +2484,7 @@ const server = createServer(async (req, res) => {
         return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
       }
     }
-    // ── ephemeral collaboration rooms (bot-to-bot tasks) ──
+    // ── durable collaboration rooms (bot-to-bot tasks) ──
     if (method === "GET" && path === "/api/rooms") {
       return json(res, 200, { rooms: rooms.list() });
     }

@@ -1,7 +1,10 @@
-// Ephemeral collaboration rooms for bot-to-bot tasks. In-memory only (no
-// file, no engine sync): a room lives 30 minutes after the last bot message,
-// then a pruner drops it. The harness owns the turns (runCollab in index.ts),
-// exactly like it owns ask_bot — bots never talk to each other directly.
+// Collaboration rooms for bot-to-bot tasks. The harness owns the turns
+// (runCollab in index.ts), exactly like it owns ask_bot — bots never talk to
+// each other directly. Rooms stay available across restarts for inspection.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 
 export interface RoomMessage {
@@ -21,25 +24,46 @@ export interface RoomRecord {
   transcript: RoomMessage[];
   status: "running" | "done" | "failed";
   createdAt: number;
-  /** TTL — every appended message pushes it ROOM_TTL_MS into the future */
-  expiresAt: number;
   /** threadId of the bot chat where the clickable chip lives */
   ownerThread: string;
   /** originator bot id (shown as "X texted Y") */
   ownerBotId: string;
 }
 
-// multibot: 30 minut, nie 5 — pojedyncza tura bota z komputerem potrafi trwać
-// dłużej niż dawniejszy cały pokój, a TTL przesuwa się tylko przy dopisaniu
-// wiadomości, więc podczas jednej długiej tury pokój umierał w trakcie pracy.
-// Zawsze dłużej niż sufit pojedynczej tury (askBotAndWait w index.ts).
-export const ROOM_TTL_MS = 30 * 60_000;
 /** A bot ends its room contribution with this exact line once the task is
  * resolved; the harness strips it from the visible transcript. */
 export const ROOM_DONE_MARKER = "[TASK COMPLETE]";
 
+const ROOMS_FILE = join(DATA_DIR, "rooms.json");
+
 export class RoomStore {
   private rooms = new Map<string, RoomRecord>();
+  private readonly filePath: string;
+
+  constructor(filePath = ROOMS_FILE) {
+    this.filePath = filePath;
+    try {
+      const saved = JSON.parse(readFileSync(this.filePath, "utf8")) as RoomRecord[];
+      for (const room of saved) {
+        if (!room || typeof room.id !== "string" || !Array.isArray(room.bot_ids) || !Array.isArray(room.transcript)) continue;
+        if (!["running", "done", "failed"].includes(room.status)) continue;
+        this.rooms.set(room.id, {
+          ...room,
+          bot_ids: [...room.bot_ids],
+          transcript: room.transcript.map((message) => ({ ...message })),
+          // No worker resumes after a restart; preserve transcript, mark turn stopped.
+          status: room.status === "running" ? "failed" : room.status,
+        });
+      }
+    } catch {
+      // First run or unreadable old file: start with no rooms.
+    }
+  }
+
+  private persist(): void {
+    mkdirSync(dirname(this.filePath), { recursive: true });
+    writeFileSync(this.filePath, JSON.stringify([...this.rooms.values()], null, 2));
+  }
 
   create(input: { task: string; bot_ids: string[]; ownerThread: string; ownerBotId: string }): RoomRecord {
     const now = Date.now();
@@ -51,11 +75,11 @@ export class RoomStore {
       transcript: [],
       status: "running",
       createdAt: now,
-      expiresAt: now + ROOM_TTL_MS,
       ownerThread: input.ownerThread,
       ownerBotId: input.ownerBotId,
     };
     this.rooms.set(room.id, room);
+    this.persist();
     return this.get(room.id)!;
   }
 
@@ -75,7 +99,7 @@ export class RoomStore {
     if (!room) return null;
     const message: RoomMessage = { id: newId(), from, text, at: Date.now() };
     room.transcript.push(message);
-    room.expiresAt = Date.now() + ROOM_TTL_MS;
+    this.persist();
     return { ...message };
   }
 
@@ -87,7 +111,7 @@ export class RoomStore {
     const message = room.transcript.find((m) => m.id === messageId);
     if (!message) return null;
     message.text += extra;
-    room.expiresAt = Date.now() + ROOM_TTL_MS;
+    this.persist();
     return { ...message };
   }
 
@@ -95,17 +119,13 @@ export class RoomStore {
     const room = this.rooms.get(id);
     if (!room) return null;
     room.status = status;
+    this.persist();
     return this.get(id);
   }
 
   delete(id: string): boolean {
-    return this.rooms.delete(id);
-  }
-
-  /** Drop rooms whose TTL elapsed — running ones too (idle = dead). */
-  pruneExpired(now = Date.now()): void {
-    for (const [id, room] of this.rooms) {
-      if (now > room.expiresAt) this.rooms.delete(id);
-    }
+    const deleted = this.rooms.delete(id);
+    if (deleted) this.persist();
+    return deleted;
   }
 }

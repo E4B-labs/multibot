@@ -45,7 +45,7 @@ const TOOLS = [
   {
     name: "start_collab",
     description:
-      "Start a temporary collaboration room with another bot to work on a TASK together. You and that bot exchange messages in a room the user can watch (read-only) until the task is done. Use this instead of ask_bot when you need the other bot to actually DO work with you, not just answer one question. Returns the room id; the final report lands back in your chat.",
+      "Start a collaboration room with another bot to work on a TASK together. You and that bot exchange messages in a room the user can watch (read-only) until the task is done. Use this instead of ask_bot when you need the other bot to actually DO work with you, not just answer one question. Returns the room id; the final report lands back in your chat.",
     inputSchema: {
       type: "object",
       properties: {

@@ -1,4 +1,4 @@
-// Read-only view of an ephemeral bot-to-bot collaboration room. Opened by
+// Read-only view of a durable bot-to-bot collaboration room. Opened by
 // clicking the "X texted Y" chip in a conversation; the user watches the bots
 // work on the task together but cannot post. Live updates ride the SSE "room"
 // frames into store.roomOpen.
@@ -116,7 +116,7 @@ export function RoomPanel() {
             <Users size={22} />
             <div className="text-[13px] font-medium text-ink">{polish ? "Pokój już nie istnieje" : "This room no longer exists"}</div>
             <span className="text-[12px]">
-              {polish ? "Chwilowe pokoje znikają po dłuższej bezczynności." : "Temporary rooms disappear after a long idle."}
+              {polish ? "Transkrypt tego pokoju nie jest dostępny." : "This room transcript is unavailable."}
             </span>
           </div>
         ) : room.transcript.length === 0 ? (

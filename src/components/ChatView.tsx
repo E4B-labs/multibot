@@ -10,7 +10,6 @@ import { AttachmentPreviewDialog } from "./AttachmentPreview";
 import { ChatFindBar } from "./ChatFindBar";
 // multibot: flat replies — cytowanie wiadomości (port z OpenMausBot #437)
 import { ReplyQuote, replyTargetOf } from "./ReplyQuote";
-import { Reply as ReplyIcon } from "lucide-react";
 import { routineStartName, slashCommandLabel } from "@/lib/transcriptChips";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { formatPeerEnvelope } from "@/lib/peerEnvelope";
@@ -112,7 +111,6 @@ function Bubble({
   botId,
   message,
   highlighted,
-  onReply,
   replyTarget,
   replyBotName,
   onJumpTo,
@@ -120,7 +118,6 @@ function Bubble({
   botId: string;
   message: Message;
   highlighted?: boolean;
-  onReply?: (message: Message) => void;
   /** multibot: wiadomość cytowana przez tę wiadomość (flat reply) */
   replyTarget?: Message;
   /** nazwa bota do etykiety cytatu („Replying to Atlas") */
@@ -192,18 +189,6 @@ function Bubble({
         <div className={cn("mt-1 flex items-center gap-1.5 text-[10px] leading-none", user ? "justify-end" : "justify-start")}>
           {/* multibot: TTS — see SpeakButton.tsx; renders null off-slafy */}
           {!user && <SpeakButton text={text} />}
-          {/* multibot: flat reply — przycisk na hover, jak SpeakButton */}
-          {onReply && message.kind === "text" && (
-            <button
-              type="button"
-              onClick={() => onReply(message)}
-              aria-label={polish ? "Odpowiedz" : "Reply"}
-              title={polish ? "Odpowiedz" : "Reply"}
-              className="rounded-md p-0.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/msg:opacity-100"
-            >
-              <ReplyIcon size={13} />
-            </button>
-          )}
         </div>
       </div>
     </div>
@@ -367,10 +352,6 @@ export function ChatView({ bot }: { bot: Bot }) {
       .querySelector(`[data-mb-msg="${CSS.escape(highlightId)}"]`)
       ?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [highlightId]);
-  // multibot: flat reply — stan cytatu nad composerem
-  const [replyTo, setReplyTo] = useState<Message | null>(null);
-  useEffect(() => setReplyTo(null), [bot.id]);
-
   const closeFind = useCallback(() => {
     setFindOpen(false);
     setHighlightId(null);
@@ -604,7 +585,6 @@ export function ChatView({ bot }: { bot: Bot }) {
                     botId={bot.id}
                     message={m}
                     highlighted={highlightId === m.id}
-                    onReply={setReplyTo}
                     replyTarget={replyTargetOf(bot.messages, m.replyToId)}
                     replyBotName={botDisplayName(bot, polish ? "pl" : "en")}
                     onJumpTo={jumpToHit}
@@ -675,18 +655,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         </button>
       )}
 
-      {/* multibot: flat reply — pasek cytatu nad composerem */}
-      {replyTo && (
-        <div className="px-5">
-          <ReplyQuote
-            message={replyTargetOf(bot.messages, replyTo.id) ?? replyTo}
-            botName={bot.name}
-            onClear={() => setReplyTo(null)}
-          />
-        </div>
-      )}
-
-      <Composer bot={bot} replyToId={replyTo?.id} onClearReply={() => setReplyTo(null)} />
+      <Composer bot={bot} />
 
     </main>
   );
