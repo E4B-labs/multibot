@@ -83,6 +83,17 @@ body {
       zespołu, konektory) to `div`, nie `main`/`aside` — celowo poza regułą,
       bo i tak zasłaniają nagłówek pod spodem. */
 .multibot-frameless [data-shell-header] { -webkit-app-region: drag; }
+/* 3. Jedna linia na całej górze okna. Rząd nagłówka czatu ma 72 px (awatar
+      bota), nagłówki paneli same z siebie 50 px — ich przyciski stały o 11 px
+      wyżej niż kontrolki okna. Wspólna wysokość plus `items-center`, które
+      te nagłówki już mają, sadza wszystkie przyciski na tej samej osi.
+      Padding pionowy zerujemy, bo inaczej to on, a nie wysokość, decyduje,
+      gdzie wypadnie środek. */
+.multibot-frameless [data-shell-header] {
+  min-height: 72px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
 .multibot-frameless [data-shell-header] :is(button, a, input, select, textarea, [role="button"]) {
   -webkit-app-region: no-drag;
 }
