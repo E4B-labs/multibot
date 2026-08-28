@@ -9,6 +9,8 @@
 // the packaged app ships no node_modules.
 import * as electronNs from "electron";
 import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
+import path from "node:path";
 
 const require = createRequire(import.meta.url);
 
@@ -97,11 +99,31 @@ export function registerUpdaterIpc() {
   ipcMain.handle("update:install", () => {
     if (state.status !== "downloaded") return;
     try {
-      // multibot: NSIS per-user + silent (isSilent=true). Interaktywny dialog
-      // instalatora pod Windowsem wracał kodem 2 i ucinał relaunch, więc
-      // stara wersja wstawała z powrotem. Silent pomija ten dialog;
-      // forceRunAfter=true sam otwiera nową wersję po zamknięciu starej.
-      autoUpdater?.quitAndInstall(true, true);
+      // multibot: NIE używamy quitAndInstall — NSIS `--force-run` relanszuje
+      // aplikację przez skrót z Menu Start (StartApp → ExecShellAsUser
+      // "$launchLink"), co na części maszyn (jajowana asocjacja .lnk) kończy
+      // się oknem „Z tym plikiem nie jest skojarzona aplikacja…” (Kacper,
+      // długo). Relaunch robimy sami: cmd czeka na instalatora (start /wait),
+      // potem odpala świeżo zapisany exe bezpośrednio, zero skrótów.
+      const installerPath = autoUpdater?.installerPath;
+      const exePath = app.getPath("exe");
+      const installDir = path.dirname(exePath);
+      if (!installerPath) {
+        setState({ status: "downloaded" });
+        return;
+      }
+      const hasSpaces = /\s/.test(installDir);
+      const installArgs = hasSpaces
+        ? `start "" /wait "${installerPath}" /S --updated`
+        // NSIS wymaga /D= jako OSTATNIEGO parametru, bez cudzysłowów
+        : `start "" /wait "${installerPath}" /S --updated /D=${installDir}`;
+      const cmd = `${installArgs} & start "" "${exePath}"`;
+      spawn("cmd.exe", ["/d", "/s", "/c", cmd], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }).unref();
+      setImmediate(() => app.quit());
     } catch {
       // Przy awarii instalacji NIE pokazujemy karty błędu — wracamy do
       // „downloaded", żeby użytkownik mógł ponowić z poziomu Updates.
@@ -147,7 +169,8 @@ export function startUpdater(mainWindow, deps = {}) {
   // multibot: pierwszy check OD RAZU przy starcie — karta z nową wersją ma
   // wskoczyć razem z interfejsem, nie po 15 s czekania jak dotychczas. To
   // sprawdzenie jest rutyną w tle, więc porażka (sieć jeszcze nie wstała)
-  // idzie cicho i ponowi się za minutę; dalej co godzinę.
+  // idzie cicho i ponowi się za minutę; dalej co 15 sekund (LEKKO — Kacper):
+  // latest.yml to 359 B, więc tuczenie kanału jest pomijalne.
   checkNow({ background: true });
-  setInterval(() => checkNow({ background: true }), 60 * 60 * 1000).unref?.();
+  setInterval(() => checkNow({ background: true }), 15_000).unref?.();
 }

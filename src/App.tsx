@@ -24,7 +24,6 @@ import { SkillsPanel } from "@/components/SkillsPanel";
 import { GroupPanel } from "@/components/GroupPanel";
 import { RoomPanel } from "@/components/RoomPanel";
 import { MailPanel } from "@/components/MailPanel";
-import { UpdateBanner } from "@/components/UpdateBanner";
 // multibot: własne min/max/zamknij — okno bez ramki systemowej (Windows,
 // Linux). Komponent sam sprawdza mostek preloadu i w przeglądarce oraz pod
 // macOS nie rysuje niczego.
@@ -185,8 +184,6 @@ function Shell() {
   }, [state.bots]);
   return (
     <div className={cn("multibot-shell flex h-full flex-col", frameless && "multibot-frameless")}>
-      {/* fixed-position popup, bottom-left — outside the layout flow */}
-      <UpdateBanner />
       {/* multibot: Cmd/Ctrl+K command palette — fixed overlay, renders null until opened */}
       <CmdK />
       <div className="relative flex min-h-0 flex-1">

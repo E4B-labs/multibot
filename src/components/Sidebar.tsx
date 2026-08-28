@@ -34,6 +34,8 @@ import { authFetch } from "@/lib/auth";
 import { engineOnline } from "@/lib/engineStatus";
 import { getLanguage, useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
+// multibot: czerwony wykrzyknik na ikonie ustawień — jest widoczna aktualizacja
+import { useUpdaterState } from "@/lib/updater";
 
 const isElectron = navigator.userAgent.includes("Electron");
 
@@ -810,6 +812,26 @@ function GroupsSection({
   );
 }
 
+/** multibot: czerwony wykrzyknik w prawym górnym rogu ikony ustawień —
+ *  widnieje, dopóki jest aktualizacja dostępna albo gotowa do restartu.
+ *  Powiadomienia bez .lnk-owych baniek: same ikony, zero nakładek na tekst. */
+function UpdateBadge() {
+  const s = useUpdaterState();
+  if (!s || (s.status !== "available" && s.status !== "downloaded" && s.status !== "downloading")) return null;
+  const label = s.status === "available"
+    ? "Update available"
+    : "Update downloading";
+  return (
+    <span
+      aria-hidden
+      className="absolute -right-0.5 -top-0.5 flex size-3.5 items-center justify-center rounded-full bg-danger text-[10px] font-bold leading-none text-danger-ink"
+      title={label}
+    >
+      !
+    </span>
+  );
+}
+
 export function Sidebar() {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
@@ -1276,7 +1298,10 @@ export function Sidebar() {
             className="flex w-full items-center justify-center rounded-xl py-2 text-ink-secondary hover:bg-raised/50 hover:text-ink"
             title={polish ? "Ustawienia aplikacji" : "App settings"}
           >
-            <Settings size={20} />
+            <span className="relative inline-flex">
+              <Settings size={20} />
+              <UpdateBadge />
+            </span>
           </button>
         ) : (
         <div className="flex items-center">
@@ -1291,7 +1316,10 @@ export function Sidebar() {
             className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
             title={polish ? "Ustawienia aplikacji" : "App settings"}
           >
-            <Settings size={18} />
+            <span className="relative inline-flex">
+              <Settings size={18} />
+              <UpdateBadge />
+            </span>
           </button>
         </div>
         )}
