@@ -920,8 +920,12 @@ export function Sidebar() {
         collapsed ? "w-[80px]" : "w-[320px]",
       )}
     >
-      {/* Titlebar: real traffic lights in Electron, faux ones in the browser */}
+      {/* Titlebar: real traffic lights in Electron, faux ones in the browser.
+          multibot: data-shell-rail-top = przy oknie bez ramki ten rząd rośnie
+          o 4 px, żeby jego przyciski stanęły w linii z kontrolkami okna
+          (src/styles.css) */}
       <div
+        data-shell-rail-top
         className={cn(
           "flex items-center px-4 pt-3.5 pb-1",
           collapsed ? "justify-center" : "justify-between",
@@ -1002,9 +1006,10 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search — multibot: data-shell-rail-search oddaje te 4 px, o które
+          urósł rząd nad nim, żeby pole zostało dokładnie tam, gdzie było */}
       {!collapsed && (
-        <div className="px-3 pt-2 pb-3">
+        <div data-shell-rail-search className="px-3 pt-2 pb-3">
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}

@@ -97,6 +97,18 @@ body {
 .multibot-frameless [data-shell-header] :is(button, a, input, select, textarea, [role="button"]) {
   -webkit-app-region: no-drag;
 }
+/* 4. Szyna boczna. Jej rząd (zwiń panel + dodaj bota) ma 46 px, więc przyciski
+      siedziały 8 px wyżej niż reszta. Nie da się ich podnieść samym
+      wyrównaniem: przycisk ma 28 px, środek na 36 px stawia go na 22-50 px,
+      czyli rząd musi mieć 50 px. Te 4 px odbieramy odstępowi nad polem
+      „Szukaj" (pt-2 → 4 px), żeby pole zostało tam, gdzie stało: 50 + 4 = 54,
+      dokładnie tyle co wcześniej 46 + 8. */
+.multibot-frameless [data-shell-rail-top] {
+  padding-top: 22px;
+  padding-bottom: 0;
+}
+.multibot-frameless [data-shell-rail-search] { padding-top: 4px; }
+
 .multibot-frameless > .relative > main:last-child > [data-shell-header],
 .multibot-frameless > .relative > aside:last-child > [data-shell-header] {
   padding-right: 114px;
