@@ -1,7 +1,10 @@
 // App-level settings screen: who you are + credentials
 // shared by all bots. Per-bot settings (name, persona, model, computer)
 // live in SettingsPanel; contextual Box-token entry stays in ComputerPanel.
-import { ArrowLeft, FileDown, Loader2, Plus, QrCode, RefreshCw, SlidersHorizontal, Trash2, Wrench } from "lucide-react";
+import { ArrowLeft, FileDown, Loader2, Plus, QrCode, Trash2 } from "lucide-react";
+// multibot: ikony szyny sekcji przerysowane z lucide, żeby dało się animować
+// ich części na kliknięcie (suwaki jeżdżą, strzałki się kręcą, klucz dokręca).
+import { RefreshTabIcon, SlidersTabIcon, WrenchTabIcon } from "./SettingsTabIcons";
 import { useEffect, useState } from "react";
 import { useStore } from "@/state/store";
 import { ApiKeyRow } from "./ApiKeys";
@@ -815,7 +818,7 @@ function UpdatesRow() {
 const settingsTabs = [
   {
     id: "general",
-    Icon: SlidersHorizontal,
+    Icon: SlidersTabIcon,
     pl: "Ogólne",
     en: "General",
     descriptionPl: "Język, profil, wygląd i połączenia.",
@@ -823,7 +826,7 @@ const settingsTabs = [
   },
   {
     id: "update",
-    Icon: RefreshCw,
+    Icon: RefreshTabIcon,
     pl: "Aktualizacje",
     en: "Updates",
     descriptionPl: "Sprawdź i zainstaluj aktualizacje aplikacji.",
@@ -831,7 +834,7 @@ const settingsTabs = [
   },
   {
     id: "other",
-    Icon: Wrench,
+    Icon: WrenchTabIcon,
     pl: "Narzędzia",
     en: "Tools",
     descriptionPl: "Dostęp, modele, usługa lokalna i diagnostyka.",
@@ -892,6 +895,8 @@ export function AppSettingsPanel() {
                 className={cn(
                   // multibot: wciśnięcie zjeżdża do 92% — w dół, nigdy w górę,
                   // więc przycisk nie wychodzi poza swoje miejsce w szynie.
+                  // Żadnej kolorowej nakładki na kafelku: na kliknięcie rusza
+                  // się wnętrze ikony, a nie tło pod nią (Kacper 28.08).
                   "relative flex size-11 items-center justify-center rounded-xl",
                   "transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.92]",
                   "before:absolute before:left-0 before:h-5 before:w-0.5 before:rounded-full",
@@ -900,18 +905,9 @@ export function AppSettingsPanel() {
                     : "text-ink-secondary hover:bg-raised/70 hover:text-ink before:bg-transparent",
                 )}
               >
-                {press.tab === id && (
-                  // Plamka rozchodzi się od środka do krawędzi przycisku i
-                  // gaśnie. `inset-0` plus skala kończąca się na 1 trzymają ją
-                  // w obrysie — nie ma jak najechać na sąsiednią ikonę.
-                  <span
-                    key={press.nth}
-                    data-settings-tab-press
-                    aria-hidden
-                    className="animate-settings-tab-press pointer-events-none absolute inset-0 rounded-xl bg-accent/35"
-                  />
-                )}
-                <Icon size={19} strokeWidth={2} className="relative" />
+                {/* key = numer kliknięcia: przemontowanie puszcza animację od
+                    nowa, także gdy klikniesz w już wybraną sekcję */}
+                <Icon key={press.nth} size={19} playing={press.tab === id} />
               </button>
             );
           })}
