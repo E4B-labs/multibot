@@ -849,7 +849,7 @@ export function AppSettingsPanel() {
 
   return (
     <main className="app-settings-screen animate-panel-in flex min-h-0 min-w-0 flex-1 flex-col bg-app">
-      <header className="flex shrink-0 items-center justify-between border-b border-hairline/40 bg-panel px-6 py-4 lg:px-10">
+      <header data-shell-header className="flex shrink-0 items-center justify-between border-b border-hairline/40 bg-panel px-6 py-4 lg:px-10">
         <div>
           <h1 className="text-[18px] font-semibold tracking-[-0.02em] text-ink">{polish ? "Ustawienia aplikacji" : "App Settings"}</h1>
           <p className="mt-1 text-[13px] text-ink-secondary">{polish ? "Konfiguracja wspólna dla całego MultiBota." : "Settings shared across your MultiBot workspace."}</p>

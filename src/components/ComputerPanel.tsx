@@ -406,7 +406,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     <>
       <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3">
+        <div data-shell-header className="flex items-center justify-between px-4 py-3">
           <button
             onClick={() => dispatch({ type: "toggleSettings", open: true })}
             className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"

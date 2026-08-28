@@ -25,6 +25,15 @@ const SERVER_ONLY = process.argv.includes("--server-only");
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+// multibot: Windows i Linux jadą bez ramki systemowej — jasny pasek tytułu
+// z ikoną i min/max/close siedział osobnym pasem nad interfejsem, więc
+// kontrolki okna rysuje sobie sam interfejs (src/components/WindowControls.tsx)
+// w tym samym rzędzie co reszta przycisków. macOS zostaje na ramce systemowej:
+// tam okno i tak nie ma paska tytułu, a światła sygnalizacyjne daje system.
+// Preload czyta ten sam warunek — obie strony muszą zgadzać się co do tego,
+// kto rysuje kontrolki, bo inaczej okna albo nie da się zamknąć, albo dostaje
+// dwa komplety przycisków.
+const CUSTOM_WINDOW_CHROME = process.platform !== "darwin";
 
 // multibot: one desktop app per user session. The headless --server-only
 // Task Scheduler instance must NOT take the lock — it has no window, so a
@@ -314,11 +323,14 @@ function createWindow() {
     minHeight: 600,
     icon: APP_ICON,
     backgroundColor: "#070707",
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 16 },
+    ...(CUSTOM_WINDOW_CHROME
+      ? { frame: false }
+      : { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 16 } }),
     // Pasek menu (File/Edit/View/Host/Window) schowany — Kacper 21.08. Menu
     // zostaje zbudowane, bo niesie role schowka i skrót Ctrl+Shift+H do
-    // zmiany hosta; Alt pokazuje pasek na chwilę, gdy ktoś go potrzebuje.
+    // zmiany hosta; pod macOS Alt pokazuje pasek na chwilę, gdy ktoś go
+    // potrzebuje. Bez ramki (Windows, Linux) paska nie ma czym pokazać —
+    // zostają same skróty.
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -378,6 +390,19 @@ function createWindow() {
   });
   void loadActiveTarget(win);
   return win;
+}
+
+// multibot: własne kontrolki okna. Bez ramki systemowej nic poza tymi trzema
+// kanałami nie zminimalizuje ani nie zamknie okna, więc rejestrujemy je
+// dokładnie tam, gdzie ramkę zdjęliśmy — pod macOS robi to system.
+if (CUSTOM_WINDOW_CHROME) {
+  ipcMain.on("window:minimize", () => mainWindow?.minimize());
+  ipcMain.on("window:toggle-maximize", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+  });
+  ipcMain.on("window:close", () => mainWindow?.close());
 }
 
 // multibot (C2): small native window for switching between the local

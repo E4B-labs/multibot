@@ -115,7 +115,7 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
   return (
     <main className="animate-panel-in flex h-full min-w-0 flex-1 flex-col bg-app">
       {/* Header — ten sam rytm co zwykły panel agenta */}
-      <div className="flex items-center px-5 py-3">
+      <div data-shell-header className="flex items-center px-5 py-3">
         <div className="flex min-w-0 items-center gap-2.5">
           {members.length > 0 ? (
             <div className="flex -space-x-2 shrink-0">

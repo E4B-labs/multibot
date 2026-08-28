@@ -31,6 +31,15 @@ declare global {
        * absent in plain browsers, so callers must feature-detect. */
       setUnreadCount?(count: number): void;
       exportDiagnostics?(): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
+      /** Własne kontrolki okna. Preload wystawia je tylko tam, gdzie ramka
+       * systemowa jest zdjęta (Windows, Linux) — nieobecne pod macOS i w
+       * przeglądarce, więc obecność tego pola jest sygnałem, że interfejs
+       * ma narysować min/max/zamknij sam. */
+      window?: {
+        minimize(): void;
+        toggleMaximize(): void;
+        close(): void;
+      };
       /** In-app auto-update (packaged app only; dormant in dev). onState
        * fires immediately with the current state, then on transitions. */
       updater?: {

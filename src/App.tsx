@@ -23,6 +23,15 @@ import { SkillsPanel } from "@/components/SkillsPanel";
 import { GroupPanel } from "@/components/GroupPanel";
 import { RoomPanel } from "@/components/RoomPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
+// multibot: własne min/max/zamknij — okno bez ramki systemowej (Windows,
+// Linux). Komponent sam sprawdza mostek preloadu i w przeglądarce oraz pod
+// macOS nie rysuje niczego.
+import { WindowControls } from "@/components/WindowControls";
+import { cn } from "@/lib/cn";
+import { hasCustomWindowControls } from "@/lib/shell";
+// multibot: stała, bo mostek preloadu jest na miejscu, zanim renderer wykona
+// pierwszą linię — okno nie zmienia ramki w trakcie życia.
+const frameless = hasCustomWindowControls();
 // multibot: Cmd/Ctrl+K paleta komend
 import { CmdK } from "@/components/CmdK";
 import { authEventName, authFetch, clearAuthToken, getAuthToken, setAuthToken } from "@/lib/auth";
@@ -160,9 +169,13 @@ function Shell() {
     window.ogb?.setUnreadCount?.(unreadConversationCount(state.bots));
   }, [state.bots]);
   return (
-    <div className="multibot-shell flex h-full flex-col">
+    <div className={cn("multibot-shell flex h-full flex-col", frameless && "multibot-frameless")}>
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
+      {/* multibot: kontrolki okna siedzą poza układem, bo nagłówek czatu
+          znika przy ustawieniach aplikacji i przy pustym stanie, a zamknąć
+          okno trzeba dać się zawsze */}
+      <WindowControls />
       {/* multibot: Cmd/Ctrl+K command palette — fixed overlay, renders null until opened */}
       <CmdK />
       <div className="relative flex min-h-0 flex-1">

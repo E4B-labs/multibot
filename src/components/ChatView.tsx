@@ -451,8 +451,10 @@ export function ChatView({ bot }: { bot: Bot }) {
         }
       }}
     >
-      {/* Header — avatar always visible; special animation when bot is working */}
-      <div className="flex items-center justify-between px-5 py-3">
+      {/* Header — avatar always visible; special animation when bot is working.
+          multibot: data-shell-header = ten rząd zastępuje pasek tytułu okna
+          bez ramki (przeciąganie + rezerwa pod kontrolkami, src/styles.css) */}
+      <div data-shell-header className="flex items-center justify-between px-5 py-3">
         <button
           onClick={() => dispatch({ type: "toggleSettings" })}
           className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-raised/50"

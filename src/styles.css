@@ -66,6 +66,31 @@ body {
   overflow: hidden;
 }
 
+/* multibot: okno bez ramki systemowej (Windows, Linux — patrz
+   electron/main.mjs `frame:false`). Reguły włącza klasa na powłoce, więc
+   przeglądarka i macOS ich nie widzą.
+
+   1. Nagłówki oznaczone `data-shell-header` przejmują rolę paska tytułu:
+      za nie przeciąga się okno. Wszystko klikalne w środku musi być
+      `no-drag`, inaczej klik przesuwa okno zamiast działać.
+   2. Własne min/max/zamknij wiszą w prawym górnym rogu okna
+      (src/components/WindowControls.tsx: 3 × 30 px + odstępy + pr-3 = 106 px,
+      plus 8 px przerwy = 114 px). Zasłoniłyby nagłówek tego panelu, który
+      akurat stoi przy prawej krawędzi — a stoi tam za każdym razem inny:
+      czat, grupa, pokój, ustawienia aplikacji, skille, rutyny, komputer,
+      inspektor. `:last-child` wybiera go sam, więc żaden z nich nie musi
+      o tym wiedzieć ani dostawać propa. Overlaye na całą powłokę (mapa
+      zespołu, konektory) to `div`, nie `main`/`aside` — celowo poza regułą,
+      bo i tak zasłaniają nagłówek pod spodem. */
+.multibot-frameless [data-shell-header] { -webkit-app-region: drag; }
+.multibot-frameless [data-shell-header] :is(button, a, input, select, textarea, [role="button"]) {
+  -webkit-app-region: no-drag;
+}
+.multibot-frameless > .relative > main:last-child > [data-shell-header],
+.multibot-frameless > .relative > aside:last-child > [data-shell-header] {
+  padding-right: 114px;
+}
+
 /* multibot: G5 — phone layout keeps bot list first, then full-width chat/panel.
    Existing desktop spacing and motion remain unchanged. */
 @media (max-width: 700px) {

@@ -2,6 +2,11 @@
 // this narrow surface (window.ogb), never Node or ipcRenderer itself.
 const { contextBridge, ipcRenderer } = require("electron");
 
+// multibot: ten sam warunek co CUSTOM_WINDOW_CHROME w main.mjs. Gdzie ramkę
+// systemową zdjęliśmy, tam interfejs musi dostać własne min/max/close; na
+// macOS pole zostaje nieobecne, więc React nie rysuje niczego zbędnego.
+const customWindowChrome = process.platform !== "darwin";
+
 contextBridge.exposeInMainWorld("ogb", {
   /** One frame of this Mac's screen as a data: URL (Screen Recording TCC). */
   screenFrame: () => ipcRenderer.invoke("screen:frame"),
@@ -37,6 +42,17 @@ contextBridge.exposeInMainWorld("ogb", {
    * macOS/Linux dock badge). Fire-and-forget; dormant in plain browsers. */
   setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
+
+  /** Własne kontrolki okna — obecne wyłącznie tam, gdzie okno leci bez ramki
+   * systemowej (Windows, Linux). Nieobecne pod macOS i w przeglądarce, więc
+   * ich obecność jest dla interfejsu jedynym sygnałem "rysujesz je sam". */
+  window: customWindowChrome
+    ? {
+        minimize: () => ipcRenderer.send("window:minimize"),
+        toggleMaximize: () => ipcRenderer.send("window:toggle-maximize"),
+        close: () => ipcRenderer.send("window:close"),
+      }
+    : undefined,
 
   /** In-app auto-update. State object:
    *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",

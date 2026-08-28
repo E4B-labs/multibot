@@ -21,7 +21,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const close = () => window.dispatchEvent(new CustomEvent("mb:inspector:close"));
   return (
     <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
-      <div className="flex items-center justify-between px-4 py-3">
+      <div data-shell-header className="flex items-center justify-between px-4 py-3">
         <button type="button" onClick={close} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={polish ? "Wstecz" : "Back"}><ChevronLeft size={18} /></button>
         <span className="text-[15px] font-semibold text-ink">Inspector</span>
         <button type="button" onClick={close} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={polish ? "Zamknij" : "Close"}><X size={18} /></button>
