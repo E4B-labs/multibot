@@ -26,7 +26,7 @@ import {
 import { useStore, formatTime, type Bot, type EngineGroup } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { ScoutTeamModal } from "./ScoutTeamModal";
-import { stateForBot } from "@/lib/mascot";
+import { busyMascotMotion, stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { plainPreview } from "@/lib/plainPreview";
 import { authFetch } from "@/lib/auth";
@@ -388,6 +388,7 @@ function BotListItem({
   // podświetlony (inaczej świecą dwa: grupa i ostatni bot).
   const selected = state.selectedId === bot.id && !state.groupOpen;
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
+  const busyMotion = bot.busy ? busyMascotMotion(bot.id) : null;
   const lang = useLanguage();
   const last = bot.messages[bot.messages.length - 1];
   return (
@@ -417,10 +418,10 @@ function BotListItem({
       <MausAvatar
         color={bot.color}
         shape={bot.mascotShape}
-        state={stateForBot(bot)}
+        state={busyMotion?.state ?? stateForBot(bot)}
         size={48}
-        motion={mascotMotion?.kind ?? "none"}
-        motionKey={mascotMotion?.nonce ?? 0}
+        motion={busyMotion?.motion ?? mascotMotion?.kind ?? "none"}
+        motionKey={busyMotion ? 1 : mascotMotion?.nonce ?? 0}
       />
       {/* multibot: nazwa i podgląd znikają w szynie, ale kropka zostaje —
           to jedyny sygnał „coś się tu dzieje", jaki tam przeżył. Ta sama
@@ -1154,7 +1155,6 @@ export function Sidebar() {
                 return (
                   <button
                     key={b.id}
-                    title={b.description?.trim() || preview(b)}
                     onClick={() => dispatch({ type: "select", id: b.id })}
                     onContextMenu={(e) => {
                       e.preventDefault();
@@ -1170,8 +1170,10 @@ export function Sidebar() {
                     <MausAvatar
                       color={b.color}
                       shape={b.mascotShape}
-                      state={stateForBot(b)}
+                      state={b.busy ? busyMascotMotion(b.id).state : stateForBot(b)}
                       size={avatarSize}
+                      motion={b.busy ? busyMascotMotion(b.id).motion : "none"}
+                      motionKey={b.busy ? 1 : 0}
                     />
                     <span className="w-full truncate text-center text-[12px] font-medium leading-tight text-ink">
                       {botDisplayName(b, lang)}

@@ -103,3 +103,16 @@ test("po udanym sprawdzeniu bez aktualizacji wraca idle i karta milczy", async (
   const last = win.sent.at(-1);
   assert.equal(last.status, "idle");
 });
+
+test("pobranie aktualizacji nie zamyka aplikacji automatycznie", async () => {
+  const { startUpdater } = await freshModule();
+  const fake = fakeUpdater();
+  let installs = 0;
+  fake.quitAndInstall = () => { installs += 1; };
+  const win = fakeWindow();
+  startUpdater(win, { isPackaged: true, loadUpdater: () => ({ autoUpdater: fake }) });
+  fake.emit("update-available", { version: "0.1.97" });
+  fake.emit("update-downloaded", { version: "0.1.97" });
+  assert.equal(installs, 0);
+  assert.equal(win.sent.at(-1).status, "downloaded");
+});

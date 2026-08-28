@@ -47,6 +47,8 @@ interface BotWorkspace {
   usage: WorkspaceUsage;
 }
 
+const TEAM_MEMORY_ID = "__team__";
+
 const DEFAULT_PERMISSIONS = {
   browser: true,
   delegation: true,
@@ -103,6 +105,32 @@ export class WorkspaceStore {
 
   deleteBot(botId: string): void {
     if (delete this.data[botId]) this.save();
+  }
+
+  /** Shared memory for every member and every bot in this server workspace. */
+  teamFacts(query = ""): WorkspaceFact[] {
+    const needle = query.trim().toLowerCase();
+    return structuredClone(this.get(TEAM_MEMORY_ID).facts.filter((fact) => !needle || fact.text.toLowerCase().includes(needle)));
+  }
+
+  addTeamFact(value: { text?: unknown; source?: unknown }): WorkspaceFact {
+    return this.addFact(TEAM_MEMORY_ID, value);
+  }
+
+  patchTeamFact(id: string, value: { text?: unknown; source?: unknown }): WorkspaceFact | null {
+    return this.patchFact(TEAM_MEMORY_ID, id, value);
+  }
+
+  deleteTeamFact(id: string): boolean {
+    return this.deleteFact(TEAM_MEMORY_ID, id);
+  }
+
+  teamMarkdown(): { content: string } {
+    return this.markdown(TEAM_MEMORY_ID);
+  }
+
+  putTeamMarkdown(content: unknown): { content: string } {
+    return this.putMarkdown(TEAM_MEMORY_ID, content);
   }
 
   facts(botId: string, query = ""): WorkspaceFact[] {

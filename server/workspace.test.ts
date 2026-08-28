@@ -53,6 +53,17 @@ describe("driver-neutral workspace", () => {
     expect(store.autonomy("bot")).toEqual({ autonomy: "autonomous" });
   });
 
+  it("keeps team memory separate from each bot memory", () => {
+    const { store } = make();
+    const botFact = store.addFact("bot-a", { text: "private note" });
+    const teamFact = store.addTeamFact({ text: "shared decision" });
+    store.putTeamMarkdown("# Team rules");
+    expect(store.facts("bot-a")).toContainEqual(botFact);
+    expect(store.facts("bot-a")).not.toContainEqual(teamFact);
+    expect(store.teamFacts()).toContainEqual(teamFact);
+    expect(store.teamMarkdown()).toEqual({ content: "# Team rules" });
+  });
+
   it("normalizes usage and deletes scoped records", () => {
     const { store } = make();
     store.recordTokens("bot", 12, 5);

@@ -24,6 +24,7 @@ const DEFAULT_CERT_MAX_AGE_MS = 3_600_000;
 export interface FirebaseIdTokenClaims {
   uid: string;
   email?: string;
+  name?: string;
 }
 
 /** kid -> PEM (X.509 cert or bare public key both work with createPublicKey)
@@ -122,7 +123,11 @@ export async function verifyFirebaseIdToken(
   const sub = typeof payload.sub === "string" ? payload.sub.trim() : "";
   if (!sub) throw new FirebaseAuthError("missing subject");
 
-  return { uid: sub, email: typeof payload.email === "string" ? payload.email : undefined };
+  return {
+    uid: sub,
+    email: typeof payload.email === "string" ? payload.email : undefined,
+    name: typeof payload.name === "string" ? payload.name : undefined,
+  };
 }
 
 // ── 2. Device sessions ──────────────────────────────────────────────────
@@ -134,6 +139,8 @@ export interface DeviceSession {
    * (the actual cookie value) is never stored or returned again. */
   id: string;
   uid: string;
+  email?: string;
+  name?: string;
   label: string;
   createdAt: number;
   lastSeenAt: number;
@@ -145,11 +152,19 @@ function hashSessionId(sessionId: string): Buffer {
 
 /** Creates a session for `uid` and returns the raw (opaque) session id to
  * set as the cookie value. Only its hash is persisted. */
-export function createDeviceSession(uid: string, label: string): string {
+export function createDeviceSession(uid: string, label: string, profile: { email?: string; name?: string } = {}): string {
   const raw = randomBytes(32).toString("hex");
   const id = hashSessionId(raw).toString("hex");
   const now = Date.now();
-  const record: DeviceSession = { id, uid, label, createdAt: now, lastSeenAt: now };
+  const record: DeviceSession = {
+    id,
+    uid,
+    label,
+    ...(profile.email ? { email: profile.email } : {}),
+    ...(profile.name ? { name: profile.name } : {}),
+    createdAt: now,
+    lastSeenAt: now,
+  };
   saveConfig({ deviceSessions: { [id]: record } });
   return raw;
 }
@@ -250,4 +265,87 @@ export function authorizeOwner(uid: string, ctx: { loopback: boolean; bearerAuth
     throw new FirebaseAuthError("owner binding requires loopback or the existing access token");
   }
   saveConfig({ firebase: { ownerUid: uid } });
+}
+
+export type WorkspaceRole = "owner" | "member";
+
+export interface WorkspaceActor {
+  uid: string;
+  email?: string;
+  name?: string;
+  role: WorkspaceRole;
+}
+
+/** Creates short-lived, one-use join codes. Raw code never persists. */
+export function createWorkspaceInvite(createdBy: string): { code: string; expiresAt: number } {
+  const code = randomBytes(18).toString("base64url");
+  const id = createHash("sha256").update(code, "utf8").digest("hex");
+  const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  saveConfig({ firebase: { invites: { [id]: { createdBy, createdAt: Date.now(), expiresAt } } } });
+  return { code, expiresAt };
+}
+
+function inviteIsValid(code: string, uid: string): boolean {
+  if (!code.trim()) return false;
+  const id = createHash("sha256").update(code.trim(), "utf8").digest("hex");
+  const cfg = loadConfig();
+  const invite = cfg.firebase?.invites?.[id];
+  if (!invite || invite.usedBy || invite.expiresAt <= Date.now()) return false;
+  saveConfig({ firebase: { invites: { [id]: { ...invite, usedBy: uid, usedAt: Date.now() } } } });
+  return true;
+}
+
+/** Registers owner/member and rejects unknown remote users without invite. */
+export function authorizeWorkspaceUser(
+  uid: string,
+  profile: { email?: string; name?: string },
+  ctx: { loopback: boolean; bearerAuthed: boolean; invite?: string },
+): WorkspaceActor {
+  const cfg = loadConfig();
+  const firebase = cfg.firebase ?? {};
+  const members = firebase.members ?? {};
+  const existing = members[uid];
+  if (existing) {
+    const next = {
+      ...existing,
+      ...(profile.email ? { email: profile.email } : {}),
+      ...(profile.name ? { name: profile.name } : {}),
+    };
+    if (JSON.stringify(next) !== JSON.stringify(existing)) saveConfig({ firebase: { members: { [uid]: next } } });
+    return next;
+  }
+  if (!firebase.ownerUid) {
+    authorizeOwner(uid, ctx);
+    const owner = { uid, ...profile, role: "owner" as const, joinedAt: Date.now() };
+    saveConfig({ firebase: { members: { [uid]: owner } } });
+    return owner;
+  }
+  if (firebase.ownerUid !== uid && !inviteIsValid(ctx.invite ?? "", uid)) {
+    throw new FirebaseAuthError("server invite required");
+  }
+  const member = { uid, ...profile, role: firebase.ownerUid === uid ? ("owner" as const) : ("member" as const), joinedAt: Date.now() };
+  saveConfig({ firebase: { members: { [uid]: member } } });
+  return member;
+}
+
+export function workspaceMembers(): WorkspaceActor[] {
+  return Object.values(loadConfig().firebase?.members ?? {}).map((member) => ({
+    uid: member.uid,
+    email: member.email,
+    name: member.name,
+    role: member.role,
+  }));
+}
+
+export function updateWorkspaceProfile(uid: string, profile: { name?: string; email?: string }): WorkspaceActor | null {
+  const cfg = loadConfig();
+  const existing = cfg.firebase?.members?.[uid];
+  if (!existing) return null;
+  const next = {
+    ...existing,
+    ...(profile.name !== undefined ? { name: profile.name.trim().slice(0, 120) } : {}),
+    ...(profile.email !== undefined ? { email: profile.email.trim().toLowerCase().slice(0, 240) } : {}),
+  };
+  saveConfig({ firebase: { members: { [uid]: next } } });
+  return next;
 }

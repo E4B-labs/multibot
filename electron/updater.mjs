@@ -29,7 +29,6 @@ let win = null;
 // status: idle | checking | available | downloading | downloaded | error
 let state = { status: "idle" };
 // set by the renderer's "Aktualizuj" click — one button downloads AND installs
-let installWhenDownloaded = false;
 // stan sprzed rutynowego sprawdzenia w tle — gdy ono polegnie, wracamy do niego,
 // żeby nie zgubić np. „available" z wcześniejszego udanego sprawdzenia
 let preCheckState = null;
@@ -62,7 +61,6 @@ export function checkNow({ background = false } = {}) {
 }
 
 function checkFailed(e) {
-  installWhenDownloaded = false;
   if (preCheckState && (state.status === "idle" || state.status === "checking")) {
     setState(preCheckState, { replace: true });
     preCheckState = null;
@@ -87,17 +85,17 @@ export function registerUpdaterIpc() {
   // against latest.yml), so the renderer can at most trigger the one
   // legitimate update; it never picks what gets installed.
   ipcMain.handle("update:download", () => {
+    if (state.status !== "available") return;
     try {
-      installWhenDownloaded = true;
       autoUpdater?.downloadUpdate();
     } catch (e) {
       setState({ status: "error", message: String(e?.message ?? e) });
     }
   });
   ipcMain.handle("update:install", () => {
-    // isSilent, isForceRunAfter — relaunch straight into the new version
+    if (state.status !== "downloaded") return;
     try {
-      autoUpdater?.quitAndInstall(true, true);
+      autoUpdater?.quitAndInstall(false, true);
     } catch (e) {
       setState({ status: "error", message: String(e?.message ?? e) });
     }
@@ -134,16 +132,6 @@ export function startUpdater(mainWindow, deps = {}) {
   );
   autoUpdater.on("update-downloaded", (info) => {
     setState({ status: "downloaded", version: info?.version });
-    // one click = download + install; the "Restart to update" button stays
-    // as the fallback when the download wasn't started from that click
-    if (installWhenDownloaded) {
-      installWhenDownloaded = false;
-      try {
-        autoUpdater.quitAndInstall(true, true);
-      } catch (e) {
-        setState({ status: "error", message: String(e?.message ?? e) });
-      }
-    }
   });
   autoUpdater.on("error", (e) => checkFailed(e));
 

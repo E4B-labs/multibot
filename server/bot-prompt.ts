@@ -35,6 +35,8 @@ export interface WorkspaceLike {
   skills(botId: string): Array<{ name: string; instructions: string; enabled?: boolean }>;
   autonomy(botId: string): { autonomy: "approval" | "autonomous" };
   access(botId: string): { access: string };
+  teamMarkdown?(): { content: string };
+  teamFacts?(query?: string): Array<{ text: string }>;
 }
 
 /**
@@ -61,6 +63,7 @@ export function botSystemPrompt(
     tagged?: Array<{ id: string; name: string }>;
     taggedReplies?: string;
     roster?: BotLike[];
+    currentUser?: { uid: string; name?: string; email?: string };
   },
 ): string {
   const { workspace, integrations, isolated } = o;
@@ -68,11 +71,14 @@ export function botSystemPrompt(
   const taggedReplies = o.taggedReplies ?? "";
   const agents = Boolean(integrations.agents);
   const computer = Boolean(integrations.localComputer);
+  const currentUser = o.currentUser;
 
   // Driver-neutral workspace context. Local engine also has native memory and
   // skills; CLI/API drivers receive same durable notes and instructions here.
-  const sharedMemory = workspace.markdown(bot.id).content.trim();
-  const sharedFacts = workspace.facts(bot.id).slice(0, 40).map((fact) => `- ${fact.text}`).join("\n");
+  const botMemory = workspace.markdown(bot.id).content.trim();
+  const botFacts = workspace.facts(bot.id).slice(0, 40).map((fact) => `- ${fact.text}`).join("\n");
+  const teamMemory = workspace.teamMarkdown?.().content.trim() ?? "";
+  const teamFacts = workspace.teamFacts?.().slice(0, 40).map((fact) => `- ${fact.text}`).join("\n") ?? "";
   const sharedSkills = workspace.skills(bot.id).filter((skill) => skill.enabled !== false)
     .map((skill) => `## ${skill.name}\n${skill.instructions}`).join("\n\n");
   const autonomous = workspace.autonomy(bot.id).autonomy === "autonomous";
@@ -80,6 +86,7 @@ export function botSystemPrompt(
 
   const who = [
     "# Who you are",
+    currentUser && `# Current human user\nYou are answering ${currentUser.name || currentUser.email || currentUser.uid}. Their stable MultiBot user id is ${currentUser.uid}. Use this identity when addressing them or recording user-specific context. Never expose internal authentication tokens or secrets.`,
     [
       `You are ${bot.name}, a MultiBot Agent in the user's MultiBot workspace.`,
       bot.title && `Role: ${bot.title}.`,
@@ -102,7 +109,7 @@ export function botSystemPrompt(
     toolsText,
     "Use MultiBot workspace tools and APIs for memory, skills, routines, agents, groups, computer, files and terminal. Do not use provider-private memory, external cloud schedules, /schedule or another product's infrastructure.",
     agents &&
-      "Memory — `recall` before answering anything that predates this conversation, then `remember` whatever stays true tomorrow: a decision and its reason, a user preference, a client or project fact, a name, a price. Skip one-off details. `read_memory` returns your durable notes; never write provider-private memory files when the user asks for MultiBot memory.",
+      "Memory — `recall` before answering anything that predates this conversation, then `remember` facts that stay true tomorrow. This bot's memory is private to this bot. Use `recall_team` and `remember_for_team` only for decisions and facts every bot/member should share. `read_memory` and `read_team_memory` return durable MultiBot notes; never write provider-private memory files.",
     agents &&
       "Skills — when the user shows or describes a procedure you will repeat, call `create_skill` with a task-shaped name (`weekly client report`, not `skill 1`) and the steps as instructions; `list_skills` shows what you already have.",
     // multibot: prośby o rutynę idą prosto do zamontowanego narzędzia —
@@ -163,8 +170,10 @@ export function botSystemPrompt(
   ].join("\n");
 
   const knowledge = [
-    sharedFacts && `# Memory facts\n${sharedFacts}`,
-    sharedMemory && `# Memory notes\n${sharedMemory}`,
+    teamFacts && `# Shared team memory facts\n${teamFacts}`,
+    teamMemory && `# Shared team memory notes\n${teamMemory}`,
+    botFacts && `# Memory facts\n${botFacts}`,
+    botMemory && `# Memory notes\n${botMemory}`,
     sharedSkills && `# Reusable skills\n${sharedSkills}`,
   ].filter(Boolean).join("\n\n");
 

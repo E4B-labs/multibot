@@ -64,6 +64,8 @@ const MOTION_FACE: Partial<
   blink: { blink: true },
   surprise: { state: "surprised", blink: true },
   failure: { state: "sad" },
+  sending: { state: "sending" },
+  "thinking-dots": { state: "thinking" },
 };
 
 /** How long a one-shot motion holds its state before the bot's own returns. */
@@ -187,7 +189,7 @@ function MausAvatarComponent(
 
   return (
     <span
-      className="inline-flex shrink-0"
+      className="relative inline-flex shrink-0"
       onPointerMove={trackPointer && animated ? onPointerMove : undefined}
       onPointerLeave={trackPointer && animated ? onPointerLeave : undefined}
     >
@@ -208,6 +210,20 @@ function MausAvatarComponent(
         mouthStroke={mouthStroke}
         paused={!animated}
       />
+      {motion === "thinking-dots" && animated && (
+        <span
+          aria-label="Thinking"
+          className="pointer-events-none absolute -bottom-0.5 -right-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/70 px-1.5 py-1 motion-reduce:animate-none"
+        >
+          {[0, 1, 2].map((dot) => (
+            <span
+              key={dot}
+              className="size-1.5 rounded-full bg-white/90 animate-bounce motion-reduce:animate-none"
+              style={{ animationDelay: `${dot * 120}ms` }}
+            />
+          ))}
+        </span>
+      )}
     </span>
   );
 }

@@ -86,9 +86,19 @@ export const MAUS_MOTIONS = [
   "blink",
   "surprise",
   "failure",
+  "sending",
+  "thinking-dots",
 ] as const;
 
 export type MausMotion = "none" | (typeof MAUS_MOTIONS)[number];
+
+export function busyMascotMotion(botId: string): { state: MausState; motion: MausMotion } {
+  let hash = 0;
+  for (const char of botId) hash = (hash * 31 + char.charCodeAt(0)) | 0;
+  return (Math.abs(hash) % 2) === 0
+    ? { state: "sending", motion: "sending" }
+    : { state: "thinking", motion: "thinking-dots" };
+}
 
 /**
  * The face used to be ten hand-drawn SVGs; it is now the engine's 39 states.

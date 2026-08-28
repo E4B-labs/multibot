@@ -63,6 +63,9 @@ const TOOLS = [
   { name: "remember", description: "Save a durable fact to your memory.", inputSchema: { type: "object", properties: { text: { type: "string" }, source: { type: "string" } }, required: ["text"] } },
   { name: "recall", description: "Search your durable memory.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
   { name: "read_memory", description: "Read your Graph Memory and markdown memory.", inputSchema: { type: "object", properties: {} } },
+  { name: "remember_for_team", description: "Save a durable fact shared by all bots and members in this server workspace.", inputSchema: { type: "object", properties: { text: { type: "string" }, source: { type: "string" } }, required: ["text"] } },
+  { name: "recall_team", description: "Search shared team memory.", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
+  { name: "read_team_memory", description: "Read shared team memory notes and facts.", inputSchema: { type: "object", properties: {} } },
   { name: "create_skill", description: "Create a reusable skill for yourself.", inputSchema: { type: "object", properties: { name: { type: "string" }, description: { type: "string" }, instructions: { type: "string" } }, required: ["name", "instructions"] } },
   { name: "list_skills", description: "List your skills.", inputSchema: { type: "object", properties: {} } },
   { name: "create_routine", description: "Create a durable scheduled routine for yourself.", inputSchema: { type: "object", properties: { name: { type: "string" }, prompt: { type: "string" }, schedule: { type: "string" } }, required: ["name", "prompt"] } },
@@ -174,7 +177,8 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
   }
   const action: Record<string, string> = {
     get_my_profile: "profile.get", update_my_profile: "profile.update", remember: "memory.add", recall: "memory.list",
-    read_memory: "memory.graph", create_skill: "skills.create", list_skills: "skills.list", create_routine: "routines.create",
+    read_memory: "memory.graph", remember_for_team: "team.memory.add", recall_team: "team.memory.list", read_team_memory: "team.memory.graph",
+    create_skill: "skills.create", list_skills: "skills.list", create_routine: "routines.create",
     list_routines: "routines.list", run_routine: "routines.run", create_agent: "agent.create", update_agent: "agent.update",
     start_collab: "collab.start",
     list_groups: "groups.list", create_group: "groups.create", delete_group: "groups.delete", send_group_message: "groups.send", get_device_info: "device.info", read_file: "file.read",

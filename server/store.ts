@@ -75,6 +75,9 @@ export interface Message {
   /** multibot: flat reply — id wiadomości, na którą odpowiada ta wiadomość.
    * Addytywne i opcjonalne; stare zapisy czytają się bez migracji. */
   replyToId?: string;
+  /** Authenticated human author; absent on legacy/system messages. */
+  userId?: string;
+  userName?: string;
   at: number;
 }
 
@@ -89,6 +92,12 @@ export interface BotRecord {
   mascotExpression?: MausExpression | null;
   /** Optional silhouette from the built-in mascot icon set. */
   mascotShape?: MascotShape;
+  /** Team visibility. Missing legacy values behave as team-visible. */
+  visibility?: "public" | "team" | "private";
+  /** Firebase UID of creator; legacy bots have no owner and stay team-visible. */
+  ownerId?: string;
+  /** Firebase UIDs allowed to open a private bot. */
+  allowedUserIds?: string[];
   unread: boolean;
   /** multibot: sekcja sidebaru — pusta/nieobecna = lista główna. */
   section?: string;

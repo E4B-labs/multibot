@@ -15,7 +15,9 @@ import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-const clients = new Set<Duplex>();
+type EventFilter = (text: string) => boolean;
+type Client = { socket: Duplex; filter: EventFilter };
+const clients = new Set<Client>();
 
 /** Ramka serwer→klient jest niemaskowana (RFC 6455 §5.1). */
 function frame(opcode: number, payload: Buffer): Buffer {
@@ -77,11 +79,13 @@ function readClientFrames(socket: Duplex): (chunk: Buffer) => void {
 export function broadcastWs(text: string): void {
   if (!clients.size) return;
   const data = frame(0x1, Buffer.from(text, "utf8"));
-  for (const socket of [...clients]) {
+  for (const client of [...clients]) {
+    if (!client.filter(text)) continue;
+    const socket = client.socket;
     try {
       socket.write(data);
     } catch {
-      clients.delete(socket);
+      clients.delete(client);
       socket.destroy();
     }
   }
@@ -95,7 +99,7 @@ export function eventsWsClientCount(): number {
  *  i nadajnik pierwszej ramki. */
 export function mountEventsWs(
   server: Server,
-  onOpen: (url: URL, send: (text: string) => void) => void,
+  onOpen: (url: URL, send: (text: string) => void, req: IncomingMessage) => EventFilter | void,
 ): void {
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -114,7 +118,9 @@ export function mountEventsWs(
         "\r\n",
     );
     (socket as { setNoDelay?: (on: boolean) => void }).setNoDelay?.(true);
-    clients.add(socket);
+    const filter = onOpen(url, (text) => socket.write(frame(0x1, Buffer.from(text, "utf8"))), req) ?? (() => true);
+    const client = { socket, filter };
+    clients.add(client);
     // Ping co 25 s: ten sam odstęp co keepalive SSE, trzyma tunel przy życiu.
     const keepalive = setInterval(() => {
       try {
@@ -128,8 +134,7 @@ export function mountEventsWs(
     socket.on("error", () => socket.destroy());
     socket.on("close", () => {
       clearInterval(keepalive);
-      clients.delete(socket);
+      clients.delete(client);
     });
-    onOpen(url, (text) => socket.write(frame(0x1, Buffer.from(text, "utf8"))));
   });
 }

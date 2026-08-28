@@ -102,11 +102,15 @@ export async function pipeVncWs(req: IncomingMessage, socket: Duplex, head: Buff
 
 /** Mount the screen proxy's WebSocket half. The HTTP half is dispatched from
  *  the main router in index.ts, which already owns path matching. */
-export function mountVncUpgrade(server: Server): void {
+export function mountVncUpgrade(server: Server, canAccess: (req: IncomingMessage, botId: string) => boolean = () => true): void {
   server.on("upgrade", (req, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     const hit = matchVncRoute(url.pathname);
     if (!hit) return;
+    if (!canAccess(req, hit.botId)) {
+      socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      return;
+    }
     void pipeVncWs(req, socket, head, hit.rest, url.search);
   });
 }

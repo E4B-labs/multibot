@@ -121,7 +121,11 @@ export function mountAuth(server: Server, getToken: () => string, hasSession: Se
         // that is what it is trading the code for. The route rate-limits and
         // single-uses the code itself.
         url.pathname === "/api/pair/claim");
-    const authed = tokenMatches(requestToken(req), getToken()) || hasSession(req);
+    const bearerAuthed = tokenMatches(requestToken(req), getToken());
+    const sessionAuthed = hasSession(req);
+    const authed = bearerAuthed || sessionAuthed;
+    if (sessionAuthed) req.headers["x-multibot-auth"] = "session";
+    else if (bearerAuthed) req.headers["x-multibot-auth"] = "token";
     if (!publicRoute && !loggingIn && !internallyAuthenticated && !authed) {
       return unauthorized(res);
     }
@@ -138,10 +142,12 @@ export function mountAuth(server: Server, getToken: () => string, hasSession: Se
     // Authorization header, and a phone logging in with Google has no token.
     // The mobile WebView instead appends the bearer as ?token= on the
     // websockify upgrade — same gate, same credential.
-    const authed =
-      tokenMatches(requestToken(req), getToken()) ||
-      hasSession(req) ||
-      tokenMatches(vncUpgradeToken(req), getToken());
+    const bearerAuthed = tokenMatches(requestToken(req), getToken());
+    const sessionAuthed = hasSession(req);
+    const vncAuthed = tokenMatches(vncUpgradeToken(req), getToken());
+    const authed = bearerAuthed || sessionAuthed || vncAuthed;
+    if (sessionAuthed) req.headers["x-multibot-auth"] = "session";
+    else if (bearerAuthed) req.headers["x-multibot-auth"] = "token";
     if (!authed) {
       // Odrzucony upgrade jest niewidoczny dla klienta poza zerwanym gniazdem —
       // przeglądarka pokazuje pusty ekran i tyle. Bez tej linii diagnoza „czarny

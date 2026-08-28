@@ -44,6 +44,8 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const language = useLanguage();
   const polish = language === "pl";
   const [token, setToken] = useState("");
+  const [invite, setInvite] = useState("");
+  const inviteRef = useRef("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Google pokazujemy tylko wtedy, gdy serwer ma czym się logować — inaczej
@@ -70,7 +72,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     void renderGoogleButton(googleSlot.current, google, (e) => {
       if (e) setError(e.message);
       else onLogin();
-    }).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    }, () => inviteRef.current).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [google, onLogin]);
   const submit = async () => {
     if (!token.trim() || busy) return;
@@ -101,9 +103,20 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         {google && (
           <>
             <p className="mt-1 text-[13px] text-ink-secondary">
-              {polish ? "Zaloguj się kontem Google właściciela serwera." : "Sign in with the owner's Google account."}
+              {polish ? "Zaloguj się Google. Nowy członek potrzebuje kodu zaproszenia." : "Sign in with Google. New members need an invite code."}
             </p>
             <div ref={googleSlot} className="mt-4 flex justify-center" />
+            <input
+              value={invite}
+              onChange={(event) => {
+                inviteRef.current = event.target.value;
+                setInvite(event.target.value);
+              }}
+              placeholder={polish ? "Kod zaproszenia (dla nowego członka)" : "Invite code (new members)"}
+              aria-label={polish ? "Kod zaproszenia" : "Invite code"}
+              autoComplete="one-time-code"
+              className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[13px] text-ink outline-none focus:border-hairline"
+            />
             <div className="mt-4 flex items-center gap-2 text-[11px] text-ink-secondary">
               <span className="h-px flex-1 bg-hairline/40" />
               {polish ? "albo token" : "or token"}

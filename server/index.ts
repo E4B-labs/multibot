@@ -14,9 +14,10 @@ import { AttachmentStore, MAX_FILE_BYTES, resolveBotFile } from "./attachments.t
 import { ensureAccessToken, mountAuth, rotateAccessToken, tokenMatches } from "./auth.ts";
 // multibot (A1): logowanie Google przez Firebase -> lokalna sesja urządzenia.
 import {
-  FirebaseAuthError, authorizeOwner, buildSessionCookie, createDeviceSession,
+  FirebaseAuthError, buildSessionCookie, createDeviceSession,
+  authorizeWorkspaceUser, createWorkspaceInvite, updateWorkspaceProfile, workspaceMembers,
   isFirebaseConfigured, isLoopbackRequest, isSecureRequest,
-  sessionIdFromCookieHeader, verifyDeviceSession, verifyFirebaseIdToken,
+  sessionIdFromCookieHeader, verifyDeviceSession, verifyFirebaseIdToken, type WorkspaceActor,
 } from "./firebase-auth.ts";
 import * as composio from "./composio.ts";
 // multibot (U28): powiadomienia push, gdy bot wchodzi w needsAttention.
@@ -644,15 +645,75 @@ if (existingEngineProfile && (!hadHarnessBots || seededPlaceholder || localFirst
 }
 
 // ── SSE fan-out to clients ─────────────────────────────────────────────
-const sseClients = new Set<ServerResponse>();
+type EventClient = { res: ServerResponse; actor: WorkspaceActor | null };
+
+function eventVisible(payload: unknown, actor: WorkspaceActor | null): boolean {
+  if (!payload || typeof payload !== "object") return true;
+  const event = payload as Record<string, any>;
+  const botFor = (id: unknown) => {
+    if (typeof id !== "string") return null;
+    return store.bot(id) ?? (id.startsWith("mb-") ? store.botByThread(id.slice(3)) : null);
+  };
+  if (event.kind === "bot") return canAccessBot(event.bot as BotRecord, actor);
+  if (event.kind === "bot.deleted") {
+    if (event.visibility !== "private") return Boolean(actor);
+    return canAccessBot({
+      id: String(event.botId ?? ""),
+      threadId: "",
+      name: "",
+      title: "",
+      description: "",
+      notifications: false,
+      color: "green",
+      unread: false,
+      modelSelection: { instanceId: "", model: "" },
+      visibility: "private",
+      ownerId: typeof event.ownerId === "string" ? event.ownerId : undefined,
+      allowedUserIds: Array.isArray(event.allowedUserIds) ? event.allowedUserIds : [],
+      messages: [],
+    } as unknown as BotRecord, actor);
+  }
+  if (event.kind === "message" || event.kind === "message.patch") {
+    const threadId = String(event.threadId ?? "");
+    const bot = store.botByThread(threadId) ?? store.bot(isolatedTurnBots.get(threadId) ?? "");
+    return bot ? canAccessBot(bot, actor) : true;
+  }
+  if (event.kind === "runtime") {
+    const threadId = String(event.event?.threadId ?? "");
+    const bot = store.botByThread(threadId) ?? store.bot(isolatedTurnBots.get(threadId) ?? "");
+    return bot ? canAccessBot(bot, actor) : true;
+  }
+  if (event.kind === "screen" || event.kind === "workspace" || event.kind === "computer") {
+    if (event.kind === "screen") return canAccessBot(botFor(event.botId), actor);
+    return event.kind === "workspace" && event.botId === undefined
+      ? Boolean(actor)
+      : canAccessBot(botFor(event.botId), actor);
+  }
+  if (event.kind === "goal") {
+    const bot = store.botByThread(String(event.goal?.ownerThread ?? ""));
+    return bot ? canAccessBot(bot, actor) : true;
+  }
+  if (event.kind === "room") {
+    const ids = Array.isArray(event.room?.bot_ids) ? event.room.bot_ids : [];
+    return ids.length === 0 || ids.every((id: unknown) => canAccessBot(botFor(id), actor));
+  }
+  if (event.kind === "group") {
+    const ids = Array.isArray(event.group?.bot_ids) ? event.group.bot_ids : [];
+    return ids.length === 0 || ids.every((id: unknown) => canAccessBot(botFor(id), actor));
+  }
+  return true;
+}
+
+const sseClients = new Set<EventClient>();
 function broadcast(payload: unknown) {
   const text = JSON.stringify(payload);
   const frame = `data: ${text}\n\n`;
-  for (const res of [...sseClients]) {
+  for (const client of [...sseClients]) {
+    if (!eventVisible(payload, client.actor)) continue;
     try {
-      res.write(frame);
+      client.res.write(frame);
     } catch {
-      sseClients.delete(res);
+      sseClients.delete(client);
     }
   }
   // ten sam strumień po WS — SSE nie przechodzi przez buforujące tunele
@@ -917,7 +978,7 @@ bus.subscribe((event: RuntimeEvent) => {
         attachments.deleteBot(bot.id);
         workspace.deleteBot(bot.id);
         store.deleteBot(bot.id);
-        broadcast({ kind: "bot.deleted", botId: bot.id });
+        broadcast({ kind: "bot.deleted", botId: bot.id, visibility: bot.visibility, ownerId: bot.ownerId, allowedUserIds: bot.allowedUserIds });
       }
       break;
     }
@@ -1405,6 +1466,8 @@ opts?: {
     origin?: TurnOrigin;
     /** nazwa rutyny do treści pushu „rutyna X wystartowała" */
     routineName?: string;
+    /** Authenticated human who started this turn. */
+    actor?: WorkspaceActor | null;
   },
 ) {
   const bot = store.bot(botId);
@@ -1445,6 +1508,7 @@ opts?: {
     role: "user",
     kind: "text",
     text,
+    ...(opts?.actor ? { userId: opts.actor.uid, ...(opts.actor.name ? { userName: opts.actor.name } : {}) } : {}),
     // multibot (F12): badge na wiadomości usera TYLKO gdy ta tura użyła
     // jawnego override (natural language / `/model --once`) — niezależnie od
     // tego, czy model różni się od skonfigurowanego. Zwykłe tury — bez badge.
@@ -1459,6 +1523,10 @@ opts?: {
     .filter((m) => m.kind === "text" && m.text && m.id !== userMessage?.id)
     .slice(-40)
     .map((m) => ({ role: m.role === "user" ? ("user" as const) : ("assistant" as const), text: m.text! }));
+  const promptUser = opts?.actor ?? (() => {
+    const lastUser = store.messagesFor(bot.threadId).reverse().find((message) => message.role === "user" && message.userId);
+    return lastUser?.userId ? { uid: lastUser.userId, name: lastUser.userName } : undefined;
+  })();
 
 
   // multibot (D7): kolejna tura usera JEST odpowiedzią na to, na co bot czekał
@@ -1593,7 +1661,7 @@ opts?: {
         model: turnModel,
         ...(!isolated ? { resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId] } : {}),
         transcript,
-        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: store.bots }),
+        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: store.bots, currentUser: promptUser }),
         integrations,
         ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
       } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel });
@@ -1629,13 +1697,77 @@ function appendBotEvent(botId: string, event: NonNullable<Message["event"]>) {
 
 // ── config hot-reload ─────────────────────────────────────────────────
 function configStatus() {
+  const { profile: _profile, ...status } = configStatusFor(null);
+  return status;
+}
+
+function configStatusFor(actor: WorkspaceActor | null) {
+  const member = actor && workspaceMembers().find((item) => item.uid === actor.uid);
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
     composio: { configured: Boolean(cfg.composio?.key), apiKeyConfigured: Boolean(cfg.composio?.apiKey) },
     box: { configured: Boolean(cfg.box?.token) },
     // not a secret — the sidebar shows it
-    profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
+    profile: {
+      name: member?.name ?? (actor?.name ?? cfg.profile?.name ?? ""),
+      email: member?.email ?? (actor?.email ?? cfg.profile?.email ?? ""),
+    },
+    workspace: {
+      id: cfg.workspace?.id ?? "default",
+      name: cfg.workspace?.name ?? "MultiBot workspace",
+    },
+    account: actor ? { uid: actor.uid, role: actor.role } : null,
   };
+}
+
+function requestBearer(req: IncomingMessage): string | null {
+  const authorization = req.headers.authorization;
+  if (authorization?.startsWith("Bearer ")) return authorization.slice(7);
+  const header = req.headers["x-multibot-token"];
+  return typeof header === "string" ? header : null;
+}
+
+function actorForRequest(req: IncomingMessage): WorkspaceActor | null {
+  if (req.headers["x-multibot-auth"] === "token") {
+    return { uid: cfg.firebase?.ownerUid ?? "legacy-token", role: "owner", name: cfg.profile?.name, email: cfg.profile?.email };
+  }
+  const sessionId = sessionIdFromCookieHeader(req.headers.cookie);
+  const session = sessionId ? verifyDeviceSession(sessionId) : null;
+  if (session) return {
+    uid: session.uid,
+    email: session.email,
+    name: session.name,
+    role: workspaceMembers().find((item) => item.uid === session.uid)?.role
+      ?? (cfg.firebase?.ownerUid === session.uid ? "owner" : "member"),
+  };
+  if (tokenMatches(requestBearer(req), cfg.auth?.token ?? "")) {
+    return { uid: cfg.firebase?.ownerUid ?? "legacy-token", role: "owner", name: cfg.profile?.name, email: cfg.profile?.email };
+  }
+  return null;
+}
+
+function actorMessageFields(actor: WorkspaceActor | null): Pick<Message, "userId" | "userName"> {
+  return actor ? { userId: actor.uid, ...(actor.name ? { userName: actor.name } : {}) } : {};
+}
+
+function canAccessBot(bot: BotRecord | null, actor: WorkspaceActor | null): boolean {
+  if (!bot) return false;
+  if (!actor) return false;
+  if (bot.visibility === "public") return true;
+  if (bot.visibility !== "private") return true;
+  return actor.role === "owner" || bot.ownerId === actor.uid || (bot.allowedUserIds ?? []).includes(actor.uid);
+}
+
+function canManageBot(bot: BotRecord | null, actor: WorkspaceActor | null): boolean {
+  return Boolean(bot && actor && (actor.role === "owner" || !bot.ownerId || bot.ownerId === actor.uid));
+}
+
+function botForReference(id: string): BotRecord | null {
+  return store.bot(id) ?? (id.startsWith("mb-") ? store.botByThread(id.slice(3)) : null);
+}
+
+function groupVisible(group: { bot_ids: string[] }, actor: WorkspaceActor | null): boolean {
+  return group.bot_ids.every((id) => canAccessBot(botForReference(id), actor));
 }
 
 /** Rebuild the provider fleet after a config change so new keys take
@@ -1974,6 +2106,15 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const path = url.pathname;
   const method = req.method ?? "GET";
+  const actor = actorForRequest(req);
+  const adminMutation = method !== "GET" && (
+    path === "/api/provision" ||
+    path.startsWith("/api/models/custom/") ||
+    path.startsWith("/api/cli-tools/") ||
+    path.startsWith("/api/progress/") ||
+    path.startsWith("/api/connectors/")
+  );
+  if (adminMutation && actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
   const langParam = url.searchParams.get("lang");
   if (langParam === "pl" || langParam === "en") uiLang = langParam;
   try {
@@ -2031,7 +2172,7 @@ const server = createServer(async (req, res) => {
         const caller = store.bot(fromBotId);
         if (!caller) return json(res, 404, { error: "no such caller bot" });
         const access = workspace.access(fromBotId).access;
-        const readOnlyActions = new Set(["profile.get", "memory.list", "memory.graph", "memory.markdown.get", "skills.list", "routines.list", "groups.list", "device.info", "file.read"]);
+        const readOnlyActions = new Set(["profile.get", "memory.list", "memory.graph", "memory.markdown.get", "team.memory.list", "team.memory.graph", "team.memory.markdown.get", "skills.list", "routines.list", "groups.list", "device.info", "file.read"]);
         if (access === "read-only" && !readOnlyActions.has(action)) return json(res, 403, { error: "read-only access" });
         const requireFull = () => {
           if (access !== "full") throw Object.assign(new Error("Full Access required for this action"), { status: 403 });
@@ -2098,6 +2239,10 @@ const server = createServer(async (req, res) => {
           case "memory.markdown.get": return json(res, 200, workspace.markdown(fromBotId));
           case "memory.add": { requireFull(); const fact = workspace.addFact(fromBotId, body); broadcast({ kind: "workspace", botId: fromBotId, resource: "memory" }); return json(res, 201, fact); }
           case "memory.markdown.set": { requireFull(); const markdown = workspace.putMarkdown(fromBotId, body.content); broadcast({ kind: "workspace", botId: fromBotId, resource: "memory" }); return json(res, 200, markdown); }
+          case "team.memory.list": return json(res, 200, workspace.teamFacts(String(body.query ?? "")));
+          case "team.memory.graph": return json(res, 200, { facts: workspace.teamFacts(String(body.query ?? "")), markdown: workspace.teamMarkdown() });
+          case "team.memory.markdown.get": return json(res, 200, workspace.teamMarkdown());
+          case "team.memory.add": { requireFull(); const fact = workspace.addTeamFact(body); broadcast({ kind: "workspace", resource: "team-memory" }); return json(res, 201, fact); }
           case "skills.list": return json(res, 200, workspace.skills(fromBotId));
           case "skills.create": { requireFull(); const skill = workspace.addSkill(fromBotId, body); appendBotEvent(fromBotId, { type: "skill-created", value: skill.name }); broadcast({ kind: "workspace", botId: fromBotId, resource: "skills" }); return json(res, 201, skill); }
           case "skills.update": { requireFull(); const skill = workspace.patchSkill(fromBotId, String(body.name), body); broadcast({ kind: "workspace", botId: fromBotId, resource: "skills" }); return json(res, 200, skill ?? { error: "no such skill" }); }
@@ -2113,7 +2258,7 @@ const server = createServer(async (req, res) => {
             }
             const created = store.createBot({ temporary: body.temporary === true });
             const selection = bootSelection;
-            const updated = store.patchBot(created.id, { name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), modelSelection: selection, ...(caller.chiefOfStaff ? { section: caller.section } : {}) });
+            const updated = store.patchBot(created.id, { name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), modelSelection: selection, ownerId: caller.ownerId, visibility: "team", ...(caller.chiefOfStaff ? { section: caller.section } : {}) });
             if (access === "full") workspace.setAccess(created.id, "full");
             broadcast({ kind: "bot", bot: updated });
             return json(res, 201, updated);
@@ -2310,7 +2455,8 @@ const server = createServer(async (req, res) => {
         connection: "keep-alive",
       });
       res.write(`data: ${JSON.stringify({ kind: "hello" })}\n\n`);
-      sseClients.add(res);
+      const client = { res, actor: actorForRequest(req) };
+      sseClients.add(client);
       const keepalive = setInterval(() => {
         try {
           res.write(": keepalive\n\n");
@@ -2318,7 +2464,7 @@ const server = createServer(async (req, res) => {
       }, 25_000);
       req.on("close", () => {
         clearInterval(keepalive);
-        sseClients.delete(res);
+        sseClients.delete(client);
       });
       return;
     }
@@ -2335,6 +2481,8 @@ const server = createServer(async (req, res) => {
       store.patchBot(bot.id, {
         ...(name ? { name } : {}),
         modelSelection: { instanceId: "local", model: "hermes-agent" },
+        ownerId: actor?.uid,
+        visibility: "team",
       });
       try {
         const baseUrl = await ensureEngine();
@@ -2352,17 +2500,26 @@ const server = createServer(async (req, res) => {
       return json(res, 201, { bot: created });
     }
 
+    // One server = one workspace. Members share team-visible bots and sections;
+    // private bots are filtered by the access gate below.
+    const botPath = path.match(/^\/api\/bots\/([^/]+)/);
+    if (botPath && !canAccessBot(store.bot(decodeURIComponent(botPath[1])), actor)) {
+      return json(res, 404, { error: "no such bot" });
+    }
+
     // ── bots ──
     if (method === "GET" && path === "/api/bots") {
       return json(res, 200, {
-        bots: store.bots.map((b) => ({ ...b, messages: store.messagesFor(b.threadId) })),
+        bots: store.bots
+          .filter((b) => canAccessBot(b, actor))
+          .map((b) => ({ ...b, messages: store.messagesFor(b.threadId) })),
       });
     }
     let m: RegExpMatchArray | null;
     // multibot: durable group rooms. Engine owns execution; harness owns the
     // user-facing roster and transcript so groups survive reload/restart.
     if (method === "GET" && path === "/api/groups") {
-      const local = groupStore.list();
+      const local = groupStore.list().filter((group) => groupVisible(group, actor));
       if (local.length || groupStore.hasLocalRoster()) return json(res, 200, local);
       try {
         const remote = await fetch(`${await ensureEngine()}/api/groups`);
@@ -2371,7 +2528,7 @@ const server = createServer(async (req, res) => {
           for (const group of groups) groupStore.upsert(group);
         }
       } catch {}
-      return json(res, 200, groupStore.list());
+      return json(res, 200, groupStore.list().filter((group) => groupVisible(group, actor)));
     }
     if (method === "POST" && path === "/api/groups") {
       const body = await readBody(req);
@@ -2379,6 +2536,7 @@ const server = createServer(async (req, res) => {
       const rawIds: string[] = Array.isArray(body.bot_ids) ? (body.bot_ids as unknown[]).map(String) : [];
       const botIds = rawIds.map((id) => store.bot(id)?.id ?? (id.startsWith("mb-") ? store.botByThread(id.slice(3))?.id : undefined)).filter((id): id is string => !!id);
       if (!name || !botIds.length) return json(res, 422, { error: "group needs at least one bot" });
+      if (botIds.some((id) => !canAccessBot(store.bot(id), actor))) return json(res, 404, { error: "no such bot" });
       try {
         const engineIds = botIds.map((id) => engineBotIdFor(store.bot(id)!.threadId));
         const result = await createGroupRecord(name, engineIds);
@@ -2390,13 +2548,22 @@ const server = createServer(async (req, res) => {
     m = path.match(/^\/api\/groups\/([\w-]+)\/members$/);
     if (m && method === "PATCH") {
       const body = await readBody(req);
-      const result = await addGroupMemberRecord(m[1], String(body.botId ?? ""));
+      const group = groupStore.get(m[1]);
+      if (!group || !groupVisible(group, actor)) return json(res, 404, { error: "no such group" });
+      const botId = String(body.botId ?? "");
+      const bot = botForReference(botId);
+      if (!bot || !canAccessBot(bot, actor)) return json(res, 404, { error: "no such bot" });
+      const result = await addGroupMemberRecord(m[1], bot.id);
       return json(res, result.status, result.body);
     }
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
+    if (m && (method === "DELETE" || method === "PATCH")) {
+      const group = groupStore.get(m[1]);
+      if (!group || !groupVisible(group, actor)) return json(res, 404, { error: "no such group" });
+    }
     if (m && method === "GET") {
       const group = groupStore.get(m[1]);
-      return group ? json(res, 200, group) : json(res, 404, { error: "no such group" });
+      return group && groupVisible(group, actor) ? json(res, 200, group) : json(res, 404, { error: "no such group" });
     }
     if (m && method === "DELETE") {
       const removed = await deleteGroupRecord(m[1]);
@@ -2453,6 +2620,7 @@ const server = createServer(async (req, res) => {
           group = await groupResponse.json() as { bot_ids?: unknown[] };
         }
         const durable = groupStore.get(gid) ?? groupStore.upsert({ id: gid, name: String((group as { name?: unknown }).name ?? "Group"), bot_ids: (group.bot_ids ?? []).map(String) });
+        if (!groupVisible(durable, actor)) return json(res, 404, { error: "no such group" });
         groupStore.append(gid, { from: "you", text: message });
         const botEntries = (group.bot_ids ?? [])
           .map((rawId) => {
@@ -2486,7 +2654,7 @@ const server = createServer(async (req, res) => {
     }
     // ── durable collaboration rooms (bot-to-bot tasks) ──
     if (method === "GET" && path === "/api/rooms") {
-      return json(res, 200, { rooms: rooms.list() });
+      return json(res, 200, { rooms: rooms.list().filter((room) => room.bot_ids.every((id) => canAccessBot(store.bot(id), actor))) });
     }
     if (method === "POST" && path === "/api/rooms") {
       const body = await readBody(req);
@@ -2494,8 +2662,8 @@ const server = createServer(async (req, res) => {
       const botIds: string[] = Array.isArray(body.bot_ids) ? (body.bot_ids as unknown[]).map(String) : [];
       if (!task || !botIds.length) return json(res, 422, { error: "task and bot_ids required" });
       for (const id of botIds) {
-        if (!store.bot(id)) return json(res, 404, { error: `no such bot: ${id}` });
-      }
+        if (!canAccessBot(store.bot(id), actor)) return json(res, 404, { error: `no such bot: ${id}` });
+     }
       const owner = store.bot(botIds[0])!;
       const room = rooms.create({ task, bot_ids: botIds, ownerThread: owner.threadId, ownerBotId: botIds[0] });
       postRoomChip(botIds[0], room);
@@ -2511,7 +2679,7 @@ const server = createServer(async (req, res) => {
       const bot = store.createBot();
       // bootSelection was resolved once at startup; rescanning every provider
       // here made the first screen wait on CLI processes.
-      store.patchBot(bot.id, { modelSelection: bootSelection });
+      store.patchBot(bot.id, { modelSelection: bootSelection, ownerId: actor?.uid, visibility: "team" });
       // multibot (U2): lokalny profil silnika zakładamy w tle przy tworzeniu
       // bota, żeby pierwsza wiadomość nie płaciła kosztu inicjalizacji.
       if (bootSelection.instanceId === "local" && !process.env.VITEST) {
@@ -2532,6 +2700,45 @@ const server = createServer(async (req, res) => {
         );
       }
       return json(res, 201, { bot: { ...store.bot(bot.id)!, messages: store.messagesFor(bot.threadId) } });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/sharing$/);
+    if (m) {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (method === "GET") {
+        return json(res, 200, {
+          visibility: bot.visibility ?? "team",
+          ownerId: bot.ownerId ?? null,
+          allowedUserIds: bot.allowedUserIds ?? [],
+        });
+      }
+      if (method === "PATCH") {
+        if (!canManageBot(bot, actor)) return json(res, 403, { error: "bot owner access required" });
+        const body = await readBody(req);
+        const visibility = body.visibility === undefined ? (bot.visibility ?? "team") : body.visibility;
+        if (visibility !== "public" && visibility !== "team" && visibility !== "private") {
+          return json(res, 422, { error: "visibility must be public, team or private" });
+        }
+        if (body.allowedUserIds !== undefined && (!Array.isArray(body.allowedUserIds) || body.allowedUserIds.length > 100 || body.allowedUserIds.some((id: unknown) => typeof id !== "string" || id.length > 200))) {
+          return json(res, 422, { error: "allowedUserIds must be at most 100 user ids" });
+        }
+        const known = new Set(workspaceMembers().map((member) => member.uid));
+        const allowedUserIds = body.allowedUserIds === undefined
+          ? (bot.allowedUserIds ?? [])
+          : [...new Set((body.allowedUserIds as string[]).filter((id) => known.has(id)))];
+        const updated = store.patchBot(bot.id, {
+          visibility,
+          ownerId: bot.ownerId ?? actor?.uid,
+          allowedUserIds,
+        });
+        broadcast({ kind: "bot", bot: updated });
+        return json(res, 200, {
+          visibility: updated?.visibility ?? visibility,
+          ownerId: updated?.ownerId ?? null,
+          allowedUserIds: updated?.allowedUserIds ?? [],
+        });
+      }
+      return json(res, 405, { error: "method not allowed" });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
     if (m && method === "PATCH") {
@@ -2598,7 +2805,7 @@ const server = createServer(async (req, res) => {
           unlinkSync(join(dir, `${bot.threadId}.ndjson`));
         } catch {}
       }
-      broadcast({ kind: "bot.deleted", botId: bot.id });
+      broadcast({ kind: "bot.deleted", botId: bot.id, visibility: bot.visibility, ownerId: bot.ownerId, allowedUserIds: bot.allowedUserIds });
       return json(res, 200, { ok: true });
     }
     m = path.match(/^\/api\/devices\/([\w-]+)\/push$/);
@@ -2762,6 +2969,7 @@ const server = createServer(async (req, res) => {
             role: "user",
             kind: "text",
             text,
+            ...actorMessageFields(actor),
             ...(replyTarget ? { replyToId: replyTarget.id } : {}),
           });
           const botMessage = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: goalReply });
@@ -2782,7 +2990,7 @@ const server = createServer(async (req, res) => {
       if (modelReply !== null) {
         const bot = store.bot(m[1]);
         if (!bot) return json(res, 404, { error: "no such bot" });
-        const userMessage = store.appendMessage(bot.threadId, { role: "user", kind: "text", text });
+        const userMessage = store.appendMessage(bot.threadId, { role: "user", kind: "text", text, ...actorMessageFields(actor) });
         const botMessage = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: modelReply });
         broadcast({ kind: "message", threadId: bot.threadId, message: userMessage });
         broadcast({ kind: "message", threadId: bot.threadId, message: botMessage });
@@ -2800,6 +3008,7 @@ const server = createServer(async (req, res) => {
           role: "user",
           kind: "text",
           text,
+          ...actorMessageFields(actor),
           ...(replyTarget ? { replyToId: replyTarget.id } : {}),
         });
         broadcast({ kind: "message", threadId: owner.threadId, message: userMessage });
@@ -2812,7 +3021,7 @@ const server = createServer(async (req, res) => {
           startTurn(
             botId,
             `${collab.task}\n\n[Collaboration room with ${peersNamed} finished — the user can open the full room transcript from the chat; use this summary to answer them]\n${roomSummary(collab.room.id)}`,
-            { reasoning, attachments: turnAttachments, userMessagePosted: true },
+            { reasoning, attachments: turnAttachments, userMessagePosted: true, actor },
           ).catch(() => {
             // Tura autora nie ruszyła: bot zdążył zniknąć, dostawca padł, albo
             // — najczęściej — użytkownik dopisał w międzyczasie zwykłą
@@ -2839,13 +3048,14 @@ const server = createServer(async (req, res) => {
           role: "user",
           kind: "text",
           text,
+          ...actorMessageFields(actor),
           ...(replyTarget ? { replyToId: replyTarget.id } : {}),
         });
         broadcast({ kind: "message", threadId: busyBot.threadId, message: userMessage });
         queuedUserMessages.push(busyBot.id, turnText);
         return json(res, 202, { ok: true, queued: true });
       }
-      await startTurn(m[1], turnText, { reasoning, attachments: turnAttachments });
+      await startTurn(m[1], turnText, { reasoning, attachments: turnAttachments, actor });
       return json(res, 202, { ok: true });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/respond$/);
@@ -2917,6 +3127,36 @@ const server = createServer(async (req, res) => {
         return ok ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such rule" });
       }
       return json(res, 405, { error: "method not allowed" });
+    }
+
+    m = path.match(/^\/api\/memory\/team\/facts(?:\/([\w-]+))?$/);
+    if (m) {
+      if (method === "GET" && !m[1]) return json(res, 200, workspace.teamFacts(url.searchParams.get("q") ?? ""));
+      if (method === "POST" && !m[1]) {
+        const fact = workspace.addTeamFact(await readBody(req));
+        broadcast({ kind: "workspace", resource: "team-memory" });
+        return json(res, 201, fact);
+      }
+      if (method === "PATCH" && m[1]) {
+        const fact = workspace.patchTeamFact(m[1], await readBody(req));
+        if (fact) broadcast({ kind: "workspace", resource: "team-memory" });
+        return fact ? json(res, 200, fact) : json(res, 404, { error: "no such fact" });
+      }
+      if (method === "DELETE" && m[1]) {
+        const ok = workspace.deleteTeamFact(m[1]);
+        if (ok) broadcast({ kind: "workspace", resource: "team-memory" });
+        return ok ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such fact" });
+      }
+      return json(res, 405, { error: "method not allowed" });
+    }
+
+    if (method === "GET" && path === "/api/memory/team/markdown") {
+      return json(res, 200, workspace.teamMarkdown());
+    }
+    if ((method === "PUT" || method === "PATCH") && path === "/api/memory/team/markdown") {
+      const markdown = workspace.putTeamMarkdown((await readBody(req)).content);
+      broadcast({ kind: "workspace", resource: "team-memory" });
+      return json(res, 200, markdown);
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/facts(?:\/([\w-]+))?$/);
@@ -3098,6 +3338,7 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (method === "GET" && path === "/api/auth/token") {
+      if (actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
       res.setHeader("cache-control", "no-store");
       return json(res, 200, { token: cfg.auth!.token });
     }
@@ -3106,6 +3347,7 @@ const server = createServer(async (req, res) => {
     // telefon dopiero się przedstawia. Bezpieczeństwo krótkiego kodu stoi na
     // wygasaniu, jednorazowości i limicie prób (server/pairing.ts).
     if (method === "POST" && path === "/api/pair/start") {
+      if (actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
       const { code, expiresAt } = startPairing();
       const url = `http://${HOST}:${PORT}`;
       return json(res, 200, { code, expiresAt, url, pairUrl: `${url}/?pair=${code}`, qrSvg: pairingQrSvg(`${url}/?pair=${code}`) });
@@ -3134,7 +3376,10 @@ const server = createServer(async (req, res) => {
     // Google jest od niego zależne.
     if (method === "POST" && path === "/api/auth/session") {
       const body = await readBody(req).catch(() => ({}));
-      const sessionId = createDeviceSession("local", String(body?.label ?? "browser"));
+      const sessionId = createDeviceSession(cfg.firebase?.ownerUid ?? "legacy-token", String(body?.label ?? "browser"), {
+        email: cfg.profile?.email,
+        name: cfg.profile?.name,
+      });
       res.setHeader("set-cookie", buildSessionCookie(sessionId, isSecureRequest(req)));
       res.setHeader("cache-control", "no-store");
       return json(res, 200, { ok: true });
@@ -3154,8 +3399,14 @@ const server = createServer(async (req, res) => {
           }
         : { configured: false as const };
       const sessionId = sessionIdFromCookieHeader(req.headers.cookie);
+      const session = sessionId ? verifyDeviceSession(sessionId) : null;
       res.setHeader("cache-control", "no-store");
-      return json(res, 200, { google, session: Boolean(sessionId && verifyDeviceSession(sessionId)) });
+      return json(res, 200, {
+        google,
+        session: Boolean(session),
+        user: session ? { uid: session.uid, email: session.email ?? null, name: session.name ?? null } : null,
+        workspace: { id: cfg.workspace?.id ?? "default", name: cfg.workspace?.name ?? "MultiBot workspace" },
+      });
     }
 
     // ── multibot (A1): Firebase Google login → lokalna sesja urządzenia ──
@@ -3167,26 +3418,48 @@ const server = createServer(async (req, res) => {
         const bearer = req.headers.authorization?.startsWith("Bearer ")
           ? req.headers.authorization.slice(7)
           : req.headers["x-multibot-token"];
-        // Pierwszy właściciel wiąże się TYLKO z loopbacka albo z już znanym
-        // tokenem — nigdy "pierwszy z internetu wygrywa".
-        authorizeOwner(claims.uid, {
+        const member = authorizeWorkspaceUser(claims.uid, {
+          email: claims.email,
+          name: claims.name,
+        }, {
           loopback: isLoopbackRequest(req),
           bearerAuthed: tokenMatches(bearer, cfg.auth?.token ?? ""),
+          invite: String(body?.invite ?? ""),
         });
-        const sessionId = createDeviceSession(claims.uid, String(body?.label ?? "device"));
+        const sessionId = createDeviceSession(claims.uid, String(body?.label ?? "device"), {
+          email: member.email,
+          name: member.name,
+        });
         res.setHeader("set-cookie", buildSessionCookie(sessionId, isSecureRequest(req)));
         res.setHeader("cache-control", "no-store");
-        return json(res, 200, { ok: true, uid: claims.uid, email: claims.email ?? null });
+        return json(res, 200, { ok: true, uid: claims.uid, email: claims.email ?? null, role: member.role });
       } catch (e) {
         const status = e instanceof FirebaseAuthError ? 401 : 400;
         return json(res, status, { error: e instanceof Error ? e.message : "invalid request" });
       }
     }
     if (method === "POST" && path === "/api/auth/token/rotate") {
+      if (actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
       const token = rotateAccessToken(cfg);
       revokeAuthSessions(req.socket);
       res.setHeader("cache-control", "no-store");
       return json(res, 200, { token });
+    }
+
+    if (method === "GET" && path === "/api/workspace") {
+      return json(res, 200, {
+        id: cfg.workspace?.id ?? "default",
+        name: cfg.workspace?.name ?? "MultiBot workspace",
+        members: workspaceMembers(),
+        currentUser: actor ? { uid: actor.uid, email: actor.email ?? null, name: actor.name ?? null, role: actor.role } : null,
+      });
+    }
+    if (method === "GET" && path === "/api/workspace/members") {
+      return json(res, 200, { members: workspaceMembers() });
+    }
+    if (method === "POST" && path === "/api/workspace/invites") {
+      if (actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
+      return json(res, 201, createWorkspaceInvite(actor.uid));
     }
 
     // ── provider instances (model picker) ──
@@ -3195,6 +3468,7 @@ const server = createServer(async (req, res) => {
       const kind = url.searchParams.get("type") ?? "all";
       const results: SearchResult[] = [];
       for (const bot of store.bots) {
+        if (!canAccessBot(bot, actor)) continue;
         if (searchText(query, bot.name, bot.title, bot.description)) {
           results.push({ id: `agent:${bot.id}`, kind: "agent", title: bot.name, subtitle: bot.title || bot.description || "Agent", botId: bot.id });
         }
@@ -3244,6 +3518,7 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && path === "/api/team-map") {
       const collaborations = groupStore
         .list()
+        .filter((group) => groupVisible(group, actor))
         .filter((group) => group.bot_ids.length === 2)
         .map((group) => ({
           groupId: group.id,
@@ -3280,6 +3555,8 @@ const server = createServer(async (req, res) => {
           name: typeof role.name === "string" && role.name.trim() ? role.name.trim().slice(0, 80) : role.role.slice(0, 80),
           title: typeof role.role === "string" ? role.role.slice(0, 80) : "",
           description: typeof role.description === "string" ? role.description.slice(0, 500) : "",
+          ownerId: actor?.uid,
+          visibility: "team",
         });
         const fresh = store.bot(bot.id)!;
         created.push({ id: fresh.id, name: fresh.name });
@@ -3476,21 +3753,31 @@ const server = createServer(async (req, res) => {
 
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
-      return json(res, 200, configStatus());
+      return json(res, 200, configStatusFor(actor));
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
       const patch: Record<string, object> = {};
-      for (const key of ["xai", "composio", "box", "profile"] as const) {
+      for (const key of ["xai", "composio", "box"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }
-      if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
-      saveConfig(patch);
+      if (body.profile && (!actor || actor.uid === "legacy-token" || actor.uid === "local")) patch.profile = body.profile;
+      if (body.profile && actor && actor.uid !== "legacy-token" && actor.uid !== "local") {
+        updateWorkspaceProfile(actor.uid, {
+          name: typeof body.profile.name === "string" ? body.profile.name : undefined,
+          email: typeof body.profile.email === "string" ? body.profile.email : undefined,
+        });
+      }
+      if (Object.keys(patch).length && actor?.role !== "owner") return json(res, 403, { error: "owner access required for server credentials" });
+      if (!Object.keys(patch).length && !(body.profile && actor && actor.uid !== "legacy-token" && actor.uid !== "local")) {
+        return json(res, 400, { error: "nothing to save" });
+      }
+      if (Object.keys(patch).length) saveConfig(patch);
       Object.assign(cfg, loadConfig());
       // provider keys change the fleet; a profile edit must not kill
       // in-flight turns with a pointless reload
       if (Object.keys(patch).some((k) => k !== "profile")) await reloadProviders();
-      const status = configStatus();
+      const status = configStatusFor(actor);
       broadcast({ kind: "config", ...status });
       return json(res, 200, status);
     }
@@ -3669,13 +3956,20 @@ const server = createServer(async (req, res) => {
 // handler wyżej zostaje nietknięty.
 mountEngineProxy(server, { harnessWebhook: harnessWebhookInbound });
 // multibot (H4): the bot's screen. Mounted before auth so one gate covers it.
-mountVncUpgrade(server);
+mountVncUpgrade(server, (req, botId) => canAccessBot(store.bot(botId), actorForRequest(req)));
 // Kanał zdarzeń po WS — ta sama ścieżka co SSE, ta sama bramka auth (montaż
 // przed `mountAuth`). Patrz `server/events-ws.ts`: tunel buforuje SSE.
-mountEventsWs(server, (url, send) => {
+mountEventsWs(server, (url, send, req) => {
   const lang = url.searchParams.get("lang");
   if (lang === "pl" || lang === "en") uiLang = lang;
   send(JSON.stringify({ kind: "hello" }));
+  return (text) => {
+    try {
+      return eventVisible(JSON.parse(text), actorForRequest(req));
+    } catch {
+      return false;
+    }
+  };
 });
 
 // Auth mounts after the proxy so one wrapper covers harness HTTP, proxied

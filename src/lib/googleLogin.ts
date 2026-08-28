@@ -69,13 +69,13 @@ export async function exchangeForFirebaseIdToken(googleIdToken: string, apiKey: 
 }
 
 /** Wymienia token Firebase'a na ciasteczko sesji tego serwera. */
-export async function startDeviceSession(idToken: string, label: string): Promise<void> {
+export async function startDeviceSession(idToken: string, label: string, invite = ""): Promise<void> {
   // `authFetch`, nie `fetch`: pierwsze logowanie właściciela przechodzi tylko z
   // loopbacka albo z już znanym tokenem dostępu (`authorizeOwner`), a token
   // siedzi w `localStorage` tej przeglądarki.
   const res = await authFetch("/api/auth/firebase/session", {
     method: "POST",
-    body: JSON.stringify({ idToken, label }),
+    body: JSON.stringify({ idToken, label, ...(invite.trim() ? { invite: invite.trim() } : {}) }),
   });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(body.error || `Sign-in rejected (${res.status})`);
@@ -90,6 +90,7 @@ export async function renderGoogleButton(
   target: HTMLElement,
   cfg: GoogleLoginConfig,
   onDone: (error?: Error) => void,
+  getInvite: () => string = () => "",
 ): Promise<void> {
   await loadGoogleIdentity();
   const gis = (window as unknown as { google?: any }).google;
@@ -100,7 +101,7 @@ export async function renderGoogleButton(
       void (async () => {
         try {
           const idToken = await exchangeForFirebaseIdToken(response.credential, cfg.apiKey);
-          await startDeviceSession(idToken, navigator.userAgent.slice(0, 60));
+          await startDeviceSession(idToken, navigator.userAgent.slice(0, 60), getInvite());
           onDone();
         } catch (e) {
           onDone(e instanceof Error ? e : new Error(String(e)));

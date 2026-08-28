@@ -59,6 +59,8 @@ export interface Message {
   model?: string;
   /** multibot: flat reply — id wiadomości, na którą odpowiada ta wiadomość. */
   replyToId?: string;
+  userId?: string;
+  userName?: string;
   /** optimistic echo — user message waiting for the server's confirmation */
   pending?: boolean;
   at: number;
@@ -79,6 +81,9 @@ export interface Bot {
   color: MausColor;
   mascotExpression?: string | null;
   mascotShape?: MascotShape;
+  visibility?: "public" | "team" | "private";
+  ownerId?: string;
+  allowedUserIds?: string[];
   unread: boolean;
   /** multibot: id pierwszej nieprzeczytanej wiadomości — nad nią rysujemy
    *  separator "NEW" (wyczyszczany przy otwarciu czatu / select). */
@@ -293,7 +298,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "workspaceChanged":
       return { ...state, workspaceVersion: state.workspaceVersion + 1 };
     case "configStatus":
-      return { ...state, config: action.config };
+      return { ...state, config: { ...state.config, ...action.config, profile: action.config.profile ?? state.config?.profile } };
     // multibot: selecting a bot leaves group conversation mode.
     case "select": {
       // Otwierany bot: czyść unread, ale ZOSTAW firstUnreadId — separator "NEW"
