@@ -375,7 +375,6 @@ export function PluginsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"marketplace" | "yours">("marketplace");
-  const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
   // multibot (F7): otwarty formularz konektora — null = zamknięty,
   // locked = edycja istniejącego (id nie do zmiany)
   const [draft, setDraft] = useState<CustomDraft | null>(null);
@@ -470,10 +469,10 @@ export function PluginsPanel() {
   const featured = composioCards.filter((c) => FEATURED_SLUGS.includes(c.slug.toLowerCase()));
   const orchestration = composioCards.filter((c) => !FEATURED_SLUGS.includes(c.slug.toLowerCase()) && ORCHESTRATION_HINTS.test(`${c.slug} ${c.label} ${c.blurb}`));
   const others = composioCards.filter((c) => !featured.includes(c) && !orchestration.includes(c));
-  const sections: Array<{ title: string; items: ToolkitCard[]; defaultCount: number }> = [
-    { title: polish ? "Wyróżnione" : "Featured", items: featured, defaultCount: 4 },
-    { title: "Agent Orchestration", items: orchestration, defaultCount: 4 },
-    { title: polish ? "Wszystkie aplikacje" : "All apps", items: others, defaultCount: 8 },
+  const sections: Array<{ title: string; items: ToolkitCard[] }> = [
+    { title: polish ? "Wyróżnione" : "Featured", items: featured },
+    { title: "Agent Orchestration", items: orchestration },
+    { title: polish ? "Wszystkie aplikacje" : "All apps", items: others },
   ].filter((section) => section.items.length > 0);
 
   const yourCards = tab === "yours" ? composioCards.filter((c) => status[c.slug]?.connected) : [];
@@ -598,19 +597,16 @@ export function PluginsPanel() {
               </div>
             )
           ) : (
-            /* ── Marketplace — sekcje z Show more, 2-kolumnowa siatka ── */
+            /* ── Marketplace — sekcje, 2-kolumnowa siatka, pełne listy ── */
             sections.length === 0 ? (
               <div className="py-8 text-center text-[13px] text-ink-secondary">{polish ? "Brak pasujących aplikacji." : "No apps match."}</div>
             ) : (
               sections.map((section) => {
-                const expanded = expandedCats[section.title] ?? false;
-                const shown = expanded ? section.items : section.items.slice(0, section.defaultCount);
-                const hidden = section.items.length - shown.length;
                 return (
                   <div key={section.title} className="mb-4">
                     <div className="mb-2 text-[13px] font-medium text-ink-secondary">{section.title}</div>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {shown.map((card) => {
+                      {section.items.map((card) => {
                         const connected = status[card.slug]?.connected;
                         const busy = busySlug === card.slug;
                         return (
@@ -637,14 +633,6 @@ export function PluginsPanel() {
                         );
                       })}
                     </div>
-                    {hidden > 0 && (
-                      <button
-                        onClick={() => setExpandedCats((c) => ({ ...c, [section.title]: true }))}
-                        className="mt-1.5 text-[12.5px] text-ink-secondary underline-offset-2 hover:text-ink hover:underline"
-                      >
-                        {polish ? `Pokaż ${hidden} więcej` : `Show ${hidden} more`}
-                      </button>
-                    )}
                   </div>
                 );
               })
