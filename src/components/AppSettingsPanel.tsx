@@ -18,6 +18,7 @@ import { authFetch, setAuthToken } from "@/lib/auth";
 import { engineOnline } from "@/lib/engineStatus";
 import { languageLabel, setLanguage, useLanguage, type Language } from "@/lib/language";
 import { SkinPicker } from "./SkinPicker";
+import { MicrophoneRow } from "./MicrophoneRow";
 import { applyMotionMode, readMotionMode, type MotionMode } from "@/lib/motion";
 
 interface BeforeInstallPromptEvent extends Event {
@@ -950,7 +951,8 @@ function MotionSettings({ polish }: { polish: boolean }) {
 // multibot: akceleracja sprzętowa. Domyślnie WYŁĄCZONA (Kacper 29.08).
 // Electron rozstrzyga ją przed gotowością aplikacji, więc przełącznik tylko
 // zapisuje preferencję — działa dopiero po restarcie i tak to podpisujemy.
-// Widoczny wyłącznie na pulpicie: w przeglądarce nie ma czego przełączać.
+// Widoczny wyłącznie na pulpicie: w przeglądarce nie ma czego przełączać,
+// więc w karcie System zostaje wtedy sam mikrofon.
 function HardwareAccelerationRow({ polish }: { polish: boolean }) {
   const [enabled, setEnabled] = useState(false);
   useEffect(() => {
@@ -1132,6 +1134,21 @@ export function AppSettingsPanel() {
                   <ProfileFields />
                 </div>
               </div>
+              {/* multibot: System — ustawienia samej aplikacji, nie komputera.
+                  Mikrofon mowi, z ktorego wejscia nagrywa MultiBot; akceleracja
+                  dotyczy wylacznie okna tej aplikacji (Kacper 29.08). */}
+              <div className="mt-4 rounded-xl bg-card p-4">
+                <div className="text-[15px] font-medium text-ink">System</div>
+                <div className="mt-0.5 text-[13px] text-ink-secondary">
+                  {polish
+                    ? "Dotyczy wyłącznie MultiBota — ustawienia systemowe zostają bez zmian."
+                    : "Applies to MultiBot only — your system settings stay untouched."}
+                </div>
+                <div className="mt-4">
+                  <MicrophoneRow polish={polish} />
+                </div>
+                <HardwareAccelerationRow polish={polish} />
+              </div>
               <div className="mt-4 rounded-xl bg-card p-4">
                 <div className="text-[15px] font-medium text-ink">{polish ? "Skórka" : "Skin"}</div>
                 <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Kolory interfejsu zapisują się lokalnie." : "Interface colors are stored locally."}</div>
@@ -1184,7 +1201,6 @@ export function AppSettingsPanel() {
               <EngineStatusRow />
               <MachineResources />
               <DiagnosticsRow />
-              <HardwareAccelerationRow polish={polish} />
             </>
           )}
           </div>
