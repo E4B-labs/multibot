@@ -125,3 +125,44 @@ test("pobranie aktualizacji nie zamyka aplikacji automatycznie", async () => {
   assert.equal(installs, 0);
   assert.equal(win.sent.at(-1).status, "downloaded");
 });
+
+// multibot: skrypt instalacyjny. Obie usterki poniżej wyłożyły aktualizację
+// 0.1.111 → 0.1.112 u Kacpra: aplikacja znikała, instalator nie startował,
+// wersja zostawała ta sama. Żadnej z nich nie widać w kodzie — widać je
+// dopiero w zachowaniu, więc pilnujemy ich tutaj.
+test("taskkill leci BEZ /t — inaczej ubija sam siebie", async () => {
+  const { buildInstallScript } = await freshModule();
+  const script = buildInstallScript({
+    installerPath: "C:\Users\k\AppData\Local\multibot-updater\installer.exe",
+    exePath: "C:\Users\k\AppData\Local\Programs\MultiBot\MultiBot.exe",
+    installDir: "C:\Users\k\AppData\Local\Programs\MultiBot",
+  });
+  const kill = script.split("\r\n").find((l) => l.startsWith("taskkill"));
+  assert.ok(kill, "brak polecenia taskkill");
+  // `/t` zabija drzewo procesów MultiBota, a skrypt jest jego potomkiem
+  assert.ok(!/\s\/t(\s|$)/.test(kill), `taskkill nie może mieć /t: ${kill}`);
+  assert.match(kill, /\/im MultiBot\.exe/);
+});
+
+test("ścieżki są cytowane, a /D= zostaje na końcu wiersza", async () => {
+  const { buildInstallScript } = await freshModule();
+  const script = buildInstallScript({
+    installerPath: "C:\cache\installer.exe",
+    exePath: "C:\Programy\MultiBot\MultiBot.exe",
+    installDir: "C:\Programy\MultiBot",
+  });
+  const run = script.split("\r\n").find((l) => l.includes("installer.exe"));
+  assert.ok(run.includes('"C:\cache\installer.exe"'), `ścieżka bez cudzysłowów: ${run}`);
+  assert.ok(run.trimEnd().endsWith("/D=C:\Programy\MultiBot"), `/D= musi kończyć wiersz: ${run}`);
+  assert.ok(script.includes('start "" "C:\Programy\MultiBot\MultiBot.exe"'), "brak relanszu aplikacji");
+});
+
+test("katalog ze spacjami dostaje /D= w cudzysłowach", async () => {
+  const { buildInstallScript } = await freshModule();
+  const script = buildInstallScript({
+    installerPath: "C:\cache\installer.exe",
+    exePath: "C:\Program Files\MultiBot\MultiBot.exe",
+    installDir: "C:\Program Files\MultiBot",
+  });
+  assert.ok(script.includes('/D="C:\Program Files\MultiBot"'), "spacje wymagają cudzysłowów");
+});

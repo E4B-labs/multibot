@@ -10,6 +10,8 @@
 import * as electronNs from "electron";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const require = createRequire(import.meta.url);
@@ -113,15 +115,18 @@ export function registerUpdaterIpc() {
         setState({ status: "downloaded" });
         return;
       }
-      // NSIS: /D= musi być OSTATNIM parametrem; ścieżka ze spacjami → w
-      // cudzysłowach (bez spacji nie dotykamy, bo cmd /c je i tak skleja).
-      const dArg = /\s/.test(installDir) ? `/D="${installDir}"` : `/D=${installDir}`;
-      const cmd =
-        `taskkill /f /im MultiBot.exe /t >nul 2>&1 & ` +
-        `timeout /t 2 /nobreak >nul & ` +
-        `start "" /wait "${installerPath}" /S --updated ${dArg} & ` +
-        `start "" "${exePath}"`;
-      spawn("cmd.exe", ["/d", "/s", "/c", cmd], {
+      // Polecenia ida PLIKIEM, nie lancuchem po `cmd /c`. Powod zmierzony:
+      // spawn() escapuje wewnetrzne cudzyslowy po konwencji CRT, wiec
+      // `start "" /wait "C:...installer.exe"` docieralo do cmd juz
+      // z odwroconymi ukosnikami przed cudzyslowami. cmd takiej konwencji nie
+      // zna, bral to za nazwe pliku i nie uruchamial niczego. W pliku .cmd
+      // cudzyslowy sa zwykle, a sciezka skryptu jedzie jako osobny argument,
+      // ktory spawn cytuje poprawnie (sprawdzone takze dla sciezek ze
+      // spacjami). Bez `/s`, bo ono zdejmuje cudzyslowy z tej sciezki.
+      const script = buildInstallScript({ installerPath, exePath, installDir });
+      const scriptPath = path.join(os.tmpdir(), `multibot-update-${Date.now()}.cmd`);
+      fs.writeFileSync(scriptPath, script, "utf8");
+      spawn("cmd.exe", ["/d", "/c", scriptPath], {
         detached: true,
         stdio: "ignore",
         windowsHide: true,
@@ -135,6 +140,30 @@ export function registerUpdaterIpc() {
   });
 }
 
+/**
+ * Tresc skryptu instalacyjnego. Wydzielone i wyeksportowane, zeby dalo sie to
+ * sprawdzic testem bez Electrona — obie usterki, ktore tu naprawiamy, byly
+ * niewidoczne w kodzie i widoczne dopiero w zachowaniu.
+ *
+ * `taskkill` BEZ `/t`: to polecenie biegnie w procesie POTOMNYM MultiBota,
+ * wiec zabicie calego drzewa ubijalo takze jego samego. Efekt u uzytkownika:
+ * aplikacja znika, instalator nigdy nie startuje, wersja zostaje ta sama
+ * (zgloszone przy 0.1.111 -> 0.1.112, potwierdzone eksperymentem). Bez `/t`
+ * i tak gina wszystkie procesy o nazwie MultiBot.exe, bo dopasowanie idzie
+ * po `/im` — a o to chodzilo: NSIS nie wymieni zablokowanego pliku.
+ */
+export function buildInstallScript({ installerPath, exePath, installDir }) {
+  // NSIS: /D= musi byc OSTATNIM parametrem; sciezka ze spacjami w cudzyslowach.
+  const dArg = installDir.includes(" ") ? `/D="${installDir}"` : `/D=${installDir}`;
+  return [
+    "@echo off",
+    "taskkill /f /im MultiBot.exe >nul 2>&1",
+    "ping -n 3 127.0.0.1 >nul",
+    `start "" /wait "${installerPath}" /S --updated ${dArg}`,
+    `start "" "${exePath}"`,
+    "",
+  ].join("\r\n");
+}
 export function startUpdater(mainWindow, deps = {}) {
   win = mainWindow;
   // wstrzykiwanie tylko na potrzeby self-checka; produkcyjnie idą wartości domyślne
