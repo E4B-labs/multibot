@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 const panel = readFileSync(new URL("./AppSettingsPanel.tsx", import.meta.url), "utf8");
 const card = readFileSync(new URL("./BotSettingsCard.tsx", import.meta.url), "utf8");
 const picker = readFileSync(new URL("./TimeZonePicker.tsx", import.meta.url), "utf8");
+const types = readFileSync(new URL("../lib/autoVerifyTypes.ts", import.meta.url), "utf8");
 
 describe("karta Bot w ustawieniach ogólnych", () => {
   it("stoi pod kartą System, a ta jest pod Profilem", () => {
@@ -41,6 +42,16 @@ describe("karta Bot w ustawieniach ogólnych", () => {
     expect(card).toContain("Zezwalaj automatycznie");
     expect(card).toContain("Najpierw pytaj");
     expect(card).toContain("Dodaj regułę");
+  });
+
+  it("domyślnie pyta o wszystko — także w polu nowej reguły", () => {
+    // Bez żadnej reguły MultiBot pyta o każdą akcję: to wynika z włączonego
+    // przełącznika i pustej listy (server/auto-verify.ts decideAction).
+    expect(types).toContain("{ enabled: true, rules: [] }");
+    // A pole „Powinien:" ma startować na pytaniu, nie na cichej zgodzie —
+    // domyślną wartość klika się bez zastanowienia.
+    expect(card).toContain('useState<AutoVerifyDecision>("ask")');
+    expect(card).not.toContain('useState<AutoVerifyDecision>("allow")');
   });
 
   it("nie obiecuje wbudowanych kontroli bezpieczeństwa, których nie mamy", () => {

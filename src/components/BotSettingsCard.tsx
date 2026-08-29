@@ -100,7 +100,11 @@ export function BotSettingsCard({ polish }: { polish: boolean }) {
   const autoVerify = state.config?.autoVerify ?? DEFAULT_AUTO_VERIFY;
 
   const [draft, setDraft] = useState("");
-  const [draftDecision, setDraftDecision] = useState<AutoVerifyDecision>("allow");
+  // Nowa reguła startuje na „Najpierw pytaj" (Kacper 29.08). Domyślna wartość
+  // pola jest tą, którą klika się bez zastanowienia, więc ma prowadzić do
+  // pytania, a nie do cichej zgody — poluzować regułę użytkownik może zawsze,
+  // cofnąć akcję, która już poszła, nie zawsze.
+  const [draftDecision, setDraftDecision] = useState<AutoVerifyDecision>("ask");
 
   /** Każda zmiana leci od razu na serwer; odpowiedź jest pełną konfiguracją,
    *  więc karta zawsze pokazuje to, co naprawdę zapisano. */
