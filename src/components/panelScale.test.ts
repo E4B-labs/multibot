@@ -1,0 +1,68 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+// multibot: odchudzenie prawego panelu i kolumny czatu (Kacper 29.08) — panel
+// zabierał ponad połowę okna, a to, co zostawało, było na tyle wąskie, że tekst
+// łamał się po trzech słowach. Wszystkie warunki są wymiarami w źródle, więc
+// nie trzeba do tego renderować drzewa Reacta.
+const panel = readFileSync(new URL("./SettingsPanel.tsx", import.meta.url), "utf8");
+const chat = readFileSync(new URL("./ChatView.tsx", import.meta.url), "utf8");
+const composer = readFileSync(new URL("./Composer.tsx", import.meta.url), "utf8");
+const picker = readFileSync(new URL("./ModelPicker.tsx", import.meta.url), "utf8");
+const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+
+describe("skala prawego panelu i czatu", () => {
+  it("panel jest węższy niż był, a jego szerokość jest jedna", () => {
+    const widths = [...panel.matchAll(/w-\[(\d+)px\]/g)].map((m) => Number(m[1]));
+    expect(widths.length).toBeGreaterThan(0);
+    for (const width of widths) expect(width).toBeLessThanOrEqual(340);
+  });
+
+  it("awatar na górze panelu jest przyciskiem odsłaniającym wygląd", () => {
+    expect(panel).toContain("setAppearanceOpen");
+    expect(panel).toContain("aria-expanded={appearanceOpen}");
+    // siatki kształtu i koloru wchodzą dopiero za tym warunkiem
+    expect(panel).toContain("{appearanceOpen && (");
+    const grids = panel.indexOf("MASCOT_SHAPES.map");
+    const guard = panel.indexOf("{appearanceOpen && (");
+    expect(guard).toBeGreaterThan(-1);
+    expect(grids).toBeGreaterThan(guard);
+  });
+
+  it("filtr szukajki wie o rozwijanej karcie wyglądu", () => {
+    // Bez `appearanceOpen` w zależnościach karta rozwinięta przy aktywnym
+    // szukaniu ominęłaby filtr i została na ekranie.
+    expect(panel).toContain("[query, appearanceOpen]");
+  });
+
+  it("nic w panelu nie jest już większe niż 14 px", () => {
+    const sizes = [...panel.matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)].map((m) => Number(m[1]));
+    expect(sizes.length).toBeGreaterThan(0);
+    for (const size of sizes) expect(size).toBeLessThanOrEqual(14);
+  });
+
+  it("dymki czatu mają 14 px i ciaśniejszą interlinię", () => {
+    expect(chat).toContain("text-[14px] leading-[1.45]");
+    expect(chat).not.toContain("text-[15px] leading-relaxed");
+  });
+
+  it("pigułka modelu w nagłówku czatu to sama ikona", () => {
+    expect(chat).toContain("<ModelPicker bot={bot} compact />");
+    // nazwa modelu musi zostać w dymku, inaczej nie da się sprawdzić,
+    // na czym bot pracuje, bez otwierania listy
+    expect(picker).toContain("{!compact && <span");
+    expect(picker).toContain("aria-label={activeLabel || selection.model}");
+  });
+
+  it("podpis poziomu rozumowania znika przy otwartym panelu", () => {
+    expect(composer).toContain("{!state.settingsOpen && (");
+  });
+
+  it("pole pisania nie pokazuje własnego paska przewijania", () => {
+    expect(composer).toContain("data-composer-input");
+    expect(css).toContain("[data-composer-input]");
+    expect(css).toContain("scrollbar-width: none");
+    // samo przewijanie zostaje — inaczej długa wiadomość znów wypchnęłaby czat
+    expect(composer).toContain("overflow-y-auto");
+  });
+});

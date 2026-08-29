@@ -157,8 +157,10 @@ function Bubble({
           // multibot: dymek szeroki (90%) — poprzednie 35% było dla właściciela
           // za wąskie, 29.08 poprosił o niemal pełną szerokość kolumny czatu,
           // z niewielkim marginesem. Rozmiar czcionki ustawiał iteracyjnie:
-          // 15 → 11 → 17 → 13 → 15px.
-          "max-w-[90%] rounded-2xl px-2 py-[5px] text-[15px] leading-relaxed",
+          // 15 → 11 → 17 → 13 → 15 → 14px, a interlinia zeszła z `leading-relaxed`
+          // (1.625) na 1.45: przy otwartym panelu bota kolumna jest wąska i
+          // rozstrzelony tekst mieścił po trzy słowa w wierszu.
+          "max-w-[90%] rounded-2xl px-2 py-[5px] text-[14px] leading-[1.45]",
           user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
           message.pending && "opacity-60",
         )}
@@ -310,7 +312,7 @@ function StreamingBubble({ text }: { text: string }) {
     <div className="flex w-full justify-start">
       {/* multibot: ten sam rozmiar co Bubble — inaczej tekst „skakałby" po
           zakończeniu strumienia */}
-      <div className="max-w-[90%] rounded-2xl bg-card px-2 py-[5px] text-[15px] leading-relaxed text-ink">
+      <div className="max-w-[90%] rounded-2xl bg-card px-2 py-[5px] text-[14px] leading-[1.45] text-ink">
         <ChatMarkdown text={text} streaming compact />
         <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-ink-secondary align-middle" />
       </div>
@@ -473,7 +475,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           <span className="text-[15px] font-semibold text-ink">{botDisplayName(bot, polish ? "pl" : "en")}</span>
         </button>
         <div className="flex items-center gap-2">
-          <ModelPicker bot={bot} />
+          <ModelPicker bot={bot} compact />
           {/* multibot: na pulpicie pięć akcji bota chowa się pod „⋮" na końcu
               rzędu, czyli tuż na lewo od kontrolek okna — układ przeniesiony
               z aplikacji mobilnej. W przeglądarce i na serwerze telefonu
@@ -580,7 +582,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           if (!follow && atEnd()) setFollow(true);
         }}
       >
-        <div className="flex w-full flex-col gap-3 pb-4">
+        <div className="flex w-full flex-col gap-2 pb-4">
           {bot.messages.map((m) => {
             let child: ReactNode;
             switch (m.kind) {

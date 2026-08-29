@@ -25,14 +25,14 @@ function Field({
 }) {
   return (
     <label className="block">
-      <div className="mb-1.5 text-[13px] text-ink-secondary">{label}</div>
+      <div className="mb-1 text-[12px] text-ink-secondary">{label}</div>
       {children}
     </label>
   );
 }
 
 const inputCls =
-  "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline";
+  "w-full rounded-lg border border-hairline/40 bg-inset px-2.5 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline";
 
 function ComposioAccountSelector({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
@@ -48,9 +48,9 @@ function ComposioAccountSelector({ bot }: { bot: Bot }) {
   const current = bot.composioAccounts?.gmail ?? "";
   const set = (value: string) => dispatch({ type: "updateBot", botId: bot.id, patch: { composioAccounts: { ...(bot.composioAccounts ?? {}), ...(value ? { gmail: value } : {}) } } });
   return (
-    <div className="rounded-xl bg-card p-4">
-      <div className="text-[15px] font-medium text-ink">{polish ? "Konto Gmail" : "Gmail account"}</div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Wybór dotyczy tego bota." : "Selection applies to this bot."}</div>
+    <div className="rounded-xl bg-card p-3">
+      <div className="text-[14px] font-medium text-ink">{polish ? "Konto Gmail" : "Gmail account"}</div>
+      <div className="mt-0.5 text-[12px] text-ink-secondary">{polish ? "Wybór dotyczy tego bota." : "Selection applies to this bot."}</div>
       <select value={current} onChange={(event) => set(event.target.value)} className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink" aria-label={polish ? "Konto Gmail" : "Gmail account"}>
         <option value="">{polish ? "Automatyczny wybór" : "Automatic selection"}</option>
         {accounts.map((account) => <option key={account.id} value={account.id}>{account.alias || account.id} · {account.status}</option>)}
@@ -79,9 +79,9 @@ function ApprovalRules({ bot }: { bot: Bot }) {
     if (response.ok) setRules((current) => current?.filter((rule) => rule.id !== id) ?? []);
   };
   return (
-    <div className="rounded-xl bg-card p-4">
-      <div className="text-[15px] font-medium text-ink">{polish ? "Zapamiętane zgody" : "Remembered approvals"}</div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">
+    <div className="rounded-xl bg-card p-3">
+      <div className="text-[14px] font-medium text-ink">{polish ? "Zapamiętane zgody" : "Remembered approvals"}</div>
+      <div className="mt-0.5 text-[12px] text-ink-secondary">
         {polish ? "Akcje dozwolone przez opcję „Allow for all”." : "Actions allowed with “Allow for all”."}
       </div>
       {rules?.length ? (
@@ -144,9 +144,9 @@ function BotSharing({ bot }: { bot: Bot }) {
   };
 
   return (
-    <div className="rounded-xl bg-card p-4">
-      <div className="text-[15px] font-medium text-ink">{polish ? "Widoczność bota" : "Bot visibility"}</div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">
+    <div className="rounded-xl bg-card p-3">
+      <div className="text-[14px] font-medium text-ink">{polish ? "Widoczność bota" : "Bot visibility"}</div>
+      <div className="mt-0.5 text-[12px] text-ink-secondary">
         {polish ? "Publiczny dla serwera, zespołowy albo prywatny dla wybranych kont." : "Public to the server, team-only, or private for selected accounts."}
       </div>
       <select
@@ -197,6 +197,10 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   // multibot: szukajka po kartach ustawień (port z OpenMausBot #418) —
   // filtruje istniejące karty po ich tekście; zero nowej struktury sekcji.
   const [query, setQuery] = useState("");
+  // multibot: kształt i kolor awatara chowają się za klikiem w awatar na górze
+  // panelu (Kacper 29.08). Dwie siatki — dziesięć kafelków i dziesięć kółek —
+  // zajmowały pół ekranu, a rusza się je raz przy zakładaniu bota.
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
   const cardsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const container = cardsRef.current;
@@ -206,7 +210,9 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
       const match = !needle || (card.textContent ?? "").toLocaleLowerCase().includes(needle);
       (card as HTMLElement).style.display = match ? "" : "none";
     }
-  }, [query]);
+    // `appearanceOpen` w zależnościach, bo karta wyglądu dochodzi i znika:
+    // bez tego rozwinięta przy aktywnym szukaniu omijałaby filtr.
+  }, [query, appearanceOpen]);
   const patch = (
     p: Partial<
       Pick<Bot, "name" | "title" | "description" | "notifications" | "color" | "mascotExpression" | "mascotShape">
@@ -216,16 +222,18 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
 
   return (
-    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    // multibot: 400 → 340 px (Kacper 29.08). Panel zabierał ponad połowę
+    // okna 960 px i ściskał kolumnę czatu do dwóch–trzech słów w wierszu.
+    <aside className="animate-panel-in flex h-full w-[340px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
       {/* Header */}
-      <div data-shell-header className="flex items-center justify-between px-4 py-3">
+      <div data-shell-header className="flex items-center justify-between px-3 py-2.5">
         <button
           onClick={() => dispatch({ type: "toggleSettings", open: false })}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
         >
           <ChevronLeft size={18} />
         </button>
-        <span className="text-[15px] font-semibold text-ink">{polish ? "Ustawienia" : "Settings"}</span>
+        <span className="text-[14px] font-semibold text-ink">{polish ? "Ustawienia" : "Settings"}</span>
       </div>
 
       {/* multibot: szukajka ustawień — Escape czyści, dopiero potem zamyka panel */}
@@ -257,64 +265,76 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-5">
-        <div className="flex justify-center py-5">
-          <MausAvatar
-            color={bot.color}
-            shape={bot.mascotShape}
-            state={activeState}
-            size={112}
-            motion={mascotMotion?.kind ?? "none"}
-            motionKey={mascotMotion?.nonce ?? 0}
-          />
+      <div className="flex-1 overflow-y-auto px-4 pb-4">
+        <div className="flex justify-center py-4">
+          {/* Awatar jest przyciskiem: to on odsłania wybór kształtu i koloru.
+              Sam awatar bota jest jedynym miejscem, w które się o to klika. */}
+          <button
+            type="button"
+            onClick={() => setAppearanceOpen((open) => !open)}
+            aria-expanded={appearanceOpen}
+            title={polish ? "Zmień wygląd bota" : "Change bot appearance"}
+            aria-label={polish ? "Zmień wygląd bota" : "Change bot appearance"}
+            className="rounded-full ring-offset-4 ring-offset-panel transition hover:opacity-90 focus:outline-none"
+          >
+            <MausAvatar
+              color={bot.color}
+              shape={bot.mascotShape}
+              state={activeState}
+              size={72}
+              motion={mascotMotion?.kind ?? "none"}
+              motionKey={mascotMotion?.nonce ?? 0}
+            />
+          </button>
         </div>
 
-        <div ref={cardsRef} className="flex flex-col gap-4">
+        <div ref={cardsRef} className="flex flex-col gap-3">
           <ComposioAccountSelector bot={bot} />
+          {appearanceOpen && (
           <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
-            <div className="flex items-center justify-between border-b border-hairline/40 px-3 py-2.5">
-              <span className="rounded-lg bg-raised px-3 py-1.5 text-[14px] font-medium text-ink">
-                Bot
+            <div className="flex items-center justify-between border-b border-hairline/40 px-2.5 py-2">
+              <span className="rounded-lg bg-raised px-2.5 py-1 text-[13px] font-medium text-ink">
+                {polish ? "Wygląd" : "Appearance"}
               </span>
               <button
                 onClick={() => patch({ color: "green", mascotExpression: null, mascotShape: "blob" })}
-                className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+                className="rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"
               >
                 {polish ? "Resetuj" : "Reset"}
               </button>
             </div>
 
-            <div className="p-3">
-              <div className="mb-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+            <div className="p-2.5">
+              <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
                 {polish ? "Kształt ikony" : "Icon shape"}
               </div>
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-5 gap-1.5">
                 {MASCOT_SHAPES.map((shape) => (
                   <button
                     key={shape}
                     onClick={() => patch({ mascotShape: shape })}
                     className={cn(
-                      "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-raised",
+                      "flex h-[46px] items-center justify-center rounded-lg bg-inset transition-colors hover:bg-raised",
                       (bot.mascotShape ?? "blob") === shape && "ring-2 ring-accent-border",
                     )}
                     title={shape}
                     aria-label={`${polish ? "Użyj kształtu ikony" : "Use"} ${shape}`}
                   >
-                    <MausAvatar color={bot.color} shape={shape} state={activeState} size={42} animated={false} />
+                    <MausAvatar color={bot.color} shape={shape} state={activeState} size={32} animated={false} />
                   </button>
                 ))}
               </div>
 
-              <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+              <div className="mb-1.5 mt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
                 {polish ? "Kolor" : "Color"}
               </div>
-              <div className="flex flex-wrap gap-2.5">
+              <div className="flex flex-wrap gap-2">
                 {MAUS_COLOR_NAMES.map((color) => (
                   <button
                     key={color}
                     onClick={() => patch({ color })}
                     className={cn(
-                      "size-8 rounded-full border-2 border-transparent transition-transform hover:scale-110",
+                      "size-7 rounded-full border-2 border-transparent transition-transform hover:scale-110",
                       bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
                     )}
                     style={{ backgroundColor: MAUS_COLORS[color] }}
@@ -325,6 +345,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               </div>
             </div>
           </div>
+          )}
 
           <Field label={polish ? "Nazwa" : "Name"}>
             <input
@@ -343,7 +364,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           </Field>
           <Field label={polish ? "Opis" : "Description"}>
             <textarea
-              className={cn(inputCls, "min-h-[96px] resize-none")}
+              className={cn(inputCls, "min-h-[72px] resize-none")}
               placeholder={polish ? "Do czego służy ten bot" : "What this agent is for"}
               value={bot.description}
               onChange={(e) => patch({ description: e.target.value })}
@@ -352,10 +373,10 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
           <BotSharing bot={bot} />
 
-          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-3">
             <div>
-              <div className="text-[15px] font-medium text-ink">{polish ? "Model" : "Model"}</div>
-              <div className="mt-0.5 text-[13px] text-ink-secondary">
+              <div className="text-[14px] font-medium text-ink">{polish ? "Model" : "Model"}</div>
+              <div className="mt-0.5 text-[12px] text-ink-secondary">
                 {polish ? "Provider i model używany przez tego bota" : "Which provider and model this bot runs on"}
               </div>
             </div>
@@ -366,18 +387,18 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               delegation is automatic; no per-bot switch exists. */}
           <EngineAutonomy key={`autonomy-${bot.id}`} bot={bot} />
           <ApprovalRules key={`approval-rules-${bot.id}-${state.workspaceVersion}`} bot={bot} />
-          <div className="rounded-xl bg-card p-4 text-[13px] text-ink-secondary">
-            <div className="text-[15px] font-medium text-ink">{polish ? "Delegowanie między botami" : "Bot-to-bot delegation"}</div>
+          <div className="rounded-xl bg-card p-3 text-[13px] text-ink-secondary">
+            <div className="text-[14px] font-medium text-ink">{polish ? "Delegowanie między botami" : "Bot-to-bot delegation"}</div>
             <div className="mt-1 leading-relaxed">
               {polish ? <>Zawsze włączone. Oznacz bota przez <code className="rounded bg-inset px-1">@nazwa</code>. Dostępne narzędzia peer są używane, gdy provider je obsługuje; w innym razie harness przekazuje żądanie i odpowiedź.</> : <>Always on. Mention another bot with <code className="rounded bg-inset px-1">@name</code> to delegate. Native peer tools are used when provider supports them; otherwise harness routes request and reply.</>}
             </div>
           </div>
-          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
+          <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-3">
             <div>
-              <div className="text-[15px] font-medium text-ink">
+              <div className="text-[14px] font-medium text-ink">
                 {polish ? "Powiadomienia" : "Notifications"}
               </div>
-              <div className="mt-0.5 text-[13px] text-ink-secondary">
+              <div className="mt-0.5 text-[12px] text-ink-secondary">
                 {polish ? "Powiadom, gdy bot skończy albo potrzebuje odpowiedzi" : "Get notified when this agent finishes or needs input"}
               </div>
             </div>

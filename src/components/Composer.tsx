@@ -880,6 +880,7 @@ export function Composer({ bot }: { bot: Bot }) {
           <Plus size={20} />
         </button>
         <textarea
+          data-composer-input
           ref={inputRef}
           rows={1}
           value={text}
@@ -957,7 +958,12 @@ export function Composer({ bot }: { bot: Bot }) {
             title={`${polish ? "Rozumowanie" : "Reasoning"}: ${availableReasoning.find((item) => item.id === reasoning)?.label ?? (polish ? "Domyślny" : "Default")}`}
           >
             <Brain size={15} />
-            <span>{availableReasoning.find((item) => item.id === reasoning)?.label ?? (polish ? "Domyślny" : "Default")}</span>
+            {/* multibot: przy otwartym panelu bota kolumna czatu robi się wąska
+                i podpis poziomu wypychał resztę wiersza — zostaje sama ikona,
+                a poziom mówi dymek i etykieta dla czytników (Kacper 29.08). */}
+            {!state.settingsOpen && (
+              <span>{availableReasoning.find((item) => item.id === reasoning)?.label ?? (polish ? "Domyślny" : "Default")}</span>
+            )}
           </button>
           {reasoningOpen && (
             <div className="absolute bottom-full right-0 z-30 mb-2 min-w-32 overflow-hidden rounded-xl border border-hairline/40 bg-card p-1 shadow-xl">

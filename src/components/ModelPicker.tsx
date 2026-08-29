@@ -17,7 +17,10 @@ function modelLabel(instance: InstanceInfo | undefined, model: string): string {
 // model endpoints configured by the user.
 const publicInstances = (instances: InstanceInfo[]) => instances.filter((instance) => instance.instanceId !== "local");
 
-export function ModelPicker({ bot, className }: { bot: Bot; className?: string }) {
+/** `compact` = sama ikona dostawcy, bez nazwy modelu (Kacper 29.08). Tak stoi
+ *  pigułka w nagłówku czatu, gdzie kolumna bywa wąska; w panelu ustawień bota
+ *  zostaje wersja z podpisem, bo tam nazwa modelu jest treścią, nie ozdobą. */
+export function ModelPicker({ bot, className, compact }: { bot: Bot; className?: string; compact?: boolean }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [open, setOpen] = useState(false);
@@ -61,13 +64,22 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
           setRailId(selection.instanceId);
           setOpen((o) => !o);
         }}
-        className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised"
+        className={cn(
+          "flex items-center rounded-full border border-hairline/40 bg-raised/60 text-[13px] text-ink hover:bg-raised",
+          compact ? "gap-1 px-1.5 py-1" : "gap-1.5 py-1 pl-2 pr-2.5",
+        )}
+        // Bez podpisu nazwa modelu musi być choć w dymku — inaczej nie da się
+        // sprawdzić, na czym bot pracuje, bez otwierania listy.
         title={activeLabel || selection.model}
+        aria-label={activeLabel || selection.model}
       >
-        {active && active.instanceId !== "local" && <ProviderMark driverKind={active.driverKind} size={14} />}
-        <span className="max-w-[190px] truncate">
-          {activeLabel}
-        </span>
+        {/* W wersji zwartej znak dostawcy jest jedyną treścią przycisku, więc
+            rysujemy go ZAWSZE — także dla instancji „local", gdzie wersja
+            z podpisem go pomija. Bez tego zostałby sam daszek. */}
+        {(compact || (active && active.instanceId !== "local")) && (
+          <ProviderMark driverKind={active?.driverKind ?? "slafy"} size={14} />
+        )}
+        {!compact && <span className="max-w-[190px] truncate">{activeLabel}</span>}
         <ChevronDown size={14} className="text-ink-secondary" />
       </button>
 

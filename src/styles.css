@@ -162,6 +162,19 @@ body {
   background: transparent;
 }
 
+/* multibot: pole pisania nie pokazuje własnego paska przewijania (Kacper 29.08).
+   Pasek wyskakiwał, gdy tekst zaczynał się zawijać — a przy otwartym panelu bota
+   kolumna jest wąska, więc wystarczyło kilka słów i obok napisu pojawiał się
+   cienki suwak. Przewijanie zostaje (kółkiem, klawiszami, kursorem), znika samo
+   8-pikselowe koryto, którego i tak nie ma po co ciągnąć w polu na dwa zdania. */
+[data-composer-input] {
+  scrollbar-width: none;
+}
+[data-composer-input]::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 @keyframes panel-in {
   from { transform: translateX(28px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
