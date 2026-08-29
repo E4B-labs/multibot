@@ -90,11 +90,18 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     setError(null);
     void masterFetch("/api/accounts")
       .then((response) => {
-        if (!response.ok) throw new Error(polish ? "Nieprawidłowe hasło serwera" : "Invalid server password");
+        // Stary serwer bez kont (brak endpointu /api/accounts) — logujemy się
+        // bezpośrednio jako właściciel (master tokenem), jak przed wprowadzeniem
+        // kont. Bez tego użytkownik na starej wersji serwera utykał na błędzie.
+        if (response.status === 404) {
+          onLogin();
+          return { __skip: true as const };
+        }
+        if (!response.ok) throw new Error(polish ? `Nieprawidłowe hasło serwera (${response.status})` : `Invalid server password (${response.status})`);
         return response.json();
       })
       .then((body) => {
-        if (!alive) return;
+        if (!alive || !body || (body as { __skip?: boolean }).__skip) return;
         const list = Array.isArray(body.accounts) ? body.accounts : [];
         setAccounts(list);
         setShowCreate(list.length === 0);
