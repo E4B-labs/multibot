@@ -419,8 +419,11 @@ describe("engine attention (D7)", () => {
       return b && b.needsAttention == null ? b : null;
     }, "needsAttention to be cleared");
     expect(cleared.needsAttention ?? null).toBeNull();
-    // tura naprawdę poszła do silnika (nie samo czyszczenie flagi)
-    await waitFor(async () => engine.chats.some((c) => c.message === "123456") || null, "the turn to reach the engine");
+    // tura naprawdę poszła do silnika (nie samo czyszczenie flagi).
+    // `includes`, nie równość: od 29.08 przed treścią tury jedzie blok stanu
+    // floty (server/fleet-status.ts), więc wiadomość nie jest już samym tekstem
+    // użytkownika. Pilnowane zostaje to samo — że tura dotarła.
+    await waitFor(async () => engine.chats.some((c) => c.message.includes("123456")) || null, "the turn to reach the engine");
   });
 });
 
@@ -463,9 +466,18 @@ describe("duplicate = fresh engine identity (D3)", () => {
       async () => engine.chats.some((c) => c.botId === `mb-${patched.threadId}`) || null,
       "the copy's turn to reach the engine",
     );
-    // dwa boty silnika, każdy dostał wyłącznie swoją turę
-    expect(engine.chats.filter((c) => c.botId === `mb-${patched.threadId}`).map((c) => c.message)).toEqual(["kopia"]);
-    expect(engine.chats.filter((c) => c.botId === `mb-${source.threadId}`).map((c) => c.message)).toEqual(["pierwsza"]);
+    // Dwa boty silnika, każdy dostał wyłącznie swoją turę. Sprawdzamy przez
+    // zawieranie, bo od 29.08 przed treścią tury jedzie blok stanu floty
+    // (server/fleet-status.ts) — ale warunek jest MOCNIEJSZY niż przedtem:
+    // każdy silnikowy bot dostał dokładnie jedną turę i nie widział cudzej.
+    const doKopii = engine.chats.filter((c) => c.botId === `mb-${patched.threadId}`).map((c) => c.message);
+    const doZrodla = engine.chats.filter((c) => c.botId === `mb-${source.threadId}`).map((c) => c.message);
+    expect(doKopii).toHaveLength(1);
+    expect(doZrodla).toHaveLength(1);
+    expect(doKopii[0]).toContain("kopia");
+    expect(doKopii[0]).not.toContain("pierwsza");
+    expect(doZrodla[0]).toContain("pierwsza");
+    expect(doZrodla[0]).not.toContain("kopia");
   });
 });
 
@@ -497,5 +509,32 @@ describe("profile import acceptance", () => {
 
     expect((await api("POST", `/api/bots/${imported.body.bot.id}/messages`, { text: "pamiętaj mnie" })).status).toBe(202);
     await waitFor(async () => (engine.chats.some((chat) => chat.botId === engineBotId) ? true : null), "imported bot turn");
+  });
+});
+
+// multibot: stan floty w każdej turze (29.08). Sprawdzane end-to-end przez
+// prawdziwy serwer, bo cała wartość tej zmiany polega na tym, że blok
+// naprawdę DOCIERA do silnika — driver slafy nie przekazuje pola `system`,
+// więc gdyby blok trafił tam zamiast do treści tury, testy jednostkowe samej
+// funkcji nadal by przechodziły, a bot i tak nic by nie wiedział.
+describe("stan floty dociera do silnika", () => {
+  it("tura niesie nazwy i zajętość pozostałych botów", async () => {
+    const kolega = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${kolega.id}`, { name: "SasiadZFloty" });
+    const bot = (await api("POST", "/api/bots")).body.bot;
+
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "czesc" });
+    const chat = await waitFor(
+      async () => engine.chats.find((c) => c.botId === `mb-${bot.threadId}`) || null,
+      "the turn to reach the engine",
+    );
+
+    expect(chat.message).toContain("[Fleet status");
+    expect(chat.message).toContain("SasiadZFloty");
+    expect(chat.message).toContain("idle");
+    // treść użytkownika zostaje nietknięta, blok tylko ją poprzedza
+    expect(chat.message).toContain("czesc");
+    // bot nie dostaje wpisu o samym sobie
+    expect(chat.message.split("\n").filter((l) => l.includes(bot.id))).toHaveLength(0);
   });
 });

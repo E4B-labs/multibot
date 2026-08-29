@@ -9,6 +9,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 
 import { botSystemPrompt } from "./bot-prompt.ts";
+import { fleetStatusBlock } from "./fleet-status.ts";
 import * as box from "./box.ts";
 import { AttachmentStore, MAX_FILE_BYTES, resolveBotFile } from "./attachments.ts";
 import { ensureAccessToken, mountAuth, rotateAccessToken, tokenMatches } from "./auth.ts";
@@ -1794,7 +1795,16 @@ opts?: {
 
       await instance.adapter.sendTurn({
         threadId: turnThreadId,
-        text: [text, turnAttachments.length ? `Attached files:\n${turnAttachments.map((file) => `- ${file.name}: ${file.path}`).join("\n")}` : ""]
+        // multibot: stan floty leci W TREŚCI tury, nie w polu `system` —
+        // driver slafy `system` do silnika NIE przekazuje, więc blok
+        // w prompcie systemowym ominąłby po cichu wszystkie boty tego
+        // silnika. Przeliczany co turę, bo `busy` zmienia się w trakcie
+        // pracy floty; zapamiętany raz byłby gorszy niż żaden.
+        text: [
+          fleetStatusBlock(store.bots, bot.id),
+          text,
+          turnAttachments.length ? `Attached files:\n${turnAttachments.map((file) => `- ${file.name}: ${file.path}`).join("\n")}` : "",
+        ]
           .filter(Boolean).join("\n\n"),
         attachments: turnAttachments,
         model: turnModel,
