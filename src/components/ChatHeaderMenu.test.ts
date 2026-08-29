@@ -38,11 +38,11 @@ describe("menu akcji w nagłówku czatu", () => {
 // sekundzie na fazę. Czasy żyją w dwóch miejscach naraz (stałe w TS i klatki
 // w CSS) i muszą się zgadzać, bo rozjazd widać jako przeskok w połowie ruchu.
 describe("sekwencja otwierania menu", () => {
-  it("każda z trzech faz trwa pół sekundy", () => {
-    expect(UNROLL_MS).toBe(500);
-    expect(FLY_MS).toBe(500);
-    expect(TYPE_MS).toBe(500);
-    expect(UNROLL_MS + FLY_MS + TYPE_MS).toBe(1500);
+  it("każda z trzech faz trwa 0,2 s", () => {
+    expect(UNROLL_MS).toBe(200);
+    expect(FLY_MS).toBe(200);
+    expect(TYPE_MS).toBe(200);
+    expect(UNROLL_MS + FLY_MS + TYPE_MS).toBe(600);
   });
 
   it("CSS trzyma te same czasy co komponent", () => {

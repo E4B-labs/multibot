@@ -240,7 +240,7 @@ body {
    rozjeżdżają się po drodze. Klasa żyje tylko w pierwszej fazie, bo
    „inset(0 0 0 0)” przyciąłby potem kropki lecące spoza obrysu panelu. */
 .menu-unroll {
-  animation: menu-unroll 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: menu-unroll 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes menu-unroll {
   from { clip-path: inset(0 0 100% 0 round 0.75rem); }
@@ -251,7 +251,7 @@ body {
    strony i podaje w --dot-dx/--dot-dy, więc trafia niezależnie od czcionki.
    0,5 s, nie sekunda: przy sekundzie lot był wyraźnie za wolny. */
 .menu-dot {
-  animation: menu-dot-fly 0.5s cubic-bezier(0.34, 0.9, 0.3, 1) both;
+  animation: menu-dot-fly 0.2s cubic-bezier(0.34, 0.9, 0.3, 1) both;
 }
 @keyframes menu-dot-fly {
   from { opacity: 0; transform: translate(var(--dot-dx), var(--dot-dy)) scale(0.5); }
@@ -273,7 +273,7 @@ body {
    opakowania nie mają wpływu na wygląd końcowy. */
 .menu-letter {
   display: inline-block;
-  animation: menu-letter-in 0.12s ease-out both;
+  animation: menu-letter-in 0.08s ease-out both;
 }
 @keyframes menu-letter-in {
   from { opacity: 0; transform: translateY(2px); }

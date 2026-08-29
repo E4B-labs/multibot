@@ -7,11 +7,12 @@
 // otwarte, szare gdy zamknięte. Otwarty panel bota NIE podświetla przycisku —
 // tak jest na telefonie.
 //
-// Otwarcie gra sekwencję na 1,5 s (Kacper 28.08), po pół sekundy na fazę:
+// Otwarcie gra sekwencję na 0,6 s (Kacper 29.08), po 0,2 s na fazę:
 //   1. panel rozwija się jak zwój, od góry do dołu, jeszcze pusty,
 //   2. z przycisku „⋮" wylatuje pięć kropek i siada na miejscach ikon,
 //   3. z każdej kropki wychodzi w prawo etykieta, litera po literze.
-// Wszystkie trzy skrócone z sekundy: przy 1 s każda była za wolna.
+// Skracane dwa razy: najpierw z 1 s na 0,5 s, potem na 0,2 s — przy dłuższych
+// czasach menu wyraźnie zwlekało z otwarciem.
 // Po sekwencji panel renderuje się dokładnie tak jak przedtem — bez opakowań
 // na litery i bez klas animacji, żeby stan końcowy był identyczny.
 //
@@ -32,12 +33,13 @@ export type ChatHeaderAction = (typeof CHAT_HEADER_ACTIONS)[number];
 /** Czasy faz. Te same liczby stoją w klatkach CSS (src/styles.css:
  * menu-unroll, menu-dot-fly, menu-letter-in) i muszą się zgadzać —
  * rozjazd widać jako przeskok w połowie ruchu. */
-export const UNROLL_MS = 500;
-export const FLY_MS = 500;
-export const TYPE_MS = 500;
+export const UNROLL_MS = 200;
+export const FLY_MS = 200;
+export const TYPE_MS = 200;
 /** Ile trwa pojawienie się jednej litery. Reszta okna to rozjazd opóźnień —
- * przy 0,5 s na całą fazę zostaje go 0,38 s, więc litera musi być krótka. */
-export const LETTER_MS = 120;
+ * przy 0,2 s na całą fazę zostaje go 0,12 s. Litera musi więc być bardzo
+ * krótka, inaczej wszystkie zapaliłyby się naraz i efekt pisania by zniknął. */
+export const LETTER_MS = 80;
 
 export type MenuPhase = "unroll" | "fly" | "type" | "done";
 
