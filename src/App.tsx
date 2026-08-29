@@ -99,7 +99,14 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         setAccounts(list);
         setShowCreate(list.length === 0);
       })
-      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => {
+        if (!alive) return;
+        // Nie utykaj na „Ładowanie…" — pokaż formularz (i komunikat), żeby
+        // dało się utworzyć konto lub wrócić do hasła serwera (przycisk Wstecz).
+        setAccounts([]);
+        setShowCreate(true);
+        setError(e instanceof Error ? e.message : String(e));
+      })
       .finally(() => alive && setBusy(false));
     return () => {
       alive = false;
@@ -190,7 +197,16 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
           </>
         ) : (
           <>
-            <h1 className="text-[18px] font-semibold">{polish ? "Zaloguj się do konta" : "Sign in to your account"}</h1>
+            <div className="flex items-center justify-between gap-2">
+              <h1 className="text-[18px] font-semibold">{polish ? "Zaloguj się do konta" : "Sign in to your account"}</h1>
+              <button
+                type="button"
+                onClick={() => { setToken(""); setStage("server"); }}
+                className="rounded-lg bg-raised px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover"
+              >
+                {polish ? "Wstecz" : "Back"}
+              </button>
+            </div>
             {accounts === null ? (
               <p className="mt-3 text-[13px] text-ink-secondary">{busy ? (polish ? "Ładowanie…" : "Loading…") : ""}</p>
             ) : showCreate ? (
