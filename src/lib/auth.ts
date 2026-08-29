@@ -11,12 +11,21 @@ export function getAuthToken(): string {
 }
 
 export function setAuthToken(token: string): void {
+  const value = token.trim();
   try {
-    const value = token.trim();
     if (value) localStorage.setItem(TOKEN_KEY, value);
     else localStorage.removeItem(TOKEN_KEY);
   } catch {
     /* storage can be disabled in private browsing */
+  }
+  // multibot: zachowaj token na dysku (userData), żeby main.mjs mógł go
+  // wstrzyknąć w fragmencie URL przy następnym starcie — bez tego trzeba
+  // by wpisywać go przy każdym uruchomieniu. Brak mostu (przeglądarka/testy)
+  // nie jest błędem: localStorage sam wystarcza.
+  try {
+    (window as unknown as { ogb?: { auth?: { save?: (t: string) => unknown } } }).ogb?.auth?.save?.(value);
+  } catch {
+    /* most niedostępny — OK */
   }
 }
 
@@ -25,6 +34,11 @@ export function clearAuthToken(): void {
     localStorage.removeItem(TOKEN_KEY);
   } catch {
     /* storage can be disabled in private browsing */
+  }
+  try {
+    (window as unknown as { ogb?: { auth?: { clear?: () => unknown } } }).ogb?.auth?.clear?.();
+  } catch {
+    /* most niedostępny — OK */
   }
 }
 
