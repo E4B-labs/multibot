@@ -31,6 +31,13 @@ declare global {
        * absent in plain browsers, so callers must feature-detect. */
       setUnreadCount?(count: number): void;
       exportDiagnostics?(): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
+      /** Akceleracja sprzętowa; domyślnie wyłączona. Zmiana działa dopiero po
+       * restarcie — Electron rozstrzyga to przed gotowością aplikacji.
+       * Nieobecne w przeglądarce, więc callers muszą sprawdzać obecność. */
+      hardwareAcceleration?: {
+        get(): Promise<boolean>;
+        set(enabled: boolean): Promise<boolean>;
+      };
       /** Własne kontrolki okna. Preload wystawia je tylko tam, gdzie ramka
        * systemowa jest zdjęta (Windows, Linux) — nieobecne pod macOS i w
        * przeglądarce, więc obecność tego pola jest sygnałem, że interfejs

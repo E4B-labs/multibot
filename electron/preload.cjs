@@ -43,6 +43,13 @@ contextBridge.exposeInMainWorld("ogb", {
   setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
 
+  /** Akceleracja sprzętowa. Zapis dopiero następnym uruchomieniem coś zmienia:
+   * Electron rozstrzyga to przed gotowością aplikacji. */
+  hardwareAcceleration: {
+    get: () => ipcRenderer.invoke("prefs:hardware-acceleration"),
+    set: (enabled) => ipcRenderer.invoke("prefs:set-hardware-acceleration", enabled),
+  },
+
   /** Własne kontrolki okna — obecne wyłącznie tam, gdzie okno leci bez ramki
    * systemowej (Windows, Linux). Nieobecne pod macOS i w przeglądarce, więc
    * ich obecność jest dla interfejsu jedynym sygnałem "rysujesz je sam". */

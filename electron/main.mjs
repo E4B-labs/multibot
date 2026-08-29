@@ -15,6 +15,7 @@ import { buildDiagnosticsReport, decodeLogTail, diagnosticsFileName } from "./di
 
 const require = createRequire(import.meta.url);
 const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
+const { parseHardwareAcceleration, withHardwareAcceleration } = require("./hardware-acceleration.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // multibot (G6): Task Scheduler starts packaged app without a window. Electron
@@ -25,6 +26,28 @@ const SERVER_ONLY = process.argv.includes("--server-only");
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+
+// multibot: akceleracja sprzętowa. DOMYŚLNIE WYŁĄCZONA (Kacper 29.08) —
+// Electron włącza ją sam, więc to my ją zdejmujemy, dopóki użytkownik nie
+// przestawi przełącznika w Ustawieniach → Narzędzia.
+//
+// Musi to pójść TUTAJ, na górze modułu: „disableHardwareAcceleration()” działa
+// wyłącznie zanim aplikacja stanie się gotowa. Dlatego preferencja leży
+// w zwykłym pliku JSON i czyta się ją synchronicznie — z rendererem byłoby
+// już za późno. Z tego samego powodu zmiana wymaga restartu aplikacji.
+function appPrefsFile() {
+  return path.join(app.getPath("userData"), "app-prefs.json");
+}
+
+function hardwareAccelerationEnabled() {
+  try {
+    return parseHardwareAcceleration(fs.readFileSync(appPrefsFile(), "utf8"));
+  } catch {
+    return false;
+  }
+}
+
+if (!hardwareAccelerationEnabled()) app.disableHardwareAcceleration();
 // multibot: Windows i Linux jadą bez ramki systemowej — jasny pasek tytułu
 // z ikoną i min/max/close siedział osobnym pasem nad interfejsem, więc
 // kontrolki okna rysuje sobie sam interfejs (src/components/WindowControls.tsx)
@@ -129,6 +152,25 @@ function trackWindowForState(win) {
 // tej samej ikony. Wyglądało to na dwie ikony jednej aplikacji, a nie na
 // licznik. Kacper 28.08 — zdejmujemy; wróci dopiero z osobną grafiką
 // plakietki (kropka albo liczba), nie z miniaturą ikony.
+ipcMain.handle("prefs:hardware-acceleration", () => hardwareAccelerationEnabled());
+ipcMain.handle("prefs:set-hardware-acceleration", (_event, enabled) => {
+  const file = appPrefsFile();
+  let raw = null;
+  try {
+    raw = fs.readFileSync(file, "utf8");
+  } catch {
+    /* pierwszy zapis — plik jeszcze nie istnieje */
+  }
+  const next = withHardwareAcceleration(raw, enabled);
+  // Zapis przez plik tymczasowy i rename, tak jak stan okna: ubicie procesu
+  // w połowie zapisu nie zostawi uciętego JSON-a, który przy starcie
+  // cofnąłby ustawienie do domyślnego.
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  return next.hardwareAcceleration;
+});
+
 ipcMain.on("desktop:unread-count", (_event, rawCount) => {
   const count = normalizeUnreadCount(rawCount);
   if (process.platform === "darwin") {

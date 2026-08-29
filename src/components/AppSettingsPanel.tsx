@@ -5,6 +5,9 @@ import { ArrowLeft, ChevronRight, FileDown, Loader2, Plus, QrCode, Trash2 } from
 // multibot: ikony szyny sekcji przerysowane z lucide, żeby dało się animować
 // ich części na kliknięcie (suwaki jeżdżą, strzałki się kręcą, klucz dokręca).
 import { RefreshTabIcon, SlidersTabIcon, WrenchTabIcon } from "./SettingsTabIcons";
+// multibot: piąta kopia tej samej linii (App.tsx, ChatView.tsx, Onboarding.tsx,
+// Sidebar.tsx). Tu decyduje o jednym: czy pokazać przełącznik akceleracji.
+const isElectron = navigator.userAgent.includes("Electron");
 import { useEffect, useState } from "react";
 import { useStore } from "@/state/store";
 import { ApiKeyRow } from "./ApiKeys";
@@ -944,6 +947,58 @@ function MotionSettings({ polish }: { polish: boolean }) {
   );
 }
 
+// multibot: akceleracja sprzętowa. Domyślnie WYŁĄCZONA (Kacper 29.08).
+// Electron rozstrzyga ją przed gotowością aplikacji, więc przełącznik tylko
+// zapisuje preferencję — działa dopiero po restarcie i tak to podpisujemy.
+// Widoczny wyłącznie na pulpicie: w przeglądarce nie ma czego przełączać.
+function HardwareAccelerationRow({ polish }: { polish: boolean }) {
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    window.ogb?.hardwareAcceleration
+      ?.get()
+      .then((value) => alive && setEnabled(value === true))
+      .catch(() => alive && setEnabled(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (!isElectron || !window.ogb?.hardwareAcceleration) return null;
+
+  const toggle = () => {
+    const next = !enabled;
+    setEnabled(next);
+    // Cofamy przełącznik, gdy zapis padnie — inaczej panel pokazywałby stan,
+    // którego nie ma na dysku, i restart cicho by go wycofał.
+    window.ogb?.hardwareAcceleration?.set(next).catch(() => setEnabled(!next));
+  };
+
+  return (
+    <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/40 pt-4">
+      <div>
+        <div className="text-[15px] font-medium text-ink">
+          {polish ? "Używaj akceleracji sprzętowej" : "Use hardware acceleration"}
+        </div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">
+          {polish
+            ? "Rysowanie interfejsu przez kartę graficzną. Zmiana zadziała po ponownym uruchomieniu aplikacji."
+            : "Render the interface on the GPU. Takes effect after you restart the app."}
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={polish ? "Używaj akceleracji sprzętowej" : "Use hardware acceleration"}
+        onClick={toggle}
+        className={cn("relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors", enabled ? "bg-accent" : "bg-raised")}
+      >
+        <span className={cn("absolute top-[3px] size-5 rounded-full bg-white transition-[left]", enabled ? "left-[21px]" : "left-[3px]")} />
+      </button>
+    </div>
+  );
+}
 const settingsTabs = [
   {
     id: "general",
@@ -1129,6 +1184,7 @@ export function AppSettingsPanel() {
               <EngineStatusRow />
               <MachineResources />
               <DiagnosticsRow />
+              <HardwareAccelerationRow polish={polish} />
             </>
           )}
           </div>
