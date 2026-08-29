@@ -19,7 +19,7 @@
  *
  * Made with Blob Studio.
  */
-import React, { useEffect, useId, useMemo, useRef } from 'react'
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { motionIsReduced } from '@/lib/motion'
 
 /* ------------------------------------------------------------------- shape */
@@ -1360,6 +1360,21 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       glyphs,
     }
 
+    // Płynna zmiana kształtu: przy podmiance `shape` rozmywamy sylwetkę (wychodzi
+    // stara, wchodzi nowa) zamiast twardo ją podmieniać. `renderedShape` to kształt
+    // aktualnie rysowany — dogania `shape` w połowie rozmycia.
+    const [renderedShape, setRenderedShape] = useState(shape)
+    const [shapeFade, setShapeFade] = useState(1)
+    useEffect(() => {
+      if (shape.name === renderedShape.name) return
+      setShapeFade(0)
+      const t = setTimeout(() => {
+        setRenderedShape(shape)
+        requestAnimationFrame(() => requestAnimationFrame(() => setShapeFade(1)))
+      }, 110)
+      return () => clearTimeout(t)
+    }, [shape, renderedShape])
+
     const selectExpression = (index: number) => {
       const e = engine.current
       const i = ((index % EXPRESSION_COUNT) + EXPRESSION_COUNT) % EXPRESSION_COUNT
@@ -1570,8 +1585,8 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     paintRef.current = paint
 
     const dimension = typeof size === 'number' ? `${size}px` : size
-    const label = title === undefined ? `${shape.name} mascot` : title
-    const body = shape.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
+    const label = title === undefined ? `${renderedShape.name} mascot` : title
+    const body = renderedShape.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
 
     return (
       <svg
@@ -1594,8 +1609,8 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
               which is also why shape.clip is pre-flattened to bare shapes. */}
           <clipPath
             id={`${uid}-clip`}
-            transform={shape.fit || undefined}
-            dangerouslySetInnerHTML={{ __html: shape.clip }}
+            transform={renderedShape.fit || undefined}
+            dangerouslySetInnerHTML={{ __html: renderedShape.clip }}
           />
         </defs>
         <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
@@ -1604,11 +1619,11 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           {/* Body and face move together — the face is painted on the body, not floating
               in front of it, so a squash or a tilt has to carry both. The glyph rides the
               same motion but is not faded with them, since it replaces them. */}
-          <g ref={bodyGroup}>
+          <g ref={bodyGroup} style={{ opacity: shapeFade, transition: 'opacity 110ms ease' }}>
           <g ref={bodyContent}>
-          <g transform={shape.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
+          <g transform={renderedShape.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
           <g clipPath={`url(#${uid}-clip)`}>
-            <g transform={anchorTransform(shape.anchor)}>
+            <g transform={anchorTransform(renderedShape.anchor)}>
               <path ref={eye0} fill={eyeColor} />
               <path ref={eye1} fill={eyeColor} />
               {showMouth && (
