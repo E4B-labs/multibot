@@ -186,6 +186,12 @@ function Shell() {
     <div className={cn("multibot-shell flex h-full flex-col", frameless && "multibot-frameless")}>
       {/* multibot: Cmd/Ctrl+K command palette — fixed overlay, renders null until opened */}
       <CmdK />
+      {/* multibot: panel „Serwer i urządzenia" to modal na całą powłokę
+          (fixed inset-0), a otwiera go przycisk z EKRANU USTAWIEŃ. Renderowany
+          w gałęzi „ustawienia zamknięte" nie miał jak się pokazać: klik ustawiał
+          flagę, panel czekał i wyskakiwał dopiero po wyjściu z ustawień.
+          Dlatego stoi tu, poza tym rozgałęzieniem — pilnuje tego App.test.ts. */}
+      {state.serverAccessOpen && <ServerAccessPanel />}
       <div className="relative flex min-h-0 flex-1">
         {state.appSettingsOpen ? (
           <AppSettingsPanel />
@@ -223,8 +229,6 @@ function Shell() {
             {state.teamMapOpen && (
               <TeamMapPanel onClose={() => dispatch({ type: "toggleTeamMap", open: false })} />
             )}
-            {/* multibot: panel „Serwer i urządzenia" — z 3-kropek w nagłówku czatu */}
-            {state.serverAccessOpen && <ServerAccessPanel />}
             {/* multibot: F9-FE — pokój grupowy; otwierany wyłącznie z sekcji Groups
                 (widocznej tylko przy botach slafy), klucz per grupę = świeży mount */}
             {state.pluginsOpen && <PluginsPanel />}
