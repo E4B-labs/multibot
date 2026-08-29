@@ -1089,6 +1089,15 @@ bus.subscribe((event: RuntimeEvent) => {
         if (busyWatchdog.has(bot.id)) { clearTimeout(busyWatchdog.get(bot.id)!); busyWatchdog.delete(bot.id); }
         activeCommsDepth.delete(bot.id);
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
+        // multibot: nieudana tura zwalnia bota tak samo jak udana, więc musi
+        // tak samo ruszyć to, co czekało w kolejkach. Bez tego list od innego
+        // bota (albo wiadomość użytkownika) dopisany do kolejki w trakcie tury
+        // zostawał w niej bez śladu, dopóki bot nie odbył przypadkiem KOLEJNEJ
+        // tury albo serwer się nie zrestartował. Trzy pozostałe miejsca, które
+        // zwalniają bota, opróżniają kolejki od zawsze — to jedyne tego nie
+        // robiło.
+        drainQueuedUserMessages(bot.id);
+        drainQueuedBotMail(bot.id);
       }
       break;
     case "turn.completed": {

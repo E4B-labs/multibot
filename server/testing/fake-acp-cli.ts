@@ -5,7 +5,7 @@
 // session/prompt, and streams session/update notifications for a scripted
 // turn. Failure modes mirror how real ACP agents misbehave:
 //
-//   FAKE_ACP_MODE   happy (default) | exit-early | hang | no-auth | permission
+//   FAKE_ACP_MODE   happy (default) | exit-early | crash-mid-turn | hang | no-auth | permission
 //                   | ask-peer/send-mail (spawn the injected "agents" MCP server from
 //                     session/new's mcpServers, call list_bots + ask_bot on a
 //                     peer, and reply with what the peer said — the comms e2e)
@@ -156,6 +156,23 @@ function handle(msg: any) {
         // never resolve the prompt — lets tests exercise interrupt
         setInterval(() => {}, 1_000);
         return;
+      }
+      if (mode === "error-mid-turn") {
+        // Dostawca odpowiada BŁĘDEM na prompt, ale proces żyje dalej — sesja
+        // zostaje otwarta. To ta ścieżka, którą harness zamienia na
+        // runtime.error bez turn.completed.
+        setTimeout(() => {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "provider exploded" } });
+        }, 400);
+        return;
+      }
+      if (mode === "crash-mid-turn") {
+        // Prawdziwe CLI potrafi paść PO otwarciu sesji, w środku tury: brak
+        // klucza, ubity proces, wyjątek dostawcy. Harness zamienia to na
+        // zdarzenie runtime.error — i to jest jedyny sygnał, że tura się
+        // skończyła, bo turn.completed już nie przyjdzie.
+        process.stderr.write("fake-acp: simulated provider failure mid-turn\n");
+        process.exit(4);
       }
       if (mode === "room") {
         // collaboration-room turn: one contribution per process, so progress

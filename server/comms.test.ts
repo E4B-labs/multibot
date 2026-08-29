@@ -111,6 +111,18 @@ describe("comms e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "send-mail" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          // dostawca odpowiada błędem na prompt, proces żyje — runtime.error
+          grokError: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "error-mid-turn" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
+          // CLI pada w środku tury — dostawca bez klucza, ubity proces, wyjątek
+          grokCrash: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "crash-mid-turn" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           // trzeci tryb: bot oddaje komputer człowiekowi (logowanie/2FA/captcha)
           grokHandoff: {
             driver: "grokAgent",
@@ -249,6 +261,103 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(helperBot.busy).toBeFalsy();
     },
     40_000,
+  );
+
+  // multibot: gdy tura pytanego bota PADNIE, harness wysyła runtime.error —
+  // turn.completed już nie przyjdzie. askBotAndWait nasłuchiwał wyłącznie
+  // turn.completed, więc wołający wisiał do własnego sufitu: przy ask_bot
+  // dwadzieścia minut, z otwartym requestem HTTP. Dla użytkownika wygląda to
+  // jak „rozmowa bot↔bot nie działa" — bez błędu, bez odpowiedzi, bez końca.
+  it(
+    "nie wiesza wołającego, gdy tura pytanego bota padnie",
+    async () => {
+      // list_bots ma zwrócić WYŁĄCZNIE Crashera — atrapa bierze pierwsze id
+      for (const b of (await api("GET", "/api/bots")).body.bots) {
+        await api("PATCH", `/api/bots/${b.id}`, { hidden: true });
+      }
+      const crasher = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${crasher.id}`, {
+        name: "Crasher",
+        modelSelection: { instanceId: "grokCrash", model: "fake-model" },
+      });
+      const asker = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${asker.id}`, {
+        name: "Pytacz",
+        modelSelection: { instanceId: "grok", model: "fake-model" },
+      });
+
+      expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Crasher ping" })).status).toBe(202);
+
+      // 25 s to wielokrotność normalnej tury i ułamek dwudziestominutowego
+      // sufitu ask_bot — jeśli wołający tu nie wróci, to znaczy, że wisi
+      const deadline = Date.now() + 25_000;
+      let askerBot: any;
+      for (;;) {
+        askerBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
+        if (!askerBot.busy && askerBot.messages.some((m: any) => m.role === "bot" && m.kind === "text")) break;
+        if (Date.now() > deadline) {
+          throw new Error(
+            "wołający nie wrócił po awarii pytanego bota — wisi na turn.completed, które nigdy nie przyjdzie. " +
+              `busy=${askerBot.busy} wiadomości=${JSON.stringify(askerBot.messages.slice(-4))}`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      // wołający dostaje ODPOWIEDŹ, a nie ciszę: treść nieistotna, liczy się powrót
+      const reply = askerBot.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
+      expect(reply?.text ?? "").not.toBe("");
+      // pytany bot nie zostaje zablokowany jako zajęty po własnej awarii
+      const crasherBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === crasher.id);
+      expect(crasherBot.busy).toBeFalsy();
+    },
+    45_000,
+  );
+
+  // multibot: poczta czeka w kolejce, gdy adresat jest zajęty, i rusza po jego
+  // turze. Gałąź runtime.error zwalniała bota, ale JAKO JEDYNA nie opróżniała
+  // kolejek — trzy pozostałe miejsca zwalniające bota robią to zawsze. Efekt:
+  // list od bota przepada bez śladu, jeśli tura adresata akurat padnie.
+  it(
+    "poczta czekająca na zajętego bota rusza także wtedy, gdy jego tura padnie",
+    async () => {
+      for (const b of (await api("GET", "/api/bots")).body.bots) {
+        await api("PATCH", `/api/bots/${b.id}`, { hidden: true });
+      }
+      // adresat: tura kończy się błędem dostawcy (proces żyje, sesja otwarta)
+      const target = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${target.id}`, {
+        name: "Padajacy",
+        modelSelection: { instanceId: "grokError", model: "fake-model" },
+      });
+      // nadawca: atrapa woła send_bot_mail na pierwszym widocznym bocie
+      const sender = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${sender.id}`, {
+        name: "Nadawca",
+        modelSelection: { instanceId: "grokMailSend", model: "fake-model" },
+      });
+
+      // adresat zajęty: startujemy jego turę, która za chwilę padnie
+      expect((await api("POST", `/api/bots/${target.id}/messages`, { text: "pracuj" })).status).toBe(202);
+      // ...i w tym czasie nadawca wysyła do niego pocztę
+      expect((await api("POST", `/api/bots/${sender.id}/messages`, { text: "wyslij" })).status).toBe(202);
+
+      const deadline = Date.now() + 25_000;
+      for (;;) {
+        const bots = (await api("GET", "/api/bots")).body.bots;
+        const t2 = bots.find((b: any) => b.id === target.id);
+        const dostal = t2.messages.some((m: any) => m.role === "user" && m.text?.includes("Agent mail from"));
+        if (dostal) break;
+        if (Date.now() > deadline) {
+          throw new Error(
+            "poczta nie ruszyla po nieudanej turze adresata — zostala w kolejce bez sladu. " +
+              `busy=${t2.busy} wiadomosci=${JSON.stringify(t2.messages.slice(-4))}`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    },
+    45_000,
   );
 
   it(
