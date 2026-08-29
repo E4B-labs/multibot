@@ -7,7 +7,6 @@ import { useStore } from "@/state/store";
 import { useLanguage } from "@/lib/language";
 import {
   AccessTokenSettings,
-  AccountManagementSettings,
   InstallAppSettings,
   PairDeviceSettings,
   WorkspaceAccessSettings,
@@ -40,7 +39,6 @@ export function ServerAccessPanel() {
         </div>
         <WorkspaceAccessSettings />
         <AccessTokenSettings />
-        <AccountManagementSettings />
         <PairDeviceSettings />
         <InstallAppSettings />
       </div>

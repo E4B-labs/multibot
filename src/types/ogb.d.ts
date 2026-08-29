@@ -58,22 +58,6 @@ declare global {
         currentVersion(): Promise<string>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
-      /** Trwałe tokeny dostępu (userData). Brak mostu w przeglądarce — callers
-       * muszą sprawdzać obecność `save`/`load` itd. */
-      auth?: {
-        /** Odczytaj master token (hasło serwera) zapisany na dysku. */
-        load(): Promise<string | null>;
-        /** Zapisz master token na dysku (pusty = usuń). */
-        save(token: string): Promise<unknown>;
-        /** Usuń master token z dysku. */
-        clear(): Promise<unknown>;
-        /** Odczytaj token konta użytkownika zapisany na dysku. */
-        loadAccount(): Promise<string | null>;
-        /** Zapisz token konta na dysku (pusty = usuń). */
-        saveAccount(token: string): Promise<unknown>;
-        /** Usuń token konta z dysku. */
-        clearAccount(): Promise<unknown>;
-      };
     };
   }
 }

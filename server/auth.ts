@@ -77,16 +77,7 @@ function rejectUpgrade(socket: Duplex) {
  *  simply never satisfied, and the bearer token remains the only way in. */
 export type SessionCheck = (req: IncomingMessage) => boolean;
 
-export function mountAuth(
-  server: Server,
-  getToken: () => string,
-  hasSession: SessionCheck = () => false,
-  // multibot: trzecia, równorzędna droga wejścia — token sesji KONTA
-  // użytkownika (z /api/accounts/login). Gdy brak kont, `hasAccountSession`
-  // nigdy nie jest spełnione i master token pozostaje jedyną drogą.
-  hasAccountSession: (token: string) => boolean = () => false,
-  resolveAccountId: (token: string) => string | null = () => null,
-) {
+export function mountAuth(server: Server, getToken: () => string, hasSession: SessionCheck = () => false) {
   const sessions = new Set<Duplex>();
   const tracked = new WeakSet<Duplex>();
   const track = (socket: Duplex) => {
@@ -130,19 +121,11 @@ export function mountAuth(
         // that is what it is trading the code for. The route rate-limits and
         // single-uses the code itself.
         url.pathname === "/api/pair/claim");
-    const bearer = requestToken(req);
-    const bearerAuthed = tokenMatches(bearer, getToken());
+    const bearerAuthed = tokenMatches(requestToken(req), getToken());
     const sessionAuthed = hasSession(req);
-    // Token konta liczy się TYLKO gdy nie jest to master token ani sesja
-    // urządzenia — master token ma pierwszeństwo (pozostaje "owner").
-    const accountAuthed = !bearerAuthed && !sessionAuthed && !!bearer && hasAccountSession(bearer);
-    const authed = bearerAuthed || sessionAuthed || accountAuthed;
+    const authed = bearerAuthed || sessionAuthed;
     if (sessionAuthed) req.headers["x-multibot-auth"] = "session";
     else if (bearerAuthed) req.headers["x-multibot-auth"] = "token";
-    else if (accountAuthed) {
-      req.headers["x-multibot-auth"] = "account";
-      if (bearer) req.headers["x-multibot-account-id"] = resolveAccountId(bearer) ?? "";
-    }
     if (!publicRoute && !loggingIn && !internallyAuthenticated && !authed) {
       return unauthorized(res);
     }
@@ -159,18 +142,12 @@ export function mountAuth(
     // Authorization header, and a phone logging in with Google has no token.
     // The mobile WebView instead appends the bearer as ?token= on the
     // websockify upgrade — same gate, same credential.
-    const bearer = requestToken(req);
-    const bearerAuthed = tokenMatches(bearer, getToken());
+    const bearerAuthed = tokenMatches(requestToken(req), getToken());
     const sessionAuthed = hasSession(req);
     const vncAuthed = tokenMatches(vncUpgradeToken(req), getToken());
-    const accountAuthed = !bearerAuthed && !sessionAuthed && !vncAuthed && !!bearer && hasAccountSession(bearer);
-    const authed = bearerAuthed || sessionAuthed || vncAuthed || accountAuthed;
+    const authed = bearerAuthed || sessionAuthed || vncAuthed;
     if (sessionAuthed) req.headers["x-multibot-auth"] = "session";
     else if (bearerAuthed) req.headers["x-multibot-auth"] = "token";
-    else if (accountAuthed) {
-      req.headers["x-multibot-auth"] = "account";
-      if (bearer) req.headers["x-multibot-account-id"] = resolveAccountId(bearer) ?? "";
-    }
     if (!authed) {
       // Odrzucony upgrade jest niewidoczny dla klienta poza zerwanym gniazdem —
       // przeglądarka pokazuje pusty ekran i tyle. Bez tej linii diagnoza „czarny

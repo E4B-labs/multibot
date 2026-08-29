@@ -1,9 +1,5 @@
 // G2: one authenticated transport for every browser request.
 const TOKEN_KEY = "multibot.auth.token";
-// multibot: osobny token KONTA użytkownika (username+password) — niezależny
-// od master tokena (hasła serwera). To nim podpisujemy zwykłe zapytania, a
-// master token zostawiamy do endpointów owner (zarządzanie kontami itp.).
-const ACCOUNT_TOKEN_KEY = "multibot.auth.account";
 const AUTH_REQUIRED = "multibot:auth-required";
 
 export function getAuthToken(): string {
@@ -15,21 +11,12 @@ export function getAuthToken(): string {
 }
 
 export function setAuthToken(token: string): void {
-  const value = token.trim();
   try {
+    const value = token.trim();
     if (value) localStorage.setItem(TOKEN_KEY, value);
     else localStorage.removeItem(TOKEN_KEY);
   } catch {
     /* storage can be disabled in private browsing */
-  }
-  // multibot: zachowaj token na dysku (userData), żeby main.mjs mógł go
-  // wstrzyknąć w fragmencie URL przy następnym starcie — bez tego trzeba
-  // by wpisywać go przy każdym uruchomieniu. Brak mostu (przeglądarka/testy)
-  // nie jest błędem: localStorage sam wystarcza.
-  try {
-    window.ogb?.auth?.save?.(value);
-  } catch {
-    /* most niedostępny — OK */
   }
 }
 
@@ -38,50 +25,6 @@ export function clearAuthToken(): void {
     localStorage.removeItem(TOKEN_KEY);
   } catch {
     /* storage can be disabled in private browsing */
-  }
-  try {
-    window.ogb?.auth?.clear?.();
-  } catch {
-    /* most niedostępny — OK */
-  }
-}
-
-// multibot: token KONTA użytkownika — pamiętany osobno od master tokena, żeby
-// nie pytać o login przy każdym uruchomieniu. Zapis na dysku (userData) przez
-// most `window.ogb.auth.saveAccount/clearAccount` — analogicznie do mastera.
-export function getAccountToken(): string {
-  try {
-    return localStorage.getItem(ACCOUNT_TOKEN_KEY) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function setAccountToken(token: string): void {
-  const value = token.trim();
-  try {
-    if (value) localStorage.setItem(ACCOUNT_TOKEN_KEY, value);
-    else localStorage.removeItem(ACCOUNT_TOKEN_KEY);
-  } catch {
-    /* storage can be disabled in private browsing */
-  }
-  try {
-    window.ogb?.auth?.saveAccount?.(value);
-  } catch {
-    /* most niedostępny — OK */
-  }
-}
-
-export function clearAccountToken(): void {
-  try {
-    localStorage.removeItem(ACCOUNT_TOKEN_KEY);
-  } catch {
-    /* storage can be disabled in private browsing */
-  }
-  try {
-    window.ogb?.auth?.clearAccount?.();
-  } catch {
-    /* most niedostępny — OK */
   }
 }
 
@@ -92,46 +35,11 @@ export function bootstrapLocalAuthToken(): void {
   history.replaceState(null, "", `${location.pathname}${location.search}`);
 }
 
-// multibot: odczytaj zapamiętany na dysku token konta (userData) i wrzuć go do
-// localStorage, żeby `getAccountToken()` od razu go widziało. Asynchroniczne
-// (most IPC), więc App sam decyduje o stanie `authenticated` po załadowaniu.
-// Zwraca token (lub null), żeby caller mógł od razu przepuścić do aplikacji.
-export function bootstrapLocalAccountToken(): Promise<string | null> {
-  try {
-    const result = window.ogb?.auth?.loadAccount?.();
-    if (!result) return Promise.resolve(null);
-    return result.then((token) => {
-      if (token) setAccountToken(token);
-      return token;
-    });
-  } catch {
-    /* most niedostępny — OK */
-    return Promise.resolve(null);
-  }
-}
-
 export function authEventName(): string {
   return AUTH_REQUIRED;
 }
 
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const headers = new Headers(init.headers);
-  if (!headers.has("content-type") && init.body) headers.set("content-type", "application/json");
-  // multibot: token konta ma priorytet; master (hasło serwera) to fallback,
-  // gdy nikt się jeszcze nie zalogował na konto.
-  const token = getAccountToken() || getAuthToken();
-  if (token) headers.set("authorization", `Bearer ${token}`);
-  const response = await fetch(input, { ...init, headers });
-  if (response.status === 401) {
-    window.dispatchEvent(new Event(AUTH_REQUIRED));
-  }
-  return response;
-}
-
-// multibot: wersja authFetch, która ZAWSZE wysyła master token (hasło serwera)
-// — do endpointów owner, np. zarządzania kontami czy rotacji tokena. Na 401
-// też wywołuje zdarzenie `auth-required`.
-export async function masterFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   if (!headers.has("content-type") && init.body) headers.set("content-type", "application/json");
   const token = getAuthToken();

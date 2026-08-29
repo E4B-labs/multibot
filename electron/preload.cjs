@@ -80,16 +80,4 @@ contextBridge.exposeInMainWorld("ogb", {
       return () => ipcRenderer.removeListener("update:state", handler);
     },
   },
-
-  /** Trwały token dostępu. Renderer zapisuje tu token po udanym logowaniu,
-   * a main.mjs wstrzykuje go w fragmencie URL przy każdym starcie — dzięki
-   * temu ekran logowania nie wyskakuje przy każdym uruchomieniu. */
-  auth: {
-    load: () => ipcRenderer.invoke("auth:load-token"),
-    save: (token) => ipcRenderer.invoke("auth:save-token", token),
-    clear: () => ipcRenderer.invoke("auth:clear-token"),
-    loadAccount: () => ipcRenderer.invoke("auth:load-account-token"),
-    saveAccount: (token) => ipcRenderer.invoke("auth:save-account-token", token),
-    clearAccount: () => ipcRenderer.invoke("auth:clear-account-token"),
-  },
 });

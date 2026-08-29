@@ -11,7 +11,6 @@ import { activateExistingWindow } from "./single-instance.mjs";
 import { startRemoteUiServer } from "./remote-ui.mjs";
 import { startSpeech, stopSpeech } from "./speech.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
-import { loadPersistedToken, registerAuthIpc } from "./auth.mjs";
 import { buildDiagnosticsReport, decodeLogTail, diagnosticsFileName } from "./diagnostics.mjs";
 
 const require = createRequire(import.meta.url);
@@ -185,15 +184,10 @@ function localAccessTokenFragment() {
   try {
     const config = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".openmausbot", "config.json"), "utf8"));
     const token = String(config?.auth?.token ?? "").trim();
-    if (token) return `#access_token=${encodeURIComponent(token)}`;
+    return token ? `#access_token=${encodeURIComponent(token)}` : "";
   } catch {
-    /* brak pliku konfiguracji — schodzimy na zapisany token */
+    return "";
   }
-  // Zapas: token, którym użytkownik się kiedyś zalogował (zapisany na dysku
-  // przez renderera). Bez tego świeża instalacja, w której config.json nie
-  // ma tokenu, prosiła o niego przy każdym uruchomieniu.
-  const persisted = loadPersistedToken();
-  return persisted ? `#access_token=${encodeURIComponent(persisted)}` : "";
 }
 
 async function startServerOn(port) {
@@ -641,7 +635,6 @@ app.whenReady().then(async () => {
   buildAppMenu();
   registerCuaIpc();
   registerUpdaterIpc();
-  registerAuthIpc();
   // Start the CUA daemon before the window so the harness can pick up the
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
