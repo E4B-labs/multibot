@@ -20,6 +20,7 @@
  * Made with Blob Studio.
  */
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { interpolate } from 'flubber'
 import { motionIsReduced } from '@/lib/motion'
 
 /* ------------------------------------------------------------------- shape */
@@ -1152,6 +1153,83 @@ const easeOutBack = (t: number) => {
 
 const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t))
 
+/* ------------------------------------------------------------------- morph */
+
+const MORPH_SVG_NS = "http://www.w3.org/2000/svg"
+const faceDCache = new Map<string, string>()
+
+// Sprowadza dowolny kształt (path/circle/rect/ellipse) do jednej ścieżki `d`.
+function elementToPathD(markup: string): string {
+  const doc = new DOMParser().parseFromString(
+    `<svg xmlns="${MORPH_SVG_NS}">${markup}</svg>`,
+    "image/svg+xml",
+  )
+  const el = doc.documentElement.firstElementChild as SVGElement | null
+  if (!el) return ""
+  const tag = el.tagName.toLowerCase()
+  if (tag === "path") return el.getAttribute("d") || ""
+  if (tag === "circle") {
+    const cx = +el.getAttribute("cx")!
+    const cy = +el.getAttribute("cy")!
+    const r = +el.getAttribute("r")!
+    return `M${cx - r},${cy}a${r},${r} 0 1,0 ${2 * r},0a${r},${r} 0 1,0 ${-2 * r},0Z`
+  }
+  if (tag === "ellipse") {
+    const cx = +el.getAttribute("cx")!
+    const cy = +el.getAttribute("cy")!
+    const rx = +el.getAttribute("rx")!
+    const ry = +el.getAttribute("ry")!
+    return `M${cx - rx},${cy}a${rx},${ry} 0 1,0 ${2 * rx},0a${rx},${ry} 0 1,0 ${-2 * rx},0Z`
+  }
+  if (tag === "rect") {
+    const x = +el.getAttribute("x")!
+    const y = +el.getAttribute("y")!
+    const w = +el.getAttribute("width")!
+    const h = +el.getAttribute("height")!
+    const rx = +(el.getAttribute("rx") || "0")
+    const rr = Math.min(rx, w / 2, h / 2)
+    return (
+      `M${x + rr},${y} h${w - 2 * rr} a${rr},${rr} 0 0 1 ${rr},${rr}` +
+      ` v${h - 2 * rr} a${rr},${rr} 0 0 1 ${-rr},${rr} h${-(w - 2 * rr)}` +
+      ` a${rr},${rr} 0 0 1 ${-rr},${-rr} v${-(h - 2 * rr)} a${rr},${rr} 0 0 1 ${rr},${-rr} Z`
+    )
+  }
+  return ""
+}
+
+// SVG `transform` (np. `rotate(45 cx cy)`) → CSS transform, by DOMMatrix go zjadł.
+function fitToCss(fit: string): string {
+  return fit
+    .replace(
+      /rotate\(([-\d.]+) ([-\d.]+) ([-\d.]+)\)/g,
+      (_, a, x, y) => `translate(${x}px, ${y}px) rotate(${a}deg) translate(${-x}px, ${-y}px)`,
+    )
+    .replace(/translate\(([-\d.]+) ([-\d.]+)\)/g, (_, x, y) => `translate(${x}px, ${y}px)`)
+}
+
+// Jedna ścieżka w przestrzeni face-boxu (już po nałożeniu `fit`) — cache'owane.
+function faceDFor(shape: CursorShape): string {
+  const cached = faceDCache.get(shape.name)
+  if (cached) return cached
+  const localD = elementToPathD(shape.body)
+  const path = document.createElementNS(MORPH_SVG_NS, "path")
+  path.setAttribute("d", localD)
+  const total = path.getTotalLength()
+  const n = 220
+  const matrix = shape.fit ? new DOMMatrix(fitToCss(shape.fit)) : new DOMMatrix()
+  let d = ""
+  for (let i = 0; i <= n; i++) {
+    const p = path.getPointAtLength((i / n) * total)
+    const tp = matrix.transformPoint(new DOMPoint(p.x, p.y))
+    d += (i === 0 ? "M" : "L") + tp.x.toFixed(2) + " " + tp.y.toFixed(2) + " "
+  }
+  d += "Z"
+  faceDCache.set(shape.name, d)
+  return d
+}
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+
 /**
  * Builds the body's transform for this frame.
  *
@@ -1360,19 +1438,47 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       glyphs,
     }
 
-    // Płynna zmiana kształtu: przy podmiance `shape` rozmywamy sylwetkę (wychodzi
-    // stara, wchodzi nowa) zamiast twardo ją podmieniać. `renderedShape` to kształt
-    // aktualnie rysowany — dogania `shape` w połowie rozmycia.
+    // Płynna zmiana kształtu: przy wyborze innego kształtu sylwetka MORFUJE się
+    // z obecnego do nowego (interpolacja ścieżki SVG przez flubber), zamiast
+    // twardo skakać. `renderedShape` to kształt "osiadły"; w trakcie morfy
+    // rysujemy interpolowaną ścieżkę `morphD`.
     const [renderedShape, setRenderedShape] = useState(shape)
-    const [shapeFade, setShapeFade] = useState(1)
+    const [morphD, setMorphD] = useState<string | null>(null)
+    const [morphT, setMorphT] = useState(0)
+    const [morphing, setMorphing] = useState(false)
+    const morphFromAnchor = useRef(shape.anchor)
+    const morphToAnchor = useRef(shape.anchor)
+
     useEffect(() => {
       if (shape.name === renderedShape.name) return
-      setShapeFade(0)
-      const t = setTimeout(() => {
+      let morpher: ((t: number) => string) | null = null
+      try {
+        morpher = interpolate(faceDFor(renderedShape), faceDFor(shape), { maxSegmentLength: 2 })
+      } catch {
         setRenderedShape(shape)
-        requestAnimationFrame(() => requestAnimationFrame(() => setShapeFade(1)))
-      }, 110)
-      return () => clearTimeout(t)
+        return
+      }
+      morphFromAnchor.current = renderedShape.anchor
+      morphToAnchor.current = shape.anchor
+      setMorphing(true)
+      const start = performance.now()
+      const dur = 420
+      let raf = 0
+      const step = (now: number) => {
+        const t = Math.min((now - start) / dur, 1)
+        const e = easeInOut(t)
+        setMorphD(morpher!(e))
+        setMorphT(e)
+        if (t < 1) {
+          raf = requestAnimationFrame(step)
+        } else {
+          setMorphing(false)
+          setMorphD(null)
+          setRenderedShape(shape)
+        }
+      }
+      raf = requestAnimationFrame(step)
+      return () => cancelAnimationFrame(raf)
     }, [shape, renderedShape])
 
     const selectExpression = (index: number) => {
@@ -1587,6 +1693,13 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     const dimension = typeof size === 'number' ? `${size}px` : size
     const label = title === undefined ? `${renderedShape.name} mascot` : title
     const body = renderedShape.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
+    const anchorNow = morphing
+      ? {
+          x: lerp(morphFromAnchor.current.x, morphToAnchor.current.x, morphT),
+          y: lerp(morphFromAnchor.current.y, morphToAnchor.current.y, morphT),
+          scale: lerp(morphFromAnchor.current.scale, morphToAnchor.current.scale, morphT),
+        }
+      : renderedShape.anchor
 
     return (
       <svg
@@ -1609,9 +1722,14 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
               which is also why shape.clip is pre-flattened to bare shapes. */}
           <clipPath
             id={`${uid}-clip`}
-            transform={renderedShape.fit || undefined}
-            dangerouslySetInnerHTML={{ __html: renderedShape.clip }}
-          />
+            transform={morphing ? undefined : (renderedShape.fit || undefined)}
+          >
+            {morphing ? (
+              <path d={morphD ?? ''} />
+            ) : (
+              <g dangerouslySetInnerHTML={{ __html: renderedShape.clip }} />
+            )}
+          </clipPath>
         </defs>
         <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
           {/* Ribbons sit behind the mascot, confetti in front of it. */}
@@ -1619,11 +1737,15 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           {/* Body and face move together — the face is painted on the body, not floating
               in front of it, so a squash or a tilt has to carry both. The glyph rides the
               same motion but is not faded with them, since it replaces them. */}
-          <g ref={bodyGroup} style={{ opacity: shapeFade, transition: 'opacity 110ms ease' }}>
+          <g ref={bodyGroup}>
           <g ref={bodyContent}>
-          <g transform={renderedShape.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
+          {morphing ? (
+            <path d={morphD ?? ''} fill={paint} />
+          ) : (
+            <g transform={renderedShape.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
+          )}
           <g clipPath={`url(#${uid}-clip)`}>
-            <g transform={anchorTransform(renderedShape.anchor)}>
+            <g transform={anchorTransform(anchorNow)}>
               <path ref={eye0} fill={eyeColor} />
               <path ref={eye1} fill={eyeColor} />
               {showMouth && (
