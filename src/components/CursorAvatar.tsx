@@ -1461,13 +1461,23 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       morphFromAnchor.current = renderedShape.anchor
       morphToAnchor.current = shape.anchor
       setMorphing(true)
+      // Statyczne awatary (animated=false) rysują twarz tylko raz — wymuś
+      // przerysowanie, żeby nie utknęły bez twarzy na morfującej sylwetce.
+      engine.current.pausedSettled = false
       const start = performance.now()
       const dur = 420
       let raf = 0
       const step = (now: number) => {
         const t = Math.min((now - start) / dur, 1)
         const e = easeInOut(t)
-        setMorphD(morpher!(e))
+        try {
+          setMorphD(morpher!(e))
+        } catch {
+          setMorphing(false)
+          setMorphD(null)
+          setRenderedShape(shape)
+          return
+        }
         setMorphT(e)
         if (t < 1) {
           raf = requestAnimationFrame(step)
@@ -1475,11 +1485,12 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           setMorphing(false)
           setMorphD(null)
           setRenderedShape(shape)
+          engine.current.pausedSettled = false
         }
       }
       raf = requestAnimationFrame(step)
       return () => cancelAnimationFrame(raf)
-    }, [shape, renderedShape])
+    }, [shape.name, renderedShape.name])
 
     const selectExpression = (index: number) => {
       const e = engine.current
@@ -1722,13 +1733,9 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
               which is also why shape.clip is pre-flattened to bare shapes. */}
           <clipPath
             id={`${uid}-clip`}
-            transform={morphing ? undefined : (renderedShape.fit || undefined)}
+            transform={renderedShape.fit || undefined}
           >
-            {morphing ? (
-              <path d={morphD ?? ''} />
-            ) : (
-              <g dangerouslySetInnerHTML={{ __html: renderedShape.clip }} />
-            )}
+            <g dangerouslySetInnerHTML={{ __html: renderedShape.clip }} />
           </clipPath>
         </defs>
         <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
