@@ -1734,9 +1734,8 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           <clipPath
             id={`${uid}-clip`}
             transform={renderedShape.fit || undefined}
-          >
-            <g dangerouslySetInnerHTML={{ __html: renderedShape.clip }} />
-          </clipPath>
+            dangerouslySetInnerHTML={{ __html: renderedShape.clip }}
+          />
         </defs>
         <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
           {/* Ribbons sit behind the mascot, confetti in front of it. */}
