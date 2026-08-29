@@ -88,5 +88,8 @@ contextBridge.exposeInMainWorld("ogb", {
     load: () => ipcRenderer.invoke("auth:load-token"),
     save: (token) => ipcRenderer.invoke("auth:save-token", token),
     clear: () => ipcRenderer.invoke("auth:clear-token"),
+    loadAccount: () => ipcRenderer.invoke("auth:load-account-token"),
+    saveAccount: (token) => ipcRenderer.invoke("auth:save-account-token", token),
+    clearAccount: () => ipcRenderer.invoke("auth:clear-account-token"),
   },
 });

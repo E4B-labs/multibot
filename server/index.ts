@@ -15,6 +15,18 @@ import { fleetStatusBlock } from "./fleet-status.ts";
 import * as box from "./box.ts";
 import { AttachmentStore, MAX_FILE_BYTES, resolveBotFile } from "./attachments.ts";
 import { ensureAccessToken, mountAuth, rotateAccessToken, tokenMatches } from "./auth.ts";
+// multibot: konta użytkowników — druga warstwa autoryzacji obok master tokena.
+import {
+  addAccountSession,
+  createAccount,
+  deleteAccount,
+  findAccountById,
+  findAccountByToken,
+  findAccountByUsername,
+  loadAccounts,
+  removeAccountSession,
+  verifyPassword,
+} from "./accounts.ts";
 // multibot (A1): logowanie Google przez Firebase -> lokalna sesja urządzenia.
 import {
   FirebaseAuthError, buildSessionCookie, createDeviceSession,
@@ -1930,6 +1942,12 @@ function requestBearer(req: IncomingMessage): string | null {
 }
 
 function actorForRequest(req: IncomingMessage): WorkspaceActor | null {
+  // multibot: token sesji KONTA użytkownika — druga warstwa obok master tokena.
+  if (req.headers["x-multibot-auth"] === "account") {
+    const id = typeof req.headers["x-multibot-account-id"] === "string" ? req.headers["x-multibot-account-id"] : "";
+    const acc = id ? findAccountById(id) : null;
+    if (acc) return { uid: acc.id, name: acc.username, role: acc.role };
+  }
   if (req.headers["x-multibot-auth"] === "token") {
     return { uid: cfg.firebase?.ownerUid ?? "legacy-token", role: "owner", name: cfg.profile?.name, email: cfg.profile?.email };
   }
@@ -3674,6 +3692,86 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { token });
     }
 
+    // ── multibot: konta użytkowników (druga warstwa autoryzacji) ────────
+    // Tworzenie konta — TYLKO dla właściciela (master token). Pierwsze konto
+    // w pliku otrzymuje rolę "owner", każde następne "member".
+    if (method === "POST" && path === "/api/accounts") {
+      if (actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
+      const body = await readBody(req).catch(() => ({}));
+      const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
+      const password = typeof body?.password === "string" ? body.password : "";
+      if (!/^[a-z0-9_]{3,32}$/.test(username)) {
+        return json(res, 400, { error: "username must be 3–32 chars: a–z, 0–9, _" });
+      }
+      if (typeof password !== "string" || password.length < 6) {
+        return json(res, 400, { error: "password must be at least 6 characters" });
+      }
+      if (findAccountByUsername(username)) {
+        return json(res, 400, { error: "username already taken" });
+      }
+      const sessionToken = randomBytes(32).toString("hex");
+      const acc = createAccount(username, password);
+      addAccountSession(acc, sessionToken);
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { id: acc.id, username: acc.username, role: acc.role, token: sessionToken });
+    }
+
+    // Publiczne logowanie konta (bez auth). Udane zwraca nowy token sesji.
+    if (method === "POST" && path === "/api/accounts/login") {
+      const body = await readBody(req).catch(() => ({}));
+      const username = typeof body?.username === "string" ? body.username.trim().toLowerCase() : "";
+      const password = typeof body?.password === "string" ? body.password : "";
+      const acc = username ? findAccountByUsername(username) : null;
+      const ok = acc ? verifyPassword(password, acc.passHash) : false;
+      if (!acc || !ok) {
+        // Dwujęzycznie: po polsku, gdy przeglądarka mówi po polsku.
+        const polish = /pl/i.test(req.headers["accept-language"] ?? "");
+        return json(res, 401, { error: polish ? "Nieprawidłowe dane" : "Invalid credentials" });
+      }
+      const sessionToken = randomBytes(32).toString("hex");
+      addAccountSession(acc, sessionToken);
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { id: acc.id, username: acc.username, role: acc.role, token: sessionToken });
+    }
+
+    // Lista kont — tylko właściciel.
+    if (method === "GET" && path === "/api/accounts") {
+      if (actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
+      const file = loadAccounts();
+      return json(res, 200, {
+        accounts: file.accounts.map((a) => ({ id: a.id, username: a.username, role: a.role, createdAt: a.createdAt })),
+      });
+    }
+
+    // Dane zalogowanego konta — wymaga tokena konta.
+    if (method === "GET" && path === "/api/accounts/me") {
+      if (req.headers["x-multibot-auth"] !== "account") return json(res, 401, { error: "account token required" });
+      const id = typeof req.headers["x-multibot-account-id"] === "string" ? req.headers["x-multibot-account-id"] : "";
+      const acc = id ? findAccountById(id) : null;
+      if (!acc) return json(res, 401, { error: "account token required" });
+      return json(res, 200, { id: acc.id, username: acc.username, role: acc.role });
+    }
+
+    // Usunięcie konta — tylko właściciel.
+    if (method === "DELETE" && path.startsWith("/api/accounts/")) {
+      if (actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
+      const id = path.slice("/api/accounts/".length);
+      if (!deleteAccount(id)) return json(res, 404, { error: "account not found" });
+      return json(res, 200, { ok: true });
+    }
+
+    // Wylogowanie konta — usuwa bieżący token sesji.
+    if (method === "POST" && path === "/api/accounts/logout") {
+      if (req.headers["x-multibot-auth"] !== "account") return json(res, 401, { error: "account token required" });
+      const id = typeof req.headers["x-multibot-account-id"] === "string" ? req.headers["x-multibot-account-id"] : "";
+      const acc = id ? findAccountById(id) : null;
+      if (acc) {
+        const bearer = requestBearer(req);
+        if (bearer) removeAccountSession(acc, bearer);
+      }
+      return json(res, 200, { ok: true });
+    }
+
     if (method === "GET" && path === "/api/workspace") {
       return json(res, 200, {
         id: cfg.workspace?.id ?? "default",
@@ -4229,6 +4327,11 @@ revokeAuthSessions = mountAuth(
     const id = sessionIdFromCookieHeader(req.headers.cookie);
     return Boolean(id && verifyDeviceSession(id));
   },
+  // multibot: token sesji KONTA — trzecia droga wejścia (obok master tokena
+  // i ciasteczka sesji urządzenia). Brak kont = hasAccountSession nigdy nie
+  // zadziała, więc istniejące instalacje działają bez zmian.
+  (token) => findAccountByToken(token) !== null,
+  (token) => findAccountByToken(token)?.id ?? null,
 ).revokeSessions;
 
 // ── multibot: uwaga bota silnika (D7) ─────────────────────────────────

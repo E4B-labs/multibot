@@ -13,7 +13,7 @@ import { useStore } from "@/state/store";
 import { ApiKeyRow } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
-import { authFetch, setAuthToken } from "@/lib/auth";
+import { authFetch, masterFetch, setAuthToken } from "@/lib/auth";
 // multibot: F11 — status silnika dla EngineStatusRow
 import { engineOnline } from "@/lib/engineStatus";
 import { languageLabel, setLanguage, useLanguage, type Language } from "@/lib/language";
@@ -246,6 +246,119 @@ export function AccessTokenSettings() {
       <button onClick={rotate} disabled={busy} className="mt-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
         {busy ? polish ? "Generowanie…" : "Generating…" : polish ? "Wygeneruj nowy token" : "Generate new token"}
       </button>
+      {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+// multibot: zarządzanie kontami użytkowników (owner). Wszystko przez master
+// token (hasło serwera) — to endpointy owner, więc masterFetch, nigdy authFetch.
+export function AccountManagementSettings() {
+  const polish = useLanguage() === "pl";
+  const [accounts, setAccounts] = useState<Array<{ id: string; username: string; role: string }>>([]);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = () => {
+    setBusy(true);
+    setError(null);
+    return masterFetch("/api/accounts")
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error(polish ? "Nie można pobrać kont" : "Unable to load accounts"))))
+      .then((body) => setAccounts(Array.isArray(body.accounts) ? body.accounts : []))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  useEffect(() => {
+    void reload();
+    // jedno pobranie przy otwarciu panelu
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const create = async () => {
+    if (!username.trim() || !password || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await masterFetch("/api/accounts", {
+        method: "POST",
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      if (!response.ok) throw new Error(polish ? "Nie udało się utworzyć konta" : "Could not create account");
+      setUsername("");
+      setPassword("");
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await masterFetch(`/api/accounts/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(polish ? "Nie udało się usunąć konta" : "Could not delete account");
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputClass =
+    "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
+
+  return (
+    <div className="mt-4 rounded-xl bg-card p-4">
+      <div className="text-[15px] font-medium text-ink">{polish ? "Konta" : "Accounts"}</div>
+      <div className="mt-0.5 text-[13px] text-ink-secondary">{polish ? "Konta użytkowników serwera (tylko właściciel)." : "Server user accounts (owner only)."}</div>
+      {accounts.length > 0 && (
+        <div className="mt-3 space-y-1 text-[12px] text-ink-secondary">
+          {accounts.map((account) => (
+            <div key={account.id} className="flex items-center justify-between gap-2 rounded-lg bg-inset px-3 py-2">
+              <span className="min-w-0 truncate">
+                {account.username}
+                <span className="ml-2 text-ink">{account.role}</span>
+              </span>
+              <button
+                aria-label={`${polish ? "Usuń" : "Delete"} ${account.username}`}
+                onClick={() => void remove(account.id)}
+                disabled={busy}
+                className="shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-danger disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 flex flex-col gap-2">
+        <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} placeholder={polish ? "Nazwa użytkownika" : "Username"} />
+        <div className="flex gap-2">
+          <input
+            type="password"
+            className={inputClass}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={polish ? "Hasło konta" : "Account password"}
+            autoComplete="new-password"
+          />
+          <button
+            onClick={() => void create()}
+            disabled={busy || !username.trim() || !password}
+            className="flex w-[78px] shrink-0 items-center justify-center gap-1 rounded-lg bg-raised px-2 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <><Plus size={13} />{polish ? "Dodaj" : "Add"}</>}
+          </button>
+        </div>
+      </div>
       {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
     </div>
   );

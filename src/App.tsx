@@ -35,7 +35,7 @@ import { hasCustomWindowControls } from "@/lib/shell";
 const frameless = hasCustomWindowControls();
 // multibot: Cmd/Ctrl+K paleta komend
 import { CmdK } from "@/components/CmdK";
-import { authEventName, authFetch, clearAuthToken, getAuthToken, setAuthToken } from "@/lib/auth";
+import { authEventName, authFetch, bootstrapLocalAccountToken, clearAccountToken, clearAuthToken, getAccountToken, getAuthToken, masterFetch, setAccountToken, setAuthToken } from "@/lib/auth";
 // multibot (A1): logowanie Google — pola konfiguracji i cała droga do sesji
 import { fetchAuthStatus, renderGoogleButton, type GoogleLoginConfig } from "@/lib/googleLogin";
 import { useLanguage } from "@/lib/language";
@@ -44,8 +44,9 @@ import { unreadConversationCount } from "@/lib/unread";
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const language = useLanguage();
   const polish = language === "pl";
+  // KROK 1 "Hasło serwera" (master token) — pomijany, gdy już zapamiętany.
+  const [stage, setStage] = useState<"server" | "account">(() => (getAuthToken() ? "account" : "server"));
   const [token, setToken] = useState("");
-  const [invite, setInvite] = useState("");
   const inviteRef = useRef("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -53,6 +54,11 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   // ekran obiecywałby przycisk, który i tak skończyłby błędem.
   const [google, setGoogle] = useState<GoogleLoginConfig | null>(null);
   const googleSlot = useRef<HTMLDivElement | null>(null);
+  // ETAP "account": lista kont (owner) + formularze tworzenia/logowania.
+  const [accounts, setAccounts] = useState<Array<{ id: string; username: string; role: string }> | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -75,15 +81,41 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
       else onLogin();
     }, () => inviteRef.current).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, [google, onLogin]);
-  const submit = async () => {
+
+  // ETAP "account": po wejściu pobieramy listę kont (owner) przez master token.
+  useEffect(() => {
+    if (stage !== "account") return;
+    let alive = true;
+    setBusy(true);
+    setError(null);
+    void masterFetch("/api/accounts")
+      .then((response) => {
+        if (!response.ok) throw new Error(polish ? "Nieprawidłowe hasło serwera" : "Invalid server password");
+        return response.json();
+      })
+      .then((body) => {
+        if (!alive) return;
+        const list = Array.isArray(body.accounts) ? body.accounts : [];
+        setAccounts(list);
+        setShowCreate(list.length === 0);
+      })
+      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => alive && setBusy(false));
+    return () => {
+      alive = false;
+    };
+  }, [stage, polish]);
+
+  // KROK 1: zatwierdzenie hasła serwera.
+  const submitServer = async () => {
     if (!token.trim() || busy) return;
     setBusy(true);
     setError(null);
     setAuthToken(token);
     try {
       const response = await authFetch("/api/instances");
-      if (!response.ok) throw new Error(response.status === 401 ? (polish ? "Nieprawidłowy token dostępu" : "Invalid access token") : polish ? "Serwer niedostępny" : "Server unavailable");
-      onLogin();
+      if (!response.ok) throw new Error(response.status === 401 ? (polish ? "Nieprawidłowe hasło serwera" : "Invalid server password") : polish ? "Serwer niedostępny" : "Server unavailable");
+      setStage("account");
     } catch (e) {
       clearAuthToken();
       setError(e instanceof Error ? e.message : String(e));
@@ -91,60 +123,145 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
       setBusy(false);
     }
   };
+
+  // KROK 2: utworzenie konta (owner) lub logowanie (public).
+  const submitAccount = async (mode: "create" | "login") => {
+    if (!username.trim() || !password || busy) return;
+    setBusy(true);
+    setError(null);
+    // Tworzenie to endpoint owner (master token), logowanie — publiczny.
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (mode === "create") headers.authorization = `Bearer ${getAuthToken()}`;
+    try {
+      const response = await fetch(
+        mode === "create" ? "/api/accounts" : "/api/accounts/login",
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ username: username.trim(), password }),
+        },
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(polish ? "Nieprawidłowe dane konta" : "Invalid account credentials");
+      const accountToken = typeof body.token === "string" ? body.token : "";
+      if (!accountToken) throw new Error(polish ? "Serwer nie zwrócił tokenu konta" : "Server returned no account token");
+      setAccountToken(accountToken);
+      onLogin();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const inputClass =
+    "mt-4 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[14px] text-ink outline-none focus:border-hairline";
+
   return (
     <main className="multibot-login flex h-full min-h-screen items-center justify-center bg-app px-5 text-ink">
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          void submit();
+          if (stage === "server") void submitServer();
         }}
         className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-xl"
       >
-        <h1 className="text-[18px] font-semibold">{polish ? "Zaloguj się" : "Sign in"}</h1>
-        {google && (
+        {stage === "server" ? (
           <>
-            <p className="mt-1 text-[13px] text-ink-secondary">
-              {polish ? "Zaloguj się Google. Nowy członek potrzebuje kodu zaproszenia." : "Sign in with Google. New members need an invite code."}
-            </p>
-            <div ref={googleSlot} className="mt-4 flex justify-center" />
+            <h1 className="text-[18px] font-semibold">{polish ? "Hasło serwera" : "Server password"}</h1>
+            <p className="mt-1 text-[13px] text-ink-secondary">{polish ? "Wpisz master token (hasło serwera) z config.json." : "Enter the master token (server password) from config.json."}</p>
             <input
-              value={invite}
-              onChange={(event) => {
-                inviteRef.current = event.target.value;
-                setInvite(event.target.value);
-              }}
-              placeholder={polish ? "Kod zaproszenia (dla nowego członka)" : "Invite code (new members)"}
-              aria-label={polish ? "Kod zaproszenia" : "Invite code"}
-              autoComplete="one-time-code"
-              className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[13px] text-ink outline-none focus:border-hairline"
+              autoFocus
+              type="password"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              placeholder={polish ? "Hasło serwera" : "Server password"}
+              aria-label={polish ? "Hasło serwera" : "Server password"}
+              autoComplete="current-password"
+              className={inputClass}
             />
-            <div className="mt-4 flex items-center gap-2 text-[11px] text-ink-secondary">
-              <span className="h-px flex-1 bg-hairline/40" />
-              {polish ? "albo token" : "or token"}
-              <span className="h-px flex-1 bg-hairline/40" />
-            </div>
+            <button
+              type="submit"
+              disabled={busy || !token.trim()}
+              className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[13px] font-medium text-white disabled:opacity-50"
+            >
+              {busy ? (polish ? "Sprawdzanie…" : "Checking…") : polish ? "Dalej" : "Continue"}
+            </button>
+          </>
+        ) : (
+          <>
+            <h1 className="text-[18px] font-semibold">{polish ? "Zaloguj się do konta" : "Sign in to your account"}</h1>
+            {accounts === null ? (
+              <p className="mt-3 text-[13px] text-ink-secondary">{busy ? (polish ? "Ładowanie…" : "Loading…") : ""}</p>
+            ) : showCreate ? (
+              <>
+                <p className="mt-1 text-[13px] text-ink-secondary">{polish ? "Brak kont. Utwórz pierwsze konto właściciela." : "No accounts yet. Create the first owner account."}</p>
+                <input
+                  autoFocus
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder={polish ? "Nazwa użytkownika" : "Username"}
+                  aria-label={polish ? "Nazwa użytkownika" : "Username"}
+                  className={inputClass}
+                />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={polish ? "Hasło konta" : "Account password"}
+                  aria-label={polish ? "Hasło konta" : "Account password"}
+                  autoComplete="new-password"
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  disabled={busy || !username.trim() || !password}
+                  onClick={() => void submitAccount("create")}
+                  className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[13px] font-medium text-white disabled:opacity-50"
+                >
+                  {busy ? (polish ? "Tworzenie…" : "Creating…") : polish ? "Utwórz konto" : "Create account"}
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-[13px] text-ink-secondary">{polish ? "Zaloguj się na istniejące konto." : "Sign in with an existing account."}</p>
+                <input
+                  autoFocus
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  placeholder={polish ? "Nazwa użytkownika" : "Username"}
+                  aria-label={polish ? "Nazwa użytkownika" : "Username"}
+                  className={inputClass}
+                />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={polish ? "Hasło konta" : "Account password"}
+                  aria-label={polish ? "Hasło konta" : "Account password"}
+                  autoComplete="current-password"
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  disabled={busy || !username.trim() || !password}
+                  onClick={() => void submitAccount("login")}
+                  className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[13px] font-medium text-white disabled:opacity-50"
+                >
+                  {busy ? (polish ? "Sprawdzanie…" : "Checking…") : polish ? "Zaloguj się" : "Sign in"}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => { setUsername(""); setPassword(""); setShowCreate(true); }}
+                  className="mt-2 w-full rounded-lg bg-raised px-3 py-2.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                >
+                  {polish ? "Utwórz nowe konto" : "Create new account"}
+                </button>
+              </>
+            )}
           </>
         )}
-        {!google && (
-          <p className="mt-1 text-[13px] text-ink-secondary">{polish ? "Wpisz token dostępu do tego serwera MultiBot." : "Enter access token for this Multibot server."}</p>
-        )}
-        <input
-          autoFocus
-          type="password"
-          value={token}
-          onChange={(event) => setToken(event.target.value)}
-          placeholder={polish ? "Token dostępu" : "Access token"}
-          aria-label={polish ? "Token dostępu" : "Access token"}
-          autoComplete="current-password"
-          className="mt-4 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[14px] text-ink outline-none focus:border-hairline"
-        />
-        <button
-          type="submit"
-          disabled={busy || !token.trim()}
-          className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[13px] font-medium text-white disabled:opacity-50"
-        >
-          {busy ? (polish ? "Sprawdzanie…" : "Checking…") : polish ? "Zaloguj się" : "Sign in"}
-        </button>
         {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
       </form>
     </main>
@@ -280,11 +397,17 @@ export default function App() {
   const [gated, setGated] = useState(() => !configured);
   // Sesja z logowania Google siedzi w ciasteczku HttpOnly, więc `getAuthToken`
   // jej nie widzi — `LoginScreen` sam sprawdza `/api/auth/status` i wpuszcza.
-  const [authenticated, setAuthenticated] = useState(() => Boolean(getAuthToken()));
+  const [authenticated, setAuthenticated] = useState(() => Boolean(getAccountToken()));
   useEffect(() => {
     initAnalytics();
+    // multibot: odczytaj zapamiętany na dysku token konta (userData) — jak
+    // istnieje, od razu przepuszczamy do aplikacji bez ekranu logowania.
+    void bootstrapLocalAccountToken().then((token) => {
+      if (token) setAuthenticated(true);
+    });
     const onAuthRequired = () => {
       clearAuthToken();
+      clearAccountToken();
       setAuthenticated(false);
     };
     window.addEventListener(authEventName(), onAuthRequired);
