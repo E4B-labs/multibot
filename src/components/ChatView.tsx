@@ -154,9 +154,11 @@ function Bubble({
     >
       <div
         className={cn(
-          // multibot: dymek na PC zwężony o połowę (35%). Rozmiar czcionki
-          // ustawiał właściciel iteracyjnie: 15 → 11 → 17 → 13 → 15px.
-          "max-w-[35%] rounded-2xl px-2 py-[5px] text-[15px] leading-relaxed",
+          // multibot: dymek szeroki (90%) — poprzednie 35% było dla właściciela
+          // za wąskie, 29.08 poprosił o niemal pełną szerokość kolumny czatu,
+          // z niewielkim marginesem. Rozmiar czcionki ustawiał iteracyjnie:
+          // 15 → 11 → 17 → 13 → 15px.
+          "max-w-[90%] rounded-2xl px-2 py-[5px] text-[15px] leading-relaxed",
           user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
           message.pending && "opacity-60",
         )}
@@ -308,7 +310,7 @@ function StreamingBubble({ text }: { text: string }) {
     <div className="flex w-full justify-start">
       {/* multibot: ten sam rozmiar co Bubble — inaczej tekst „skakałby" po
           zakończeniu strumienia */}
-      <div className="max-w-[35%] rounded-2xl bg-card px-2 py-[5px] text-[15px] leading-relaxed text-ink">
+      <div className="max-w-[90%] rounded-2xl bg-card px-2 py-[5px] text-[15px] leading-relaxed text-ink">
         <ChatMarkdown text={text} streaming compact />
         <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-ink-secondary align-middle" />
       </div>
