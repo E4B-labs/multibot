@@ -12,6 +12,9 @@ import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
 import type { McpConnector } from "./mcp-connectors.ts";
 // multibot (A1): jw. — kształt sesji urządzenia mieszka w server/firebase-auth.ts.
 import type { DeviceSession } from "./firebase-auth.ts";
+// multibot: kształt reguł autoweryfikacji mieszka w server/auto-verify.ts (jw.
+// — import wyłącznie typu).
+import type { AutoVerifyState } from "./auto-verify.ts";
 
 // multibot (U28): zarejestrowane tokeny powiadomień push (Expo) na telefon.
 // Klucz = id urządzenia nadane przez aplikację mobilną.
@@ -75,6 +78,12 @@ export interface AppConfig {
   deviceSessions?: Record<string, DeviceSession>;
   /** multibot (U28): tokeny powiadomień push (Expo) na telefon, obok sesji. */
   pushDevices?: Record<string, PushDevice>;
+  /** multibot: strefa czasowa IANA ("Europe/Warsaw"), którą prompt bota podaje
+   * modelowi. Pusty ciąg albo brak = strefa hosta, więc ktoś, kto nigdy tu nie
+   * zajrzy, i tak dostaje bota z poprawną godziną. */
+  timeZone?: string;
+  /** multibot: autoweryfikacja akcji — patrz server/auto-verify.ts. */
+  autoVerify?: AutoVerifyState;
 }
 
 /** Credential names shared with Electron diagnostics redaction. */
@@ -153,6 +162,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     "firebase",
     "deviceSessions",
     "pushDevices",
+    "autoVerify",
   ] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
@@ -162,6 +172,10 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   // DELETE real (object merge cannot remove an instance) while preserving all
   // unrelated top-level config and secrets.
   if (patch.instances !== undefined) disk.instances = patch.instances;
+  // multibot: `timeZone` jest stringiem, a pętla wyżej scala wyłącznie obiekty
+  // — bez tej linii zapis przepadłby po cichu. O zapisie decyduje TYP, nie
+  // prawdziwość: pusty ciąg to świadome "wykryj strefę sam", a nie brak wyboru.
+  if (typeof patch.timeZone === "string") disk.timeZone = patch.timeZone;
   mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   chmodPrivate(DATA_DIR, 0o700);
   chmodPrivate(p, 0o600);

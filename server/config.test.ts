@@ -1,8 +1,8 @@
-import { chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { DATA_DIR, ensureDirs, instanceConfigs, saveConfig, type AppConfig } from "./config.ts";
+import { DATA_DIR, ensureDirs, instanceConfigs, loadConfig, saveConfig, type AppConfig } from "./config.ts";
 
 describe("instanceConfigs", () => {
   it("overlays configured instances on the built-in fleet without a default slafy entry", () => {
@@ -32,6 +32,43 @@ describe("instanceConfigs", () => {
     });
     // Rendering the fleet must not mutate durable config objects.
     expect(cfg.instances?.local.config).toBeUndefined();
+  });
+});
+
+// multibot: `saveConfig` scala WYŁĄCZNIE klucze z własnej białej listy, więc
+// pole spoza niej ginie bez śladu — zapis wraca 200, a po restarcie nie ma
+// niczego. Ten test pilnuje obu nowych ustawień właśnie przed tym.
+describe("saveConfig: ustawienia aplikacji", () => {
+  it("utrwala strefę czasową i autoweryfikację, nie ruszając reszty pliku", () => {
+    ensureDirs();
+    saveConfig({ auth: { token: "keep-me" } });
+    saveConfig({
+      timeZone: "Europe/Warsaw",
+      autoVerify: { enabled: true, rules: [{ id: "r1", when: "czytaj kalendarz", decision: "allow" }] },
+    });
+
+    const disk = JSON.parse(readFileSync(join(DATA_DIR, "config.json"), "utf8"));
+    expect(disk.timeZone).toBe("Europe/Warsaw");
+    expect(disk.autoVerify).toEqual({
+      enabled: true,
+      rules: [{ id: "r1", when: "czytaj kalendarz", decision: "allow" }],
+    });
+    expect(disk.auth.token).toBe("keep-me");
+    expect(loadConfig().timeZone).toBe("Europe/Warsaw");
+  });
+
+  it("zapisuje pustą strefę, bo to znacząca wartość: wykryj automatycznie", () => {
+    ensureDirs();
+    saveConfig({ timeZone: "Asia/Tokyo" });
+    saveConfig({ timeZone: "" });
+    expect(loadConfig().timeZone).toBe("");
+  });
+
+  it("nowa lista reguł zastępuje starą, żeby dało się regułę usunąć", () => {
+    ensureDirs();
+    saveConfig({ autoVerify: { enabled: true, rules: [{ id: "a", when: "jeden", decision: "allow" }] } });
+    saveConfig({ autoVerify: { enabled: false, rules: [] } });
+    expect(loadConfig().autoVerify).toEqual({ enabled: false, rules: [] });
   });
 });
 

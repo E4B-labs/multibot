@@ -555,6 +555,45 @@ describe("harness HTTP API", () => {
     expect(after.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com" });
   });
 
+  // multibot: strefa czasowa i autoweryfikacja jadą tym samym /api/config co
+  // reszta ustawień — UI nie dostaje osobnego API. Test pilnuje CAŁEJ pętli:
+  // zapis, odesłanie w odpowiedzi i przeżycie do następnego GET-a (bez wpisu
+  // w białej liście `saveConfig` zapis przepadał po cichu).
+  it("saves and echoes the time zone and the auto-verify rules", async () => {
+    const fresh = await api("GET", "/api/config");
+    expect(fresh.body.timeZone).toBe("");
+    expect(fresh.body.autoVerify).toEqual({ enabled: true, rules: [] });
+
+    const zone = await api("PUT", "/api/config", { timeZone: "  Europe/Warsaw  " });
+    expect(zone.status).toBe(200);
+    expect(zone.body.timeZone).toBe("Europe/Warsaw");
+
+    const rules = await api("PUT", "/api/config", {
+      autoVerify: { enabled: true, rules: [{ id: "r1", when: "odpowiadaj na maile", decision: "allow" }] },
+    });
+    expect(rules.status).toBe(200);
+    expect(rules.body.autoVerify.rules).toEqual([{ id: "r1", when: "odpowiadaj na maile", decision: "allow" }]);
+    // zapis samych reguł nie może zgubić strefy zapisanej wcześniej
+    expect(rules.body.timeZone).toBe("Europe/Warsaw");
+
+    // sam przełącznik, bez listy — reguły zostają na miejscu
+    const off = await api("PUT", "/api/config", { autoVerify: { enabled: false } });
+    expect(off.body.autoVerify).toEqual({
+      enabled: false,
+      rules: [{ id: "r1", when: "odpowiadaj na maile", decision: "allow" }],
+    });
+
+    // usunięcie reguły = zapis krótszej listy tym samym kanałem
+    const cleared = await api("PUT", "/api/config", { autoVerify: { enabled: true, rules: [] } });
+    expect(cleared.body.autoVerify).toEqual({ enabled: true, rules: [] });
+
+    // pusta strefa jest znacząca: "wykryj automatycznie"
+    expect((await api("PUT", "/api/config", { timeZone: "" })).body.timeZone).toBe("");
+    const after = await api("GET", "/api/config");
+    expect(after.body.timeZone).toBe("");
+    expect(after.body.autoVerify).toEqual({ enabled: true, rules: [] });
+  });
+
   // multibot (F7): własne serwery MCP użytkownika — osobna trasa `/custom/`,
   // wspólny katalog z Composio (karta niesie `source`).
   it("registers a custom MCP connector and tags it in the integrations catalog", async () => {

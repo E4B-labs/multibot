@@ -54,6 +54,49 @@ function environmentLine(agents: boolean): string {
     : `This server runs on ${process.platform} with ${gb} GB RAM.${verify}`;
 }
 
+/** Data i godzina złożone ręcznie z `formatToParts`, a nie z gotowego formatu
+ *  locale: gotowy format zmienia kształt między buildami ICU, a prompt ma być
+ *  ten sam tekst na każdej maszynie (driver claude podaje go raz, przy spawnie
+ *  — patrz nagłówek pliku). `h23` bo bez niego północ w części locale wychodzi
+ *  jako 24:00. */
+function clockIn(now: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    weekday: "long",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("weekday")} ${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+}
+
+/**
+ * Jedna linia z aktualnym czasem. Data i strefa wchodzą argumentem, bo inaczej
+ * nie da się tego przetestować bez przestawiania zegara i strefy maszyny.
+ *
+ * Nazwa strefy pochodzi z pliku konfiguracji, więc bywa nieprawidłowa (ręczna
+ * edycja, literówka, wycofana nazwa IANA) — `Intl` rzuca wtedy wyjątkiem.
+ * Spadamy na strefę hosta, bo bot z czasem hosta jest wyraźnie lepszy niż bot,
+ * któremu prompt się wysypał.
+ */
+export function currentTimeLine(now: Date, timeZone?: string): string {
+  const host = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const wanted = timeZone?.trim() || host;
+  let zone = wanted;
+  let clock: string;
+  try {
+    clock = clockIn(now, zone);
+  } catch {
+    zone = host;
+    clock = clockIn(now, zone);
+  }
+  return `Right now it is ${clock} in time zone ${zone}. Treat this as the current date and time: resolve "today", "tomorrow", "this week" and any deadline against it instead of guessing.`;
+}
+
 export function botSystemPrompt(
   bot: BotLike,
   o: {
@@ -64,6 +107,10 @@ export function botSystemPrompt(
     taggedReplies?: string;
     roster?: BotLike[];
     currentUser?: { uid: string; name?: string; email?: string };
+    /** Strefa IANA z konfiguracji aplikacji; pusta = strefa hosta. */
+    timeZone?: string;
+    /** Tylko dla testu — produkcja bierze zegar w chwili budowania promptu. */
+    now?: Date;
   },
 ): string {
   const { workspace, integrations, isolated } = o;
@@ -187,6 +234,10 @@ export function botSystemPrompt(
       : "The harness already fetched the tagged peer replies and appended them below."
     : "";
 
-  return ([who, have, how, "# Environment\n" + environmentLine(agents), chief, knowledge, peers]
+  const environment = "# Environment\n"
+    + currentTimeLine(o.now ?? new Date(), o.timeZone) + "\n"
+    + environmentLine(agents);
+
+  return ([who, have, how, environment, chief, knowledge, peers]
     .filter(Boolean).join("\n\n") + taggedReplies).replace(/[—–]/g, "-");
 }

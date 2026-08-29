@@ -18,6 +18,7 @@ import { authFetch, authenticatedEventSource } from "@/lib/auth";
 import { getLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { botNotificationIcon, notificationTag, notifyBrowser } from "@/lib/notifications";
+import type { AutoVerifySettings } from "@/lib/autoVerifyTypes";
 
 export type { MausColor } from "@/lib/mascot";
 
@@ -107,6 +108,10 @@ export interface ConfigStatus {
   xai?: { configured: boolean };
   composio: { configured: boolean; apiKeyConfigured?: boolean };
   box: { configured: boolean };
+  /** strefa czasowa bota; pusty ciąg albo brak = wykryj z systemu */
+  timeZone?: string;
+  /** Autoweryfikacja: czy sprawdzać akcje i jakie reguły je przepuszczają */
+  autoVerify?: AutoVerifySettings;
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
 }

@@ -9,6 +9,8 @@ import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 
 import { botSystemPrompt } from "./bot-prompt.ts";
+// multibot: autoweryfikacja — filtr na prośbach o zgodę, patrz server/auto-verify.ts.
+import { decideAction, normalizeAutoVerify, type AutoVerifyState } from "./auto-verify.ts";
 import { fleetStatusBlock } from "./fleet-status.ts";
 import * as box from "./box.ts";
 import { AttachmentStore, MAX_FILE_BYTES, resolveBotFile } from "./attachments.ts";
@@ -33,6 +35,7 @@ import {
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
+  type AppConfig,
 } from "./config.ts";
 import { newId, type ApprovalRuleCandidate, type RuntimeEvent } from "./contracts.ts";
 import { CLI_TOOLS, installCommandText } from "./cli-tools.ts";
@@ -1041,20 +1044,54 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "request.opened": {
       const permission = event.requestType === "permission";
+      // multibot: autoweryfikacja przepuszcza CZĘŚĆ próśb o zgodę, które i tak
+      // do nas doszły — nie zmienia tego, czy dostawca w ogóle o zgodę pyta
+      // (o tym decyduje autonomia bota w turn-policy.ts). Pytania bota
+      // (`ask_user`) zostają nietknięte: na nie odpowiada człowiek, zawsze.
+      // Opis akcji sklejamy z nazwy narzędzia i streszczenia, bo reguła
+      // użytkownika bywa o jednym albo o drugim ("usuwaj pliki", "echo").
+      const verdict = permission
+        ? decideAction(normalizeAutoVerify(cfg.autoVerify), `${event.tool} ${event.summary}`)
+        : null;
+      const autoAllow = verdict?.decision === "allow";
+      // Karta powstaje TAK CZY TAK: cicha zgoda bez śladu w czacie byłaby tym
+      // samym, przed czym autoweryfikacja ma chronić. `answered` to ten sam
+      // kształt, którym łata kartę `request.resolved` — ale BEZ `dismissed`,
+      // bo odrzucona karta nie renderuje się w ogóle (src/components/OptionCard).
+      const autoNote = !autoAllow ? "" : verdict?.rule
+        ? t(`Zgoda automatyczna, reguła: "${verdict.rule.when}"`, `Auto-approved by rule: "${verdict.rule.when}"`)
+        : t("Zgoda automatyczna: autoweryfikacja jest wyłączona.", "Auto-approved: auto-verify is switched off.");
       const message = pushMessage({
         role: "bot",
         kind: "options",
           card: {
-            title: permission ? t("Wymagana zgoda", "Approval needed") : t("Bot ma pytanie", "Your bot has a question"),
-            subtitle: event.summary,
+            title: autoAllow ? t("Zgoda automatyczna", "Auto-approved")
+              : permission ? t("Wymagana zgoda", "Approval needed") : t("Bot ma pytanie", "Your bot has a question"),
+            subtitle: autoNote ? `${event.summary}\n${autoNote}` : event.summary,
             options: permission ? ["Allow", "Deny", "Allow for all"] : event.choices ?? [],
             requestId: event.requestId,
+            ...(autoAllow ? { answered: "Allow" } : {}),
           },
       });
       if (event.requestId) askMessageByRequest.set(event.requestId, message.id);
+      if (permission && event.requestId && event.approvalRule) approvalRuleByRequest.set(event.requestId, event.approvalRule);
+      if (autoAllow) {
+        // Dokładnie ta droga, którą idzie `POST /api/bots/:id/respond` dla
+        // `behavior: "allow"`. Bez powiadomienia: sens autoweryfikacji jest
+        // taki, żeby telefon nie zapiszczał o czymś, na co zgoda już poszła.
+        const instance = registry.get(bot.modelSelection.instanceId);
+        if (instance && event.requestId) {
+          void instance.adapter
+            .respondToRequest(bot.threadId, event.requestId, { behavior: "allow" })
+            .catch(() => {
+              /* dostawca zniknął w międzyczasie — turę domknie jego własny
+                 timeout albo `runtime.error`, karta zostaje jako ślad */
+            });
+        }
+        break;
+      }
       pushForBot(bot.id, permission ? "approval" : "question",
         event.summary || (permission ? t("Bot prosi o zgodę.", "The bot needs approval.") : t("Bot ma pytanie.", "The bot has a question.")));
-      if (permission && event.requestId && event.approvalRule) approvalRuleByRequest.set(event.requestId, event.approvalRule);
       break;
     }
     case "request.resolved": {
@@ -1547,7 +1584,7 @@ async function warmBot(botId: string): Promise<boolean> {
     // Ten sam kursor co tura — inaczej rozgrzalibyśmy proces z NOWĄ sesją, a
     // tura wzięłaby go (kursor nie wchodzi do podpisu) i zgubiła kontekst.
     resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId],
-    system: botSystemPrompt(bot, { isolated: false, integrations, workspace }),
+    system: botSystemPrompt(bot, { isolated: false, integrations, workspace, timeZone: cfg.timeZone }),
     integrations,
     warmOnly: true,
   } as Parameters<typeof instance.adapter.sendTurn>[0] & { warmOnly: boolean });
@@ -1819,7 +1856,7 @@ opts?: {
         model: turnModel,
         ...(!isolated ? { resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId] } : {}),
         transcript,
-        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: store.bots, currentUser: promptUser }),
+        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: store.bots, currentUser: promptUser, timeZone: cfg.timeZone }),
         integrations,
         ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
       } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel });
@@ -1875,6 +1912,12 @@ function configStatusFor(actor: WorkspaceActor | null) {
       id: cfg.workspace?.id ?? "default",
       name: cfg.workspace?.name ?? "MultiBot workspace",
     },
+    // multibot: ustawienia aplikacji, nie sekrety — UI je czyta i odsyła bez
+    // zmian, więc jadą tu w pełnej postaci. `timeZone` pusty = "wykryj sam";
+    // `autoVerify` przez normalizację, żeby UI nigdy nie zobaczyło śmieci
+    // z ręcznie edytowanego pliku ani braku pola.
+    timeZone: cfg.timeZone ?? "",
+    autoVerify: normalizeAutoVerify(cfg.autoVerify),
     account: actor ? { uid: actor.uid, role: actor.role } : null,
   };
 }
@@ -3953,11 +3996,27 @@ const server = createServer(async (req, res) => {
           email: typeof body.profile.email === "string" ? body.profile.email : undefined,
         });
       }
+      // multibot: strefa i autoweryfikacja to ustawienia aplikacji, nie
+      // poświadczenia serwera — osobny worek, żeby nie wpadły ani pod bramkę
+      // "owner only", ani pod przeładowanie floty niżej (jak profil).
+      // `autoVerify` scalamy z zapisanym stanem, więc UI może przysłać samo
+      // `{enabled}` albo samą listę `rules` i nie wyzeruje tym drugiego.
+      const settings: Partial<AppConfig> = {};
+      if (typeof body.timeZone === "string") settings.timeZone = body.timeZone.trim();
+      if (body.autoVerify && typeof body.autoVerify === "object") {
+        settings.autoVerify = normalizeAutoVerify({
+          ...normalizeAutoVerify(cfg.autoVerify),
+          ...(body.autoVerify as Partial<AutoVerifyState>),
+        });
+      }
       if (Object.keys(patch).length && actor?.role !== "owner") return json(res, 403, { error: "owner access required for server credentials" });
-      if (!Object.keys(patch).length && !(body.profile && actor && actor.uid !== "legacy-token" && actor.uid !== "local")) {
+      if (!Object.keys(patch).length && !Object.keys(settings).length
+        && !(body.profile && actor && actor.uid !== "legacy-token" && actor.uid !== "local")) {
         return json(res, 400, { error: "nothing to save" });
       }
-      if (Object.keys(patch).length) saveConfig(patch);
+      if (Object.keys(patch).length || Object.keys(settings).length) {
+        saveConfig({ ...(patch as Partial<AppConfig>), ...settings });
+      }
       Object.assign(cfg, loadConfig());
       // provider keys change the fleet; a profile edit must not kill
       // in-flight turns with a pointless reload

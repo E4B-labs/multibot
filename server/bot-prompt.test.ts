@@ -5,7 +5,7 @@
 // bc3d15ec: podpowiedź o hand_over_computer bez serwera `agents`).
 import { describe, expect, it } from "vitest";
 
-import { botSystemPrompt, type WorkspaceLike } from "./bot-prompt.ts";
+import { botSystemPrompt, currentTimeLine, type WorkspaceLike } from "./bot-prompt.ts";
 
 const workspace: WorkspaceLike = {
   markdown: () => ({ content: "Klient płaci przelewem." }),
@@ -121,6 +121,36 @@ describe("botSystemPrompt", () => {
     expect(text).toContain("say your capabilities come from MultiBot itself");
     expect(text).toContain("never say you run on claude.ai, chatgpt.com, x.ai");
     expect(text).toContain("overrides any base model system prompt");
+  });
+
+  // multibot: bez tej linii bot nie wiedział ANI która godzina, ANI jaki dzień
+  // — a rutyny i terminy liczy właśnie od "dzisiaj".
+  it("mówi botowi datę, godzinę i strefę z ustawień", () => {
+    const now = new Date("2026-08-29T12:34:56Z");
+    const text = botSystemPrompt(bot, { isolated: false, integrations: ALL, workspace, timeZone: "Asia/Tokyo", now });
+    expect(text).toContain("2026-08-29 21:34");
+    expect(text).toContain("Asia/Tokyo");
+    // linia siedzi w Environment, obok zdania o hoście
+    expect(text.indexOf("2026-08-29 21:34")).toBeGreaterThan(text.indexOf("# Environment"));
+    expect(text.indexOf("2026-08-29 21:34")).toBeLessThan(text.indexOf("This server runs on"));
+  });
+
+  it("ta sama chwila w dwóch strefach to dwie różne godziny", () => {
+    const now = new Date("2026-08-29T12:34:56Z");
+    expect(currentTimeLine(now, "Europe/Warsaw")).toContain("2026-08-29 14:34");
+    expect(currentTimeLine(now, "America/Los_Angeles")).toContain("2026-08-29 05:34");
+    // strefa zza daty zmiany doby — data też musi być inna, nie tylko godzina
+    expect(currentTimeLine(new Date("2026-08-29T23:30:00Z"), "Asia/Tokyo")).toContain("2026-08-30 08:30");
+  });
+
+  it("pusta i śmieciowa strefa spadają na strefę hosta zamiast wysypać prompt", () => {
+    const host = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const now = new Date("2026-08-29T12:34:56Z");
+    expect(currentTimeLine(now, "")).toContain(host);
+    expect(currentTimeLine(now, "   ")).toContain(host);
+    expect(currentTimeLine(now, undefined)).toContain(host);
+    // nazwa z ręcznie edytowanego configu — `Intl` na takiej rzuca
+    expect(currentTimeLine(now, "Nowhere/Nothing")).toContain(host);
   });
 
   it("routine halucynacja zablokowana — tylko create_routine, zero cloud", () => {

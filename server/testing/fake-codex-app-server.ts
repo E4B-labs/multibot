@@ -5,6 +5,9 @@
 // real app-server, it never exits on its own — the driver kills it.
 //
 //   FAKE_CODEX_MODE   happy (default) | approval | mcp | resume | stream
+//                     | question (item/tool/requestUserInput — jedyny sposób,
+//                       w jaki ten dostawca prosi CZŁOWIEKA o decyzję zamiast
+//                       o zgodę na narzędzie)
 //   FAKE_CODEX_DUMP   path to write {argv, env, calls, decision} as JSON
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
@@ -91,6 +94,19 @@ process.stdin.on("data", (chunk) => {
             params: { command: "rm -rf scratch", proposedExecpolicyAmendment: ["rm", "-rf"] },
           });
           // turn continues from the approval response handler above
+        } else if (mode === "question") {
+          out({
+            jsonrpc: "2.0",
+            id: 100,
+            method: "item/tool/requestUserInput",
+            params: {
+              questions: [{
+                id: "q1",
+                question: "Which database?",
+                options: [{ label: "Postgres" }, { label: "SQLite" }],
+              }],
+            },
+          });
         } else if (mode === "mcp") {
           out({
             jsonrpc: "2.0",
