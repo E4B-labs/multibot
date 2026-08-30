@@ -78,6 +78,8 @@ export interface Message {
   /** Authenticated human author; absent on legacy/system messages. */
   userId?: string;
   userName?: string;
+  /** Per-thread insertion order; keeps same-millisecond messages identical on every client. */
+  order?: number;
   at: number;
 }
 
@@ -145,8 +147,8 @@ const BOTS_FILE = join(DATA_DIR, "bots.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
 /** Canonical order shared by persisted history and every UI transport. */
-export function sortMessages<T extends { id: string; at: number }>(messages: readonly T[]): T[] {
-  return [...messages].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+export function sortMessages<T extends { id: string; at: number; order?: number }>(messages: readonly T[]): T[] {
+  return [...messages].sort((a, b) => a.at - b.at || (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id));
 }
 
 const COLORS: MausColor[] = [
@@ -229,10 +231,9 @@ export class Store {
       } catch {
         list = [];
       }
-      const ordered = sortMessages(list);
-      if (ordered.some((message, index) => message !== list![index])) {
-        writeFileSync(messagesFile(threadId), JSON.stringify(ordered, null, 2));
-      }
+      const normalized = list.map((message, index) => typeof message.order === "number" ? message : { ...message, order: index });
+      const ordered = sortMessages(normalized);
+      if (ordered.some((message, index) => message !== list![index])) writeFileSync(messagesFile(threadId), JSON.stringify(ordered, null, 2));
       list = ordered;
       this.messages.set(threadId, list);
     }
@@ -240,8 +241,9 @@ export class Store {
   }
 
   appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }): Message {
-    const full: Message = { id: newId(), at: Date.now(), ...message };
     const list = this.messagesFor(threadId);
+    const order = list.reduce((max, item) => Math.max(max, item.order ?? -1), -1) + 1;
+    const full: Message = { id: newId(), at: Date.now(), ...message, order };
     const ordered = sortMessages([...list, full]);
     this.messages.set(threadId, ordered);
     writeFileSync(messagesFile(threadId), JSON.stringify(ordered, null, 2));
@@ -313,6 +315,35 @@ export class Store {
     Object.assign(bot, patch);
     this.saveBots();
     return bot;
+  }
+
+  /** One-time v2 migration: bind legacy private records to first owner and
+   * label anonymous team messages without inventing a human identity. */
+  migrateLegacyOwner(userId: string, displayName: string): { bots: number; messages: number } {
+    let bots = 0;
+    let messages = 0;
+    for (const bot of this.bots) {
+      if (bot.visibility === "private" && (!bot.ownerId || bot.ownerId === "legacy-token")) {
+        bot.ownerId = userId;
+        bots++;
+      }
+      const list = this.messagesFor(bot.threadId);
+      let changed = false;
+      for (const message of list) {
+        if (message.role !== "user" || message.userId || message.userName) continue;
+        if (bot.visibility === "private" && bot.ownerId === userId) {
+          message.userId = userId;
+          message.userName = displayName;
+        } else if (bot.visibility !== "private") {
+          message.userName = "Legacy member";
+        }
+        changed = true;
+        messages++;
+      }
+      if (changed) writeFileSync(messagesFile(bot.threadId), JSON.stringify(list, null, 2));
+    }
+    if (bots) this.saveBots();
+    return { bots, messages };
   }
 
   setChiefOfStaff(id: string, value: boolean): BotRecord | null {

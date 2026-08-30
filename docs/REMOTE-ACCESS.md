@@ -1,145 +1,121 @@
-# Dostęp zdalny i logowanie Google
+# Zdalny dostęp i wspólny serwer MultiBot
 
-Docelowy kształt: MultiBot stoi na **jednym** urządzeniu (tu: telefon s10e
-z Termuksem). Każdy inny klient — przeglądarka, aplikacja desktopowa, telefon —
-jest tylko powłoką: podajesz adres, logujesz się i masz pełny MultiBot. Klient
-nie musi być w tej samej sieci ani w tym samym kraju.
+Docelowy układ: MultiBot Server działa stale na S10e w Termuxie. Desktopowa i mobilna aplikacja są klientami. Każdy klient wpisuje publiczny adres HTTPS serwera, zakłada profil albo loguje się na istniejący profil.
 
-Składa się to z dwóch rzeczy, niezależnych od siebie:
+## Model dostępu
 
-1. **Jak ruch dociera do serwera** — tunel wychodzący (`scripts/tunnel.sh`).
-2. **Kto zostaje wpuszczony** — token dostępu albo konto Google właściciela.
+- jeden serwer i jedna baza SQLite;
+- konto użytkownika: `username`, hasło profilu, wyświetlana nazwa;
+- serwer ma własną nazwę i osobne hasło wejścia;
+- hasło serwera potrzebne jest tylko przy tworzeniu serwera i rejestracji nowego profilu;
+- logowanie tworzy sesję HTTP oraz krótkotrwały token API;
+- token nie jest pokazywany w UI ani logach;
+- odzyskiwanie konta używa jednorazowego kodu recovery pokazanego po rejestracji;
+- prywatny bot widoczny jest wyłącznie właścicielowi;
+- bot teamowy i sekcje teamowe widoczne są wszystkim członkom serwera;
+- pamięć prywatnego bota nie jest dostępna innym botom ani użytkownikom;
+- pamięć bota teamowego oraz wspólna pamięć workspace są współdzielone zgodnie z ACL.
 
-## Stan na dziś
+## Onboarding
 
-| Rzecz | Stan |
-|---|---|
-| Tunel z telefonu, dostęp z dowolnej sieci | działa, sprawdzone end-to-end |
-| Logowanie tokenem przez tunel | działa |
-| Ekran komputera bota (noVNC po WebSocket) przez tunel | działa |
-| Weryfikacja tokenu Google po stronie serwera | gotowa (`server/firebase-auth.ts`) |
-| Przycisk „Sign in with Google" w przeglądarce | gotowy, włącza się sam po konfiguracji |
-| Logowanie Google w aplikacji mobilnej | **nie zrobione** — patrz „Świadome luki" |
+### Utwórz serwer
 
-Sprawdzone przez tunel: `api/bots` bez tokenu `401`, z tokenem `200`, UI `200`,
-a `wss://…/computer/vnc/websockify` oddaje `RFB 003.008`.
+1. Uruchom serwer MultiBot na S10e.
+2. Upewnij się, że adres jest osiągalny z internetu przez HTTPS.
+3. W aplikacji wybierz `Set up server`.
+4. Podaj: adres serwera, nazwę serwera, hasło serwera, nazwę użytkownika i hasło profilu.
+5. Instalacja zapisze konfigurację serwera i utworzy pierwszy profil.
 
-## Krok 1 — projekt Firebase (jednorazowo, wymaga Twojego konta Google)
+Setup serwera jest dozwolony wyłącznie z loopbacka urządzenia hostującego. Jeśli aplikacja łączy się przez publiczny adres, najpierw wykonaj lokalny setup albo użyj instalatora serwera.
 
-1. <https://console.firebase.google.com> → **Add project**, dowolna nazwa.
-   Google Analytics możesz pominąć.
-2. **Build → Authentication → Get started → Sign-in method → Google → Enable**.
-   Jako *Project support email* wybierz swój adres.
-3. **Project settings → General → Your apps → Web (`</>`)**, zarejestruj apkę.
-   Ze snippetu potrzebujesz dwóch wartości: `projectId` i `apiKey`.
-4. **Project settings → General → Your apps → SDK setup** albo
-   <https://console.cloud.google.com/apis/credentials> → **OAuth 2.0 Client IDs**
-   → wpis typu *Web client (auto created by Google Service)*. Skopiuj
-   **Client ID** (kończy się na `.apps.googleusercontent.com`).
-5. Do **Authorized JavaScript origins** tego klienta dopisz adres, spod którego
-   będziesz się logować (patrz krok 2 — musi być stały).
-6. W Firebase: **Authentication → Settings → Authorized domains** dopisz tę samą
-   domenę.
+### Dołącz do serwera
 
-Wpisz trzy wartości do `~/.openmausbot/config.json` na serwerze:
+1. Wybierz `Sign in`, jeśli profil już istnieje.
+2. Wybierz `New profile`, jeśli tworzysz własne konto.
+3. Podaj publiczny adres HTTPS.
+4. Przy rejestracji podaj hasło serwera, nazwę użytkownika, hasło profilu i opcjonalną nazwę wyświetlaną.
 
-```json
-"firebase": {
-  "projectId": "twoj-projekt",
-  "apiKey": "AIza…",
-  "clientId": "…apps.googleusercontent.com"
-}
-```
+Nie ma QR, Tailscale, WireGuard ani ręcznego wklejania tokenu w normalnym flow.
 
-Potem zrestartuj serwer (`sv restart multibot`). Ekran logowania sam pokaże
-przycisk Google — sprawdza to trasą `GET /api/auth/status`.
+## Publiczny HTTPS
 
-`apiKey` i `clientId` są **publiczne z definicji**: przeglądarka musi je pokazać
-Google. Bramką nie są one, tylko to, co serwer robi z odesłanym tokenem.
+Serwer lokalny nasłuchuje domyślnie na porcie `8799`. Do publicznego dostępu użyj Cloudflare Tunnel albo zaufanego reverse proxy z poprawnym certyfikatem HTTPS.
 
-### Kolejność pierwszego logowania ma znaczenie
-
-`authorizeOwner` wiąże **pierwszy** UID jako właściciela i tylko wtedy, gdy
-żądanie idzie z loopbacka albo niesie znany token dostępu. To celowe: bez tego
-pierwszy przechodzień z internetu przejąłby serwer.
-
-Praktycznie: **pierwsze** logowanie Google zrób w przeglądarce, która ma już
-wpisany token (czyli tej, w której normalnie pracujesz). Kolejne urządzenia
-logują się samym Google, bez tokenu.
-
-## Krok 2 — publiczny adres
-
-Na telefonie **stoi już usługa runit `cloudflared`**, wyłączona (plik `down`).
-Czeka wyłącznie na token nazwanego tunelu:
-
-```
-$PREFIX/var/service/cloudflared/run
-  exec cloudflared tunnel run --token-file $HOME/.cloudflared/token
-```
-
-Więc najkrótsza droga do STAŁEGO adresu (i jedyna, przy której działa logowanie
-Google) wygląda tak:
-
-1. <https://one.dash.cloudflare.com> → **Networks → Tunnels → Create a tunnel**
-   → *Cloudflared*, nazwij `multibot`.
-2. Skopiuj token instalacyjny (długi ciąg z komendy, którą pokaże panel).
-3. Na telefonie:
-
-   ```bash
-   mkdir -p ~/.cloudflared
-   printf '%s' 'WKLEJONY_TOKEN' > ~/.cloudflared/token
-   chmod 600 ~/.cloudflared/token
-   export SVDIR=$PREFIX/var/service
-   rm $PREFIX/var/service/cloudflared/down    # usługa ma wstawać sama
-   sv up cloudflared && sv status cloudflared
-   ```
-
-4. W panelu tunelu dodaj **Public hostname**: Twoja domena, typ `HTTP`, cel
-   `localhost:8799`.
-
-Ten adres wpisujesz raz w kroku 1 (punkty 5 i 6) i masz spokój.
-
-### Wariant bez konta, na jeden raz
-
-Szybki tunel (bez konta, adres losowy przy każdym starcie):
+Szybki tunel testowy:
 
 ```bash
 ~/multibot/scripts/tunnel.sh
 ```
 
-Do logowania Google to **nie wystarczy** — Google i Firebase wymagają wpisania
-domeny na listę dozwolonych, a losowa domena zmienia się przy każdym restarcie.
-Token dostępu działa tędy bez zastrzeżeń.
+Do stałej pracy skonfiguruj nazwany Cloudflare Tunnel wskazujący na `http://127.0.0.1:8799`, ustaw publiczny hostname i uruchamiaj usługę `cloudflared` w Termuxie. Losowy quick tunnel zmienia adres po restarcie; używaj go wyłącznie do testów.
 
-Sprawdzone tą drogą (adres losowy, tunel po teście zdjęty): `api/bots` bez
-tokenu `401`, z tokenem `200`, UI `200`, `wss://…/computer/vnc/websockify`
-oddaje `RFB 003.008`.
+Przed udostępnieniem adresu sprawdź:
 
-## Bezpieczeństwo, wprost
+```bash
+curl -i https://PUBLIC_HOST/api/auth/status
+curl -i https://PUBLIC_HOST/api/bots
+```
 
-Publiczny adres znaczy, że każdy może zapukać. Za bramką stoją Twoje boty,
-pliki, terminal komputera bota i klucze API dostawców. Bramka to:
+`/api/auth/status` jest publiczne. `/api/bots` bez sesji musi zwracać `401`.
 
-- **token dostępu** — 64 znaki, jeden dla całej instalacji, jedzie w nagłówku
-  albo w ciasteczku; albo
-- **konto Google właściciela** — tylko UID zapisany jako `firebase.ownerUid`.
+## Protokół v2
 
-Dopóki nie skończysz kroku 1, jedyną barierą jest token. Dlatego tunel **nie
-stoi domyślnie** — uruchamiasz go świadomie, jedną komendą.
+Nowi klienci wysyłają `x-multibot-protocol: 2`, a WebSocket używa subprotocolu `multibot-v2`. Stary zdalny bearer token jest odrzucany kodem `426`, żeby nie mieszać starego modelu tokenowego z kontami użytkowników.
 
-Token rotujesz z UI (`AppSettingsPanel`) albo trasą `POST /api/auth/token/rotate`.
-Rotacja zrywa wszystkie aktywne sesje.
+Najważniejsze endpointy:
 
-## Świadome luki
+- `GET /api/auth/status` — status konfiguracji serwera;
+- `POST /api/setup/server` — lokalna inicjalizacja serwera;
+- `POST /api/auth/register` — nowe konto;
+- `POST /api/auth/login` — logowanie;
+- `POST /api/auth/recover` — odzyskanie konta kodem recovery;
+- `POST /api/auth/session` — wymiana tokenu na sesję cookie;
+- `POST /api/auth/logout` — unieważnienie bieżącej sesji;
+- `GET /api/profile` — własny profil;
+- `GET /api/server` — nazwa i publiczne dane serwera;
+- `GET /api/server/members` — członkowie serwera;
+- `GET /api/workspace` — workspace, członkowie i bieżący użytkownik;
+- `GET /api/bots` — boty zgodne z ACL;
+- `GET /api/events` — zdarzenia zgodne z ACL.
 
-- **Logowanie Google w aplikacji mobilnej.** Google blokuje OAuth w WebView
-  Androida (`disallowed_useragent`), więc ekran webowy tam nie zadziała. Trzeba
-  natywnego `expo-auth-session` i przekazania ciasteczka do WebView — osobny
-  kawałek pracy. Do tego czasu telefon loguje się tokenem, tak jak dotąd.
-- **Electron.** `electron/oauth-loopback.mjs` ma gotową obsługę callbacku na
-  loopbacku, ale `buildAuthUrl` nie ma jeszcze czego budować. Aplikacja
-  desktopowa pokazuje UI serwera, więc logowanie Google działa w niej tą samą
-  drogą, co w przeglądarce — osobnego flow potrzebuje dopiero logowanie
-  systemowe poza oknem.
-- **Parowanie kodem QR** ma gotowy serwer (`POST /api/pair/start`, `/claim`),
-  ale nie ma ekranu z kodem w UI hosta.
+## Bezpieczeństwo
+
+- hasła są haszowane scryptem, nigdy nie są przechowywane jawnie;
+- sesja cookie ma `HttpOnly`, `SameSite=Strict` oraz `Secure` przy HTTPS;
+- token API jest krótko ważny i może być odświeżony przez sesję;
+- logowanie, rejestracja, recovery i setup mają rate limit;
+- prywatne boty są filtrowane na serwerze, nie tylko w UI;
+- wiadomości, mail, grupy, pokoje, wyszukiwanie i zdarzenia stosują ACL;
+- prywatne boty nie mogą używać trybu automatycznej komunikacji ani Full Access;
+- odpowiedzi API nie zawierają haseł, tokenów ani kodów recovery po pierwszym pokazaniu;
+- SQLite i sekrety pozostają na serwerze S10e; nie commituj katalogu danych;
+- publiczne repo nie może zawierać `.env`, `identity.db`, tokenów Cloudflare, kluczy API ani transcriptów z danymi prywatnymi.
+
+## S10e / Termux
+
+Uruchom usługę serwera przez `runit`/`termux-services`, ustaw autostart i wyłącz agresywne oszczędzanie baterii dla Termuxa. Przechowuj dane w katalogu wskazanym przez `OMB_DATA_DIR`; nie używaj katalogu repo jako magazynu sekretów.
+
+Instalatory:
+
+- `scripts/install-termux.sh` — instalacja na S10e;
+- `scripts/install-server-windows.mjs` — przygotowanie serwera na Windows;
+- `scripts/selfhost-check.mjs` — sprawdzenie instrukcji i konfiguracji self-hostingu.
+
+## Aktualizacje
+
+Aktualizacja aplikacji desktopowej korzysta z publicznych artefaktów release repo `E4B-labs/multibot`: `latest.yml`, instalator i blockmap. Feed nie może zawierać `releases.atom`, znaków nowej linii ani komunikatu błędu GitHub.
+
+Przed wydaniem:
+
+```powershell
+$env:TEMP='D:\tmp'
+$env:TMP='D:\tmp'
+$env:ELECTRON_BUILDER_CACHE='D:\electron-builder-cache'
+pnpm exec tsc -b
+pnpm exec tsc -p tsconfig.server.build.json
+pnpm exec vitest run
+pnpm vite build
+pnpm package:win
+```
+
+Nie publikuj release bez ręcznego sprawdzenia artefaktów i numeru wersji.

@@ -7,6 +7,7 @@ import type { Duplex } from "node:stream";
 
 import { saveConfig, type AppConfig } from "./config.ts";
 import { matchVncRoute } from "./computer-vnc-proxy.ts";
+import { isIdentityPublicRoute } from "./identity.ts";
 
 export const newAccessToken = () => randomBytes(32).toString("hex");
 
@@ -70,6 +71,16 @@ function rejectUpgrade(socket: Duplex) {
   socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
 }
 
+function loopbackRequest(req: IncomingMessage): boolean {
+  const address = req.socket.remoteAddress ?? "";
+  return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function protocolV2Request(req: IncomingMessage): boolean {
+  if (req.headers["x-multibot-protocol"] === "2") return true;
+  return String(req.headers["sec-websocket-protocol"] ?? "").split(",").map((value) => value.trim()).includes("multibot-v2");
+}
+
 /** Mount last: wraps both the app request handler and every upgrade handler,
  * including the engine event and per-bot computer sockets. */
 /** multibot (A1): a second, equal way to be authenticated — a device session
@@ -91,6 +102,7 @@ export function mountAuth(server: Server, getToken: () => string, hasSession: Se
   server.on("request", (req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     const publicRoute =
+      isIdentityPublicRoute(req.method ?? "GET", url.pathname) ||
       (req.method === "GET" && url.pathname === "/api/health") ||
       // multibot (A1): ekran logowania musi wiedzieć, CZY jest się czym
       // logować, zanim cokolwiek ma. Trasa oddaje wyłącznie publiczne
@@ -123,9 +135,19 @@ export function mountAuth(server: Server, getToken: () => string, hasSession: Se
         url.pathname === "/api/pair/claim");
     const bearerAuthed = tokenMatches(requestToken(req), getToken());
     const sessionAuthed = hasSession(req);
-    const authed = bearerAuthed || sessionAuthed;
+    const legacyLocal = bearerAuthed && loopbackRequest(req);
+    const authed = sessionAuthed || legacyLocal;
+    // Anonymous/old clients still get the normal 401.  426 is reserved for a
+    // remote legacy bearer, where silently accepting the old installation-wide
+    // credential would bypass v2 account isolation.
+    const protocolUpgrade = !publicRoute && !loggingIn && !internallyAuthenticated &&
+      !protocolV2Request(req) && bearerAuthed && !legacyLocal;
     if (sessionAuthed) req.headers["x-multibot-auth"] = "session";
     else if (bearerAuthed) req.headers["x-multibot-auth"] = "token";
+    if (protocolUpgrade) {
+      res.writeHead(426, { "content-type": "application/json", "cache-control": "no-store", "upgrade": "multibot-v2" });
+      return res.end(JSON.stringify({ error: "protocol v2 required" }));
+    }
     if (!publicRoute && !loggingIn && !internallyAuthenticated && !authed) {
       return unauthorized(res);
     }
@@ -145,7 +167,9 @@ export function mountAuth(server: Server, getToken: () => string, hasSession: Se
     const bearerAuthed = tokenMatches(requestToken(req), getToken());
     const sessionAuthed = hasSession(req);
     const vncAuthed = tokenMatches(vncUpgradeToken(req), getToken());
-    const authed = bearerAuthed || sessionAuthed || vncAuthed;
+    const legacyLocal = bearerAuthed && loopbackRequest(req);
+    const authed = sessionAuthed || legacyLocal || (vncAuthed && loopbackRequest(req));
+    if (!protocolV2Request(req) && !legacyLocal && !sessionAuthed && !vncAuthed) return rejectUpgrade(socket);
     if (sessionAuthed) req.headers["x-multibot-auth"] = "session";
     else if (bearerAuthed) req.headers["x-multibot-auth"] = "token";
     if (!authed) {
@@ -160,7 +184,8 @@ export function mountAuth(server: Server, getToken: () => string, hasSession: Se
     const protocols = String(req.headers["sec-websocket-protocol"] ?? "")
       .split(",")
       .map((value) => value.trim());
-    if (protocols.includes("multibot-auth")) req.headers["sec-websocket-protocol"] = "multibot-auth";
+    if (protocols.includes("multibot-v2")) req.headers["sec-websocket-protocol"] = "multibot-v2";
+    else if (protocols.includes("multibot-auth")) req.headers["sec-websocket-protocol"] = "multibot-auth";
     for (const handler of upgrades) handler(req, socket, head);
   });
   return {

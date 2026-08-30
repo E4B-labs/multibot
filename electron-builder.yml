@@ -3,11 +3,9 @@ appId: com.e4b-labs.multibot
 productName: MultiBot
 artifactName: MultiBot-${version}-${arch}.${ext}
 
-# Source repo stays private. Update binaries live in a separate public repo,
-# so installed apps never need a GitHub token.
 publish:
   - provider: generic
-    url: https://github.com/E4B-labs/multibot-releases/releases/latest/download
+    url: https://github.com/E4B-labs/multibot/releases/latest/download
 
 directories:
   buildResources: build

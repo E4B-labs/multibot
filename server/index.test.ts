@@ -80,7 +80,9 @@ beforeAll(async () => {
       // reach it — without this the server would provision REAL containers for
       // every throwaway test bot.
       MULTIBOT_COMPUTER: "off",
-      OMB_HOST: "0.0.0.0",
+      // Loopback keeps tests valid in restricted CI sandboxes; public access
+      // is provided by the HTTPS tunnel/reverse proxy in real deployments.
+      OMB_HOST: "127.0.0.1",
       OMB_STATIC_DIR: staticDir,
       ENGINE_URL: "http://127.0.0.1:1",
     },

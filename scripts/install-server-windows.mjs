@@ -49,7 +49,7 @@ export function windowsServerPlan(env = process.env, packagedExe) {
       sourceCreateArgs: ["/Create", "/F", "/SC", "ONLOGON", "/RL", "LIMITED", "/TN", TASK_NAME, "/TR", sourceAction],
       runArgs: ["/Run", "/TN", TASK_NAME],
     },
-    tailscale: `tailscale serve --bg --yes http://127.0.0.1:${PORT}`,
+    publicHttps: "scripts/tunnel.sh or a trusted HTTPS reverse proxy",
   };
 }
 
@@ -135,9 +135,8 @@ async function install() {
     await run(plan.task.command, plan.task.runArgs);
     await waitForServer(plan.port);
     console.log(`\nMultibot server: http://127.0.0.1:${plan.port}`);
-    console.log(`Access token: ${token}`);
-    console.log(`Recommended remote HTTPS (Tailscale 1.52+):\n  ${plan.tailscale}`);
-    console.log("Then open HTTPS address shown by: tailscale serve status");
+    console.log(`Public HTTPS: ${plan.publicHttps}`);
+    console.log("Next: open MultiBot, choose Set up server, then share host + server password.");
     return;
   }
 
@@ -176,10 +175,8 @@ async function install() {
   }
 
   console.log(`\nMultibot server: http://127.0.0.1:${plan.port}`);
-  console.log(`Access token: ${token}`);
-  console.log("Recommended remote HTTPS (Tailscale 1.52+):");
-  console.log(`  ${plan.tailscale}`);
-  console.log("Then open HTTPS address shown by: tailscale serve status");
+  console.log(`Public HTTPS: ${plan.publicHttps}`);
+  console.log("Next: open MultiBot, choose Set up server, then share host + server password.");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -23,7 +23,7 @@ describe("Windows one-command server installer", () => {
       installDir: join(localAppData, "Multibot Server"),
       packagedExe,
       task: { command: "schtasks.exe" },
-      tailscale: "tailscale serve --bg --yes http://127.0.0.1:8799",
+      publicHttps: "scripts/tunnel.sh or a trusted HTTPS reverse proxy",
     });
     expect(plan.task.createArgs).toEqual(expect.arrayContaining(["/SC", "ONLOGON", "/RL", "LIMITED"]));
     expect(plan.task.createArgs.join(" ")).not.toMatch(/HIGHEST|\/RU\s+SYSTEM/i);

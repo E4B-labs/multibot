@@ -14,7 +14,7 @@ import {
 import type { MascotShape } from "@/lib/mascotShapes";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import { MAUS_COLORS } from "@/lib/mascot";
-import { authFetch, authenticatedEventSource } from "@/lib/auth";
+import { authFetch, authenticatedEventSource, ensureBrowserSession, getAuthMode } from "@/lib/auth";
 import { getLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { botNotificationIcon, notificationTag, notifyBrowser } from "@/lib/notifications";
@@ -63,6 +63,7 @@ export interface Message {
   replyToId?: string;
   userId?: string;
   userName?: string;
+  order?: number;
   /** optimistic echo — user message waiting for the server's confirmation */
   pending?: boolean;
   at: number;
@@ -223,7 +224,7 @@ type Action =
   | { type: "send"; botId: string; text: string; reasoning?: string; attachmentIds?: string[]; replyToId?: string }
   | { type: "answerCard"; botId: string; messageId: string; answer: string }
   | { type: "dismissCard"; botId: string; messageId: string }
-  | { type: "newBot" }
+  | { type: "newBot"; visibility?: "team" | "private" }
   | { type: "botAdded"; bot: Bot }
   | { type: "deleteBot"; botId: string }
   | { type: "duplicateBot"; botId: string }
@@ -863,7 +864,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "newBot":
-          api("/api/bots", { method: "POST" })
+          api("/api/bots", { method: "POST", body: JSON.stringify({ visibility: action.visibility ?? "team" }) })
             .then(({ bot }) => rawDispatch({ type: "botAdded", bot }))
             .catch(showError);
           break;
@@ -959,8 +960,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .then(({ threads }) => alive && rawDispatch({ type: "mailSet", threads: Array.isArray(threads) ? threads : [] }))
         .catch(() => {});
     };
-    loadAll();
+    const sessionReady = getAuthMode() === "v2" ? ensureBrowserSession() : Promise.resolve();
+    void sessionReady.finally(loadAll);
 
+    let lastSequence = 0;
     const es = authenticatedEventSource(`/api/events?lang=${getLanguage()}`);
     es.onopen = () => {
       rawDispatch({ type: "connected", value: true });
@@ -973,6 +976,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         frame = JSON.parse(raw.data);
       } catch {
         return;
+      }
+      if (Number.isSafeInteger(frame.sequence) && frame.sequence > 0) {
+        if (frame.sequence <= lastSequence) return;
+        lastSequence = frame.sequence;
       }
       switch (frame.kind) {
         case "message":

@@ -8,10 +8,10 @@
 // `server/index.ts` w momencie ustawienia `needsAttention`.
 import { loadConfig, saveConfig, type AppConfig, type PushDevice } from "./config.ts";
 
-export function registerPushDevice(id: string, token: string, botId?: string): void {
+export function registerPushDevice(id: string, token: string, botId?: string, userId?: string): void {
   const cfg = loadConfig();
   const devices: Record<string, PushDevice> = { ...(cfg.pushDevices ?? {}) };
-  devices[id] = { token, botId, updated: Date.now() };
+  devices[id] = { token, botId, userId, updated: Date.now() };
   // saveConfig merguje po kluczu, więc zapis jednego urządzenia nie kasuje reszty
   saveConfig({ pushDevices: devices } as Partial<AppConfig>);
 }
@@ -21,11 +21,12 @@ export async function notifyPushDevices(
   body: string,
   botId?: string,
   data?: Record<string, string>,
+  audienceUserIds?: string[],
 ): Promise<void> {
   const cfg = loadConfig();
   const devices = cfg.pushDevices ?? {};
   const tokens = Object.values(devices)
-    .filter((d) => d.token && (botId == null || d.botId == null || d.botId === botId))
+    .filter((d) => d.token && (botId == null || d.botId == null || d.botId === botId) && (audienceUserIds === undefined ? true : Boolean(d.userId && audienceUserIds.includes(d.userId))))
     .map((d) => d.token);
   if (tokens.length === 0) return;
   await Promise.allSettled(

@@ -51,6 +51,8 @@ describe("driver-neutral workspace", () => {
     expect(store.setAccess("bot", "full")).toEqual({ access: "full" });
     expect(store.permissions("bot").terminal).toBe(true);
     expect(store.autonomy("bot")).toEqual({ autonomy: "autonomous" });
+    expect(store.access("private", true)).toEqual({ access: "approval" });
+    expect(store.autonomy("private", true)).toEqual({ autonomy: "approval" });
   });
 
   it("keeps team memory separate from each bot memory", () => {

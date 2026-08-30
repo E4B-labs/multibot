@@ -2,7 +2,7 @@
 
 **Stan dokumentu:** 28 sierpnia 2026
 
-**Wersja opisywana:** `0.1.110`
+**Wersja opisywana:** `0.2.1` + protokół tożsamości v2
 
 **Repozytorium:** `E4B-labs/multibot`
 
@@ -133,7 +133,7 @@ Harness znajduje się w `server/`. Odpowiada za:
 - rutyny i webhooki;
 - profile, workspace i zaproszenia;
 - proxy do engine;
-- parowanie urządzeń;
+- logowanie profili na wspólnym serwerze;
 - provisioning runtime;
 - katalog providerów, CLI i konektorów;
 - eventy live dla kilku urządzeń.
@@ -347,15 +347,12 @@ może utworzyć zaproszenie dla kolejnej osoby.
 ### 5.8. Połączenie z istniejącym serwerem
 
 Ścieżka **Zaloguj się do serwera** przyjmuje adres serwera, np. HTTPS przez
-Tailscale lub inny reverse proxy. W Electronie host jest zapisywany przez
+Cloudflare Tunnel lub inny reverse proxy. W Electronie host jest zapisywany przez
 bridge, a w zwykłej przeglądarce następuje nawigacja pod podany adres.
 
-Po stronie serwera logowanie może odbywać się przez:
-
-- token Bearer;
-- device session po uwierzytelnieniu Google/Firebase, jeśli operator je
-  skonfigurował;
-- jednorazowe parowanie urządzenia.
+Po stronie serwera logowanie odbywa się przez konto lokalne i hasło profilu.
+Rejestracja nowego użytkownika wymaga hasła serwera. Serwer wydaje sesję HTTP
+oraz krótkotrwały token API.
 
 ---
 
@@ -1284,34 +1281,11 @@ serwerem, kontem i urządzeniami:
 - Shared server/workspace;
 - aktualny użytkownik;
 - lista członków;
-- zaproszenie ownera;
-- access token;
-- rotacja tokena;
-- QR do połączenia urządzenia;
+- nazwa i hasło serwera dla ownera;
+- wylogowanie i zarządzanie sesjami;
 - instalacja PWA.
 
-### 18.5. Access token
-
-Token jest wymagany przy połączeniu z innego urządzenia, jeśli nie używana jest
-sesja Firebase. UI pozwala go pokazać/ukryć i wygenerować nowy.
-
-Rotacja tokena:
-
-- tworzy nowy losowy token;
-- unieważnia poprzedni token;
-- zamyka aktywne sesje/SSE/WebSocket poza bieżącym żądaniem;
-- wymaga ponownego połączenia klientów.
-
-### 18.6. Pair device
-
-Owner może wygenerować jednorazowy kod i QR:
-
-- kod wygasa po `5` minutach;
-- jest single-use;
-- klient wymienia go na sesję urządzenia;
-- adres pairingowy jest pokazywany razem z QR.
-
-### 18.7. Install app/PWA
+### 18.5. Install app/PWA
 
 Panel rozpoznaje przeglądarkę:
 
@@ -1330,9 +1304,8 @@ Jeżeli przeglądarka dostarczy `beforeinstallprompt`, UI uruchamia natywny prom
 
 Każda osoba ma własną tożsamość. Serwer może użyć:
 
-- tokena instalacji;
-- lokalnej device session;
-- Firebase/Google ID tokena wymienionego na lokalną sesję.
+- lokalnej sesji HTTP;
+- krótkotrwałego tokena API wydanego po logowaniu.
 
 Profil użytkownika zawiera UID oraz opcjonalnie name/email. Te pola są używane
 do podpisu wiadomości i listy członków.
@@ -1341,25 +1314,25 @@ do podpisu wiadomości i listy członków.
 
 Workspace ma role:
 
-- `owner` — może tworzyć zaproszenia i wykonywać operacje właścicielskie;
+- `owner` — może zmieniać ustawienia serwera i wykonywać operacje właścicielskie;
 - `member` — może pracować w workspace zgodnie z ACL botów.
 
-Pierwszy owner jest wiązany z instalacją. Dalszy użytkownik powinien wejść
-przez zaproszenie lub skonfigurowaną ścieżkę logowania.
+Pierwszy zarejestrowany użytkownik zostaje ownerem. Kolejni użytkownicy
+dołączają hasłem serwera i tworzą własne profile.
 
 ### 19.3. Zaproszenie
 
-Owner wybiera **Utwórz zaproszenie**. Serwer tworzy kod, który można skopiować
-i przekazać koledze. Zaproszenie jest ograniczone czasowo i jednorazowe.
+Osobny mechanizm invite nie jest potrzebny: owner przekazuje publiczny adres
+i hasło serwera. Hasło serwera nie jest hasłem profilu.
 
 Kolejność użycia:
 
 1. właściciel uruchamia serwer;
-2. właściciel tworzy invite;
+2. właściciel przekazuje adres i hasło serwera;
 3. druga osoba instaluje MultiBot lub otwiera PWA;
 4. druga osoba łączy się z adresem serwera;
 5. loguje się lub tworzy własną tożsamość;
-6. używa invite, jeśli serwer tego wymaga;
+6. wybiera `New profile` i podaje hasło serwera;
 7. pojawia się jako nowy member;
 8. widzi wspólne boty i sekcje zgodnie z ACL.
 
@@ -1367,13 +1340,10 @@ Kolejność użycia:
 
 Bot ma jedną z wartości:
 
-- `public` — dostępny dla uwierzytelnionych użytkowników instalacji/workspace;
 - `team` — dostępny członkom workspace;
-- `private` — widoczny tylko ownerowi bota, ownerowi workspace albo UID z
-  `allowedUserIds`.
+- `private` — widoczny wyłącznie właścicielowi bota.
 
-Private ACL obsługuje do `100` UID. Serwer filtruje boty, eventy, grupy i
-operacje zanim zwróci je klientowi.
+Serwer filtruje boty, eventy, grupy i operacje zanim zwróci je klientowi.
 
 ### 19.5. Wspólne sekcje
 
@@ -1394,15 +1364,11 @@ traktowana jako dane widoczne dla członków workspace.
 
 ### 20.1. HTTP
 
-Chronione trasy przyjmują:
-
-- `Authorization: Bearer <token>`;
-- `X-MultiBot-Token`;
-- sesję urządzenia w cookie po Firebase/Google login.
+Chronione trasy przyjmują krótkotrwały `Authorization: Bearer <token>` albo
+sesję `mb_v2_session` w cookie.
 
 Publiczne pozostają tylko trasy wymagane do health, logowania, statycznego
-shella, webhooków i bootstrappingu parowania. Dane workspace nie powinny być
-publiczne.
+shella i setupu lokalnego. Dane workspace nie są publiczne.
 
 ### 20.2. WebSocket/SSE
 
@@ -1536,12 +1502,12 @@ uruchomiono jako pełny asset release.
 Nie kopiować publicznie:
 
 - access tokenów;
-- Firebase ID tokenów;
+- kodów recovery;
 - API keys;
 - webhook secretów;
 - cookies;
 - pełnych payloadów connectorów;
-- prywatnych adresów LAN/Tailscale;
+- prywatnych adresów LAN;
 - transcriptów zawierających dane osobowe.
 
 Do raportu wystarczą wersja, endpoint bez sekretu, status HTTP, typ błędu,
@@ -1617,15 +1583,9 @@ Playwright dla Androida.
 
 ### 23.5. Zdalny HTTPS
 
-Do bezpiecznego dostępu z telefonu użyć HTTPS, Tailscale Serve albo stabilnego
-reverse proxy. Przykład Tailscale:
-
-~~~sh
-tailscale serve --bg --yes http://127.0.0.1:8799
-~~~
-
-Quick tunnel z losowym adresem nadaje się do krótkiego testu z tokenem, ale nie
-jest stabilną konfiguracją dla Google OAuth ani stałego zespołu.
+Do dostępu z telefonu użyć HTTPS przez nazwany Cloudflare Tunnel albo stabilny
+reverse proxy. Quick tunnel z losowym adresem nadaje się wyłącznie do testów;
+stały zespół potrzebuje stałego hostname.
 
 ---
 
@@ -1661,18 +1621,27 @@ Większość tras wymaga tokena albo device session.
 ### 25.1. Health i auth
 
 - `GET /api/health`;
-- `GET /api/auth/check`;
+- `GET /api/public/handshake`;
+- `GET /api/public/server`;
 - `GET /api/auth/status`;
+- `POST /api/setup/server`;
+- `POST /api/auth/register`;
+- `POST /api/auth/login`;
+- `POST /api/auth/recover`;
 - `POST /api/auth/session`;
-- `POST /api/auth/firebase/session`;
-- `POST /api/auth/token`;
-- `POST /api/auth/token/rotate`.
+- `POST /api/auth/access-token`;
+- `POST /api/auth/logout`;
+- `POST /api/auth/logout-all`;
+- `GET /api/auth/sessions`;
+- `DELETE /api/auth/sessions/:id`.
 
 ### 25.2. Workspace i użytkownicy
 
 - `GET /api/workspace`;
 - `GET /api/workspace/members`;
-- `POST /api/workspace/invites`;
+- `GET /api/server`;
+- `PATCH /api/server`;
+- `GET /api/server/members`;
 - `PUT /api/config` dla profilu i konfiguracji.
 
 `GET /api/workspace` zwraca ID i nazwę workspace, listę members oraz
@@ -1813,11 +1782,10 @@ Nigdy nie commitować:
 - `.env`;
 - API keys;
 - access tokenów;
-- Firebase secrets;
-- OAuth client secretów;
+- tokenów sesji i API;
 - webhook HMAC secretów;
 - prywatnych URL-i serwera;
-- adresów LAN i Tailscale;
+- adresów LAN;
 - transcriptów rozmów;
 - uploadów;
 - `memory_store.db`;
@@ -1829,8 +1797,8 @@ Zasady implementacyjne:
 
 - sekrety write-only;
 - redakcja diagnostyki;
-- token rotation zamyka sesje;
-- owner-only invite creation;
+- rotacja/wylogowanie zamyka sesje;
+- hasło serwera dopuszcza rejestrację nowych profili;
 - ACL sprawdzane na serwerze, nie tylko w React;
 - engine loopback-only;
 - SSRF/loopback restrictions dla proxy;
@@ -1847,7 +1815,7 @@ ale dane, tokeny i transcript pozostają prywatne operatora.
 
 ## 28. Znane różnice między dokumentacją a starszymi opisami
 
-Ten plik jest aktualnym opisem wersji `0.1.110`. Wcześniejsze materiały mogą
+Ten plik jest aktualnym opisem wersji `0.2.1` i protokołu v2. Wcześniejsze materiały mogą
 mieć następujące nieaktualne założenia:
 
 - Agent mail i Team map jako pozycje stopki sidebara zamiast menu `⋮`;
@@ -1869,7 +1837,7 @@ commit źródłowy i logi, zamiast zakładać, że opis lub stary proces jest ak
 
 ---
 
-## 29. Zakres wersji `0.1.110`
+## 29. Zakres wersji `0.2.1` / protokół v2
 
 Wersja zamyka bieżący zestaw zmian związanych z:
 
@@ -1878,7 +1846,7 @@ Wersja zamyka bieżący zestaw zmian związanych z:
 - możliwością cofnięcia się z każdego kroku onboardingu;
 - przejściem `Set up a server` z powrotem do ekranu wyboru;
 - krokiem Shared workspace;
-- integracją workspace access, members i owner invite w onboardingu;
+- integracją workspace access, members i server-password onboardingiem;
 - utrzymaniem modelu osobna pamięć bota + wspólna pamięć zespołu;
 - bieżącym układem App Settings: General → Tools → Updates;
 - przeniesieniem Agent mail i Team map do menu `⋮`;
@@ -1888,8 +1856,8 @@ Wersja zamyka bieżący zestaw zmian związanych z:
 - zabezpieczeniami aktualizacji i release assetów.
 
 Wersja nie udaje, że rozwiązuje wszystkie przyszłe elementy multi-user. Nadal
-trzeba osobno monitorować konfigurację Firebase/Google, reverse proxy,
-zaproszenia, prywatne ACL, sekretne connectory i politykę dostępu do team memory.
+trzeba osobno monitorować reverse proxy, prywatne ACL, sekretne connectory i
+politykę dostępu do team memory.
 
 ---
 
@@ -1898,8 +1866,8 @@ zaproszenia, prywatne ACL, sekretne connectory i politykę dostępu do team memo
 Workspace jest poprawnie skonfigurowany, gdy:
 
 - serwer odpowiada na `/api/health` i `/api/workspace`;
-- klient ma poprawny token lub device session;
-- owner widzi członków i może utworzyć invite;
+- klient ma poprawną sesję lub krótkotrwały token API;
+- owner widzi członków i może zmienić nazwę/hasło serwera;
 - drugi użytkownik dołącza własnym profilem;
 - wspólne boty i sekcje są widoczne obu osobom;
 - private bot jest widoczny tylko ACL;
@@ -1911,4 +1879,3 @@ Workspace jest poprawnie skonfigurowany, gdy:
 - `latest.yml`, EXE i blockmap mają tę samą wersję;
 - engine nie jest wystawiony publicznie;
 - żaden sekret nie trafił do repozytorium ani release notes.
-

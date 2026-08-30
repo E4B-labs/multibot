@@ -88,16 +88,6 @@ EOF
 fi
 
 say "Address: http://$(hostname 2>/dev/null || echo phone):8799"
-if (( ! DRY_RUN )); then
-  token_file="$HOME/.openmausbot/config.json"
-  for _ in $(seq 1 30); do
-    if [[ -f "$token_file" ]]; then
-      token="$(node -e 'const fs=require("fs");try{const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(x.auth?.token||"")}catch{}' "$token_file")"
-      if [[ -n "$token" ]]; then say "Token: $token"; break; fi
-    fi
-    sleep 1
-  done
-fi
-say "Token fallback: svlogtail multibot"
 say "Keep phone awake: termux-wake-lock (Boot script repeats this)"
-say "Recommended HTTPS: tailscale serve --bg --yes http://127.0.0.1:8799"
+say "Public HTTPS: run scripts/tunnel.sh with a named Cloudflare Tunnel, or put a trusted reverse proxy in front of port 8799"
+say "Next: open MultiBot at the address, choose Set up server, then share host + server password"

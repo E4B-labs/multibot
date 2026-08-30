@@ -1099,12 +1099,23 @@ export function Sidebar() {
                     onClick={() => {
                       track("bot_created");
                       setAddMenuOpen(false);
-                      dispatch({ type: "newBot" });
+                      dispatch({ type: "newBot", visibility: "team" });
                     }}
                     className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-raised"
                   >
                     <BotIcon size={15} className="text-ink-secondary" />
-                    {polish ? "Nowy bot" : "New bot"}
+                    {polish ? "Nowy bot zespołowy" : "New team bot"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      track("bot_created");
+                      setAddMenuOpen(false);
+                      dispatch({ type: "newBot", visibility: "private" });
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-raised"
+                  >
+                    <BotIcon size={15} className="text-ink-secondary" />
+                    {polish ? "Nowy bot prywatny" : "New private bot"}
                   </button>
                   <button
                     onClick={() => {

@@ -26,6 +26,7 @@ interface BotLike {
   section?: string;
   chiefOfStaff?: boolean;
   composioAccounts?: Record<string, string>;
+  visibility?: "public" | "team" | "private";
 }
 
 /** Strukturalny widok na WorkspaceStore — test podstawia własną atrapę. */
@@ -33,8 +34,8 @@ export interface WorkspaceLike {
   markdown(botId: string): { content: string };
   facts(botId: string, query?: string): Array<{ text: string }>;
   skills(botId: string): Array<{ name: string; instructions: string; enabled?: boolean }>;
-  autonomy(botId: string): { autonomy: "approval" | "autonomous" };
-  access(botId: string): { access: string };
+  autonomy(botId: string, privateBot?: boolean): { autonomy: "approval" | "autonomous" };
+  access(botId: string, privateBot?: boolean): { access: string };
   teamMarkdown?(): { content: string };
   teamFacts?(query?: string): Array<{ text: string }>;
 }
@@ -128,8 +129,9 @@ export function botSystemPrompt(
   const teamFacts = workspace.teamFacts?.().slice(0, 40).map((fact) => `- ${fact.text}`).join("\n") ?? "";
   const sharedSkills = workspace.skills(bot.id).filter((skill) => skill.enabled !== false)
     .map((skill) => `## ${skill.name}\n${skill.instructions}`).join("\n\n");
-  const autonomous = workspace.autonomy(bot.id).autonomy === "autonomous";
-  const fullAccess = workspace.access(bot.id).access === "full";
+  const privateBot = bot.visibility === "private";
+  const autonomous = workspace.autonomy(bot.id, privateBot).autonomy === "autonomous";
+  const fullAccess = workspace.access(bot.id, privateBot).access === "full";
 
   const who = [
     "# Who you are",

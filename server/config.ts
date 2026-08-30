@@ -21,6 +21,8 @@ import type { AutoVerifyState } from "./auto-verify.ts";
 export interface PushDevice {
   token: string;
   botId?: string;
+  /** v2 account owner; absent only for legacy migration records. */
+  userId?: string;
   updated: number;
 }
 
@@ -97,7 +99,9 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_COMPOSIO_BROKER_TOKEN",
 ] as const;
 
-export const DATA_DIR = join(homedir(), ".openmausbot");
+// Tests, Termux and packaged hosts may provide an explicit writable data root.
+// Default stays compatible with existing desktop installations.
+export const DATA_DIR = process.env.OMB_DATA_DIR?.trim() || join(homedir(), ".openmausbot");
 const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");

@@ -55,8 +55,18 @@ test("pierwsze sprawdzenie rusza od razu przy starcie, nie po 15 s", async () =>
   assert.equal(fake.checks, 1);
   assert.deepEqual(fake.feed, {
     provider: "generic",
-    url: "https://github.com/E4B-labs/multibot-releases/releases/latest/download",
+    url: "https://github.com/E4B-labs/multibot/releases/latest/download",
   });
+});
+
+test("odrzucona Promise sprawdzenia nie zostaje nieobsłużona", async () => {
+  const { startUpdater } = await freshModule();
+  const fake = fakeUpdater();
+  fake.checkForUpdates = () => Promise.reject(new Error("404"));
+  const win = fakeWindow();
+  startUpdater(win, { isPackaged: true, loadUpdater: () => ({ autoUpdater: fake }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(win.sent.at(-1).status, "idle");
 });
 
 test("apka niedopakowana zostaje uśpiona — zero checków", async () => {

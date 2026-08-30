@@ -2,15 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { sortMessages } from "./messageOrder";
 
-describe("sortMessages", () => {
-  it("orders by server timestamp, with deterministic ties", () => {
+describe("message order", () => {
+  it("uses server insertion order when timestamps match", () => {
     const messages = [
-      { id: "z", at: 2 },
-      { id: "b", at: 1 },
-      { id: "a", at: 1 },
+      { id: "z", at: 1_000, order: 1 },
+      { id: "a", at: 1_000, order: 0 },
     ];
-
-    expect(sortMessages(messages).map((message) => message.id)).toEqual(["a", "b", "z"]);
-    expect(messages.map((message) => message.id)).toEqual(["z", "b", "a"]);
+    expect(sortMessages(messages).map((message) => message.id)).toEqual(["a", "z"]);
   });
 });

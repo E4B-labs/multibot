@@ -103,9 +103,7 @@ function ApprovalRules({ bot }: { bot: Bot }) {
 function BotSharing({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const polish = useLanguage() === "pl";
-  const [visibility, setVisibility] = useState<"public" | "team" | "private">(bot.visibility ?? "team");
-  const [allowedUserIds, setAllowedUserIds] = useState<string[]>(bot.allowedUserIds ?? []);
-  const [members, setMembers] = useState<Array<{ uid: string; name?: string; email?: string; role: string }>>([]);
+  const [visibility, setVisibility] = useState<"team" | "private">(bot.visibility === "private" ? "private" : "team");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -113,29 +111,25 @@ function BotSharing({ bot }: { bot: Bot }) {
     let alive = true;
     void Promise.all([
       authFetch("/api/bots/" + bot.id + "/sharing").then((response) => response.ok ? response.json() : Promise.reject(new Error("sharing unavailable"))),
-      authFetch("/api/workspace/members").then((response) => response.ok ? response.json() : Promise.reject(new Error("members unavailable"))),
-    ]).then(([sharing, roster]) => {
+    ]).then(([sharing]) => {
       if (!alive) return;
-      if (sharing.visibility === "public" || sharing.visibility === "team" || sharing.visibility === "private") setVisibility(sharing.visibility);
-      if (Array.isArray(sharing.allowedUserIds)) setAllowedUserIds(sharing.allowedUserIds.map(String));
-      if (Array.isArray(roster.members)) setMembers(roster.members);
+      setVisibility(sharing.visibility === "private" ? "private" : "team");
     }).catch((reason) => alive && setError(reason instanceof Error ? reason.message : String(reason)));
     return () => { alive = false; };
   }, [bot.id]);
 
-  const save = async (nextVisibility: typeof visibility, nextAllowed: string[]) => {
+  const save = async (nextVisibility: typeof visibility) => {
     setBusy(true);
     setError(null);
     try {
       const response = await authFetch("/api/bots/" + bot.id + "/sharing", {
         method: "PATCH",
-        body: JSON.stringify({ visibility: nextVisibility, allowedUserIds: nextAllowed }),
+        body: JSON.stringify({ visibility: nextVisibility }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? String(response.status) + " " + response.statusText);
       setVisibility(body.visibility);
-      setAllowedUserIds(body.allowedUserIds ?? []);
-      dispatch({ type: "botPatched", bot: { id: bot.id, visibility: body.visibility, ownerId: body.ownerId ?? undefined, allowedUserIds: body.allowedUserIds ?? [] } });
+      dispatch({ type: "botPatched", bot: { id: bot.id, visibility: body.visibility, ownerId: body.ownerId ?? undefined } });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -147,7 +141,7 @@ function BotSharing({ bot }: { bot: Bot }) {
     <div className="rounded-xl bg-card p-3">
       <div className="text-[14px] font-medium text-ink">{polish ? "Widoczność bota" : "Bot visibility"}</div>
       <div className="mt-0.5 text-[12px] text-ink-secondary">
-        {polish ? "Publiczny dla serwera, zespołowy albo prywatny dla wybranych kont." : "Public to the server, team-only, or private for selected accounts."}
+        {polish ? "Zespołowy dla wszystkich albo prywatny tylko dla właściciela." : "Team-visible for everyone or private to its owner."}
       </div>
       <select
         value={visibility}
@@ -155,37 +149,14 @@ function BotSharing({ bot }: { bot: Bot }) {
         onChange={(event) => {
           const value = event.target.value as typeof visibility;
           setVisibility(value);
-          void save(value, allowedUserIds);
+          void save(value);
         }}
         className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink"
       >
-        <option value="public">{polish ? "Publiczny" : "Public"}</option>
         <option value="team">{polish ? "Zespół" : "Team"}</option>
         <option value="private">{polish ? "Prywatny" : "Private"}</option>
       </select>
-      {visibility === "private" && (
-        <div className="mt-3 space-y-2">
-          {members.length ? members.map((member) => {
-            const checked = allowedUserIds.includes(member.uid);
-            return (
-              <label key={member.uid} className="flex items-center gap-2 text-[13px] text-ink">
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={busy}
-                  onChange={() => {
-                    const next = checked ? allowedUserIds.filter((id) => id !== member.uid) : [...allowedUserIds, member.uid];
-                    setAllowedUserIds(next);
-                    void save(visibility, next);
-                  }}
-                />
-                <span className="truncate">{member.name || member.email || member.uid}</span>
-                {member.role === "owner" && <span className="text-[11px] text-ink-secondary">owner</span>}
-              </label>
-            );
-          }) : <div className="text-[12px] text-ink-secondary">{polish ? "Brak kont do wybrania." : "No accounts available."}</div>}
-        </div>
-      )}
+      {visibility === "private" && <div className="mt-2 text-[12px] text-ink-secondary">{polish ? "Inni członkowie nie zobaczą bota, pamięci ani rozmów." : "Other members cannot see this bot, its memory, or its conversations."}</div>}
       {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
     </div>
   );

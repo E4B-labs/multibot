@@ -13,8 +13,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = 24_000 + Math.floor(Math.random() * 5_000);
-const BASE = `http://127.0.0.1:${PORT}`;
+let port = 0;
+let base = "";
 const TOKEN = "push-test-access-token";
 
 type Push = { title: string; body: string; data?: { botId?: string; kind?: string } };
@@ -28,7 +28,7 @@ describe("push na telefon (fake ACP fleet)", () => {
   const pushes: Push[] = [];
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await fetch(`${base}${path}`, {
       method,
       headers: { authorization: `Bearer ${TOKEN}`, ...(body ? { "content-type": "application/json" } : {}) },
       body: body ? JSON.stringify(body) : undefined,
@@ -51,6 +51,15 @@ describe("push na telefon (fake ACP fleet)", () => {
 
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
+    const probe = createServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(0, "127.0.0.1", () => {
+        port = (probe.address() as { port: number }).port;
+        probe.close((error) => error ? reject(error) : resolve());
+      });
+    });
+    base = `http://127.0.0.1:${port}`;
     expo = createServer((req, res) => {
       let raw = "";
       req.on("data", (c) => (raw += c));
@@ -100,7 +109,7 @@ describe("push na telefon (fake ACP fleet)", () => {
         ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
         HOME: home,
         USERPROFILE: home,
-        OMB_PORT: String(PORT),
+        OMB_PORT: String(port),
         MULTIBOT_COMPUTER: "off",
         MULTIBOT_EXPO_PUSH_URL: `http://127.0.0.1:${pushPort}/push`,
       },
@@ -111,7 +120,7 @@ describe("push na telefon (fake ACP fleet)", () => {
     const deadline = Date.now() + 20_000;
     for (;;) {
       try {
-        if ((await fetch(`${BASE}/api/health`)).ok) break;
+        if ((await fetch(`${base}/api/health`)).ok) break;
       } catch {
         /* jeszcze nie wstał */
       }

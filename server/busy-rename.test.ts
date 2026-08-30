@@ -5,6 +5,7 @@
 // across the rename, letting us assert it is preserved.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,8 +14,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
-const BASE = `http://127.0.0.1:${PORT}`;
+let port = 0;
+let base = "";
 const TOKEN = "busy-rename-access-token";
 
 let child: ChildProcess;
@@ -22,7 +23,7 @@ let home: string;
 let stderr = "";
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${base}${path}`, {
     method,
     headers: { authorization: `Bearer ${TOKEN}`, ...(body ? { "content-type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
@@ -36,6 +37,15 @@ const getBot = async (id: string) => {
 };
 
 beforeAll(async () => {
+  const probe = createServer();
+  await new Promise<void>((resolve, reject) => {
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      port = (probe.address() as { port: number }).port;
+      probe.close((error) => error ? reject(error) : resolve());
+    });
+  });
+  base = `http://127.0.0.1:${port}`;
   home = mkdtempSync(join(tmpdir(), "omb-busy-test-"));
   mkdirSafe(join(home, ".openmausbot"));
   writeFileSync(
@@ -53,9 +63,9 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
+      OMB_PORT: String(port),
       MULTIBOT_COMPUTER: "off",
-      OMB_HOST: "0.0.0.0",
+      OMB_HOST: "127.0.0.1",
       FAKE_ACP_MODE: "hang",
       ENGINE_URL: "http://127.0.0.1:1",
     },
@@ -66,7 +76,7 @@ beforeAll(async () => {
   const deadline = Date.now() + 20_000;
   for (;;) {
     try {
-      const res = await fetch(`${BASE}/api/health`);
+      const res = await fetch(`${base}/api/health`);
       if (res.ok) break;
     } catch {
       /* not up yet */
@@ -108,7 +118,7 @@ type Frame = { kind: string; [k: string]: any };
 
 const openSse = async (): Promise<{ frames: Frame[]; close: () => void }> => {
   const frames: Frame[] = [];
-  const res = await fetch(`${BASE}/api/events`, { headers: { authorization: `Bearer ${TOKEN}` } });
+  const res = await fetch(`${base}/api/events`, { headers: { authorization: `Bearer ${TOKEN}` } });
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buf = "";

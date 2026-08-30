@@ -28,6 +28,6 @@ must(termux.includes("termux-services") && termux.includes(".termux/boot"), "Ter
 must(termux.includes("python-ensurepip-wheels") && termux.includes("--system-site-packages"), "Termux native Python prerequisites missing");
 must(termux.includes("termux-services/svlogger"), "Termux service logger missing");
 must(termux.includes('pnpm --dir "$ROOT" build:server'), "Termux installer omits server build");
-must(linux.includes("tailscale serve --bg --yes http://127.0.0.1:8799"), "Linux Tailscale guidance missing");
-must(termux.includes("tailscale serve --bg --yes http://127.0.0.1:8799"), "Termux Tailscale guidance missing");
+must(linux.includes("scripts/tunnel.sh") && linux.includes("Cloudflare Tunnel"), "Linux HTTPS guidance missing");
+must(termux.includes("scripts/tunnel.sh") && termux.includes("Cloudflare Tunnel"), "Termux HTTPS guidance missing");
 console.log("self-host install paths: OK (no services started)");

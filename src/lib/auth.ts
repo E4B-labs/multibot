@@ -1,5 +1,6 @@
 // G2: one authenticated transport for every browser request.
 const TOKEN_KEY = "multibot.auth.token";
+const TOKEN_MODE_KEY = "multibot.auth.mode";
 const AUTH_REQUIRED = "multibot:auth-required";
 
 export function getAuthToken(): string {
@@ -10,11 +11,16 @@ export function getAuthToken(): string {
   }
 }
 
-export function setAuthToken(token: string): void {
+export function setAuthToken(token: string, mode: "legacy" | "v2" = "legacy"): void {
   try {
     const value = token.trim();
-    if (value) localStorage.setItem(TOKEN_KEY, value);
-    else localStorage.removeItem(TOKEN_KEY);
+    if (value) {
+      localStorage.setItem(TOKEN_KEY, value);
+      localStorage.setItem(TOKEN_MODE_KEY, mode);
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(TOKEN_MODE_KEY);
+    }
   } catch {
     /* storage can be disabled in private browsing */
   }
@@ -23,6 +29,7 @@ export function setAuthToken(token: string): void {
 export function clearAuthToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_MODE_KEY);
   } catch {
     /* storage can be disabled in private browsing */
   }
@@ -35,12 +42,26 @@ export function bootstrapLocalAuthToken(): void {
   history.replaceState(null, "", `${location.pathname}${location.search}`);
 }
 
+export function getAuthMode(): "legacy" | "v2" | null {
+  try {
+    const mode = localStorage.getItem(TOKEN_MODE_KEY);
+    return mode === "v2" || mode === "legacy" ? mode : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setV2AuthToken(token: string): void {
+  setAuthToken(token, "v2");
+}
+
 export function authEventName(): string {
   return AUTH_REQUIRED;
 }
 
 export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
+  headers.set("x-multibot-protocol", "2");
   if (!headers.has("content-type") && init.body) headers.set("content-type", "application/json");
   const token = getAuthToken();
   if (token) headers.set("authorization", `Bearer ${token}`);
@@ -204,7 +225,8 @@ function sseEventSource(path: string, source: EventChannel): EventChannel {
 export function authenticatedWebSocket(path: string, protocol = location.protocol): WebSocket {
   const token = getAuthToken();
   const wsProtocol = protocol === "https:" ? "wss:" : "ws:";
-  return new WebSocket(`${wsProtocol}//${location.host}${path}`, token ? ["multibot-auth", token] : undefined);
+  const mode = getAuthMode();
+  return new WebSocket(`${wsProtocol}//${location.host}${path}`, token ? [mode === "v2" ? "multibot-v2" : "multibot-auth", token] : undefined);
 }
 
 /**
@@ -218,6 +240,7 @@ export function authenticatedWebSocket(path: string, protocol = location.protoco
 let sessionPromise: Promise<void> | null = null;
 
 export function ensureBrowserSession(): Promise<void> {
+  if (getAuthMode() !== "v2") return Promise.resolve();
   return (sessionPromise ??= authFetch("/api/auth/session", {
     method: "POST",
     body: JSON.stringify({ label: "browser" }),

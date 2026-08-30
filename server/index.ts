@@ -15,6 +15,8 @@ import { fleetStatusBlock } from "./fleet-status.ts";
 import * as box from "./box.ts";
 import { AttachmentStore, MAX_FILE_BYTES, resolveBotFile } from "./attachments.ts";
 import { ensureAccessToken, mountAuth, rotateAccessToken, tokenMatches } from "./auth.ts";
+import { IdentityError, IdentityStore, identityCookie, type IdentityActor, type CreatedSession, isIdentityPublicRoute } from "./identity.ts";
+import { canBotContact } from "./acl.ts";
 // multibot (A1): logowanie Google przez Firebase -> lokalna sesja urządzenia.
 import {
   FirebaseAuthError, buildSessionCookie, createDeviceSession,
@@ -129,7 +131,10 @@ function staticHeaders(file: string): Record<string, string> {
 
 ensureDirs();
 const cfg = loadConfig();
+const identity = new IdentityStore();
+identity.init();
 const access = ensureAccessToken(cfg);
+const identityAttempts = new Map<string, { startedAt: number; count: number }>();
 // multibot (H3): serwer MCP komputera jest zwykłym klientem HTTP tego harnessu,
 // więc jego terminal potrzebuje tego samego tokena. Env, nie argv — argv widać
 // w liście procesów. Ten sam wzorzec, co COMMS_TOKEN dla agents-proxy.
@@ -536,7 +541,7 @@ function roomSummary(roomId: string): string {
 function maybeStartCollab(botId: string, text: string): { room: RoomRecord; task: string } | null {
   const bot = store.bot(botId);
   if (!bot) return null;
-  const peers = store.bots.filter((b) => b.id !== botId && !b.hidden);
+  const peers = store.bots.filter((b) => b.id !== botId && !b.hidden && canBotContact(bot, b));
   const tagged = mentionedBots(text, peers);
   if (!tagged.length) return null;
   // "Room only for task": a bare @mention ("hey @B", "ask @B once") keeps the
@@ -693,6 +698,7 @@ function sendBotMail(fromBotId: string, toBotId: string, text: string, depth = 0
   const target = store.bot(toBotId);
   if (!from) return { status: 404, body: { error: "no such caller bot" } };
   if (!target) return { status: 404, body: { error: "no such target bot" } };
+  if (!canBotContact(from, target)) return { status: 404, body: { error: "no such target bot" } };
   if (fromBotId === toBotId) return { status: 400, body: { error: "a bot cannot message itself" } };
   const message = text.trim();
   if (!message || message.length > 8_000) return { status: 422, body: { error: "message required (max 8000)" } };
@@ -843,11 +849,15 @@ function eventVisible(payload: unknown, actor: WorkspaceActor | null): boolean {
 }
 
 const sseClients = new Set<EventClient>();
+let eventSequence = 0;
 function broadcast(payload: unknown) {
-  const text = JSON.stringify(payload);
+  const sequenced = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? { ...(payload as Record<string, unknown>), sequence: ++eventSequence }
+    : payload;
+  const text = JSON.stringify(sequenced);
   const frame = `data: ${text}\n\n`;
   for (const client of [...sseClients]) {
-    if (!eventVisible(payload, client.actor)) continue;
+    if (!eventVisible(sequenced, client.actor)) continue;
     try {
       client.res.write(frame);
     } catch {
@@ -895,7 +905,8 @@ function pushForBot(botId: string, kind: PushKind, body: string): void {
   const bot = store.bot(botId);
   // `=== false` a nie `!`: boty zapisane zanim pole istniało nie mają go w JSON
   if (!bot || bot.notifications === false) return;
-  void notifyPushDevices(bot.name || "Bot", body.slice(0, 300) || "…", bot.id, { botId: bot.id, kind }).catch(() => {});
+  const audience = bot.visibility === "private" && bot.ownerId ? [bot.ownerId] : undefined;
+  void notifyPushDevices(bot.name || "Bot", body.slice(0, 300) || "…", bot.id, { botId: bot.id, kind }, audience).catch(() => {});
 }
 
 // Kto zaczął turę: tury bot-bot (`ask_bot`, runda grupy, cel) nie pushują
@@ -1573,8 +1584,8 @@ async function warmBot(botId: string): Promise<boolean> {
   // `permissionMode` i listę wyłączonych narzędzi, a jedno i drugie siedzi w
   // podpisie procesu. Wartości są te same, które ustawi prawdziwa tura.
   setTurnPolicy(bot.threadId, {
-    autonomy: workspace.autonomy(bot.id).autonomy,
-    access: workspace.access(bot.id).access,
+    autonomy: workspace.autonomy(bot.id, bot.visibility === "private").autonomy,
+    access: workspace.access(bot.id, bot.visibility === "private").access,
     permissions: workspace.permissions(bot.id),
     approvalRules: workspace.approvalRules(bot.id),
   });
@@ -1724,8 +1735,8 @@ opts?: {
   if (!isolated) {
     store.patchBot(bot.id, { busy: true, unread: false });
     setTurnPolicy(bot.threadId, {
-      autonomy: workspace.autonomy(bot.id).autonomy,
-      access: workspace.access(bot.id).access,
+      autonomy: workspace.autonomy(bot.id, bot.visibility === "private").autonomy,
+      access: workspace.access(bot.id, bot.visibility === "private").access,
       permissions: workspace.permissions(bot.id),
       approvalRules: workspace.approvalRules(bot.id),
     });
@@ -1815,9 +1826,10 @@ opts?: {
       // @mentions in the user's message (the composer's tagging UI) become
       // an explicit delegation nudge — the agent still does the ask_bot call
       // itself, so the harness stays the single owner of turns/permissions
+      const visibleRoster = store.bots.filter((candidate) => candidate.id === bot.id || canBotContact(bot, candidate));
       const tagged = mentionedBots(
         text,
-        store.bots.filter((b) => b.id !== bot.id),
+        visibleRoster.filter((b) => b.id !== bot.id),
       );
 
       // Providers without MCP (currently Codex and API-backed Grok) still
@@ -1848,7 +1860,7 @@ opts?: {
         // silnika. Przeliczany co turę, bo `busy` zmienia się w trakcie
         // pracy floty; zapamiętany raz byłby gorszy niż żaden.
         text: [
-          fleetStatusBlock(store.bots, bot.id),
+          fleetStatusBlock(visibleRoster, bot.id),
           text,
           turnAttachments.length ? `Attached files:\n${turnAttachments.map((file) => `- ${file.name}: ${file.path}`).join("\n")}` : "",
         ]
@@ -1857,7 +1869,7 @@ opts?: {
         model: turnModel,
         ...(!isolated ? { resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId] } : {}),
         transcript,
-        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: store.bots, currentUser: promptUser, timeZone: cfg.timeZone }),
+        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: visibleRoster, currentUser: promptUser, timeZone: cfg.timeZone }),
         integrations,
         ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
       } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel });
@@ -1900,13 +1912,14 @@ function configStatus() {
 
 function configStatusFor(actor: WorkspaceActor | null) {
   const member = actor && workspaceMembers().find((item) => item.uid === actor.uid);
+  const identityMember = actor && identity.members().find((item) => item.userId === actor.uid);
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
     composio: { configured: Boolean(cfg.composio?.key), apiKeyConfigured: Boolean(cfg.composio?.apiKey) },
     box: { configured: Boolean(cfg.box?.token) },
     // not a secret — the sidebar shows it
     profile: {
-      name: member?.name ?? (actor?.name ?? cfg.profile?.name ?? ""),
+      name: identityMember?.displayName ?? member?.name ?? (actor?.name ?? cfg.profile?.name ?? ""),
       email: member?.email ?? (actor?.email ?? cfg.profile?.email ?? ""),
     },
     workspace: {
@@ -1930,7 +1943,21 @@ function requestBearer(req: IncomingMessage): string | null {
   return typeof header === "string" ? header : null;
 }
 
+function identityActorForRequest(req: IncomingMessage): IdentityActor | null {
+  const identityActor = identity.actorForRequest(req);
+  if (identityActor) return identityActor;
+  if (new URL(req.url ?? "/", "http://localhost").pathname === "/api/auth/access-token") {
+    const session = req.headers["x-multibot-session"];
+    return identity.actorForSessionToken(typeof session === "string" ? session : null);
+  }
+  return null;
+}
+
 function actorForRequest(req: IncomingMessage): WorkspaceActor | null {
+  const identityActor = identityActorForRequest(req);
+  if (identityActor) {
+    return { uid: identityActor.userId, name: identityActor.displayName, role: identityActor.role };
+  }
   if (req.headers["x-multibot-auth"] === "token") {
     return { uid: cfg.firebase?.ownerUid ?? "legacy-token", role: "owner", name: cfg.profile?.name, email: cfg.profile?.email };
   }
@@ -1956,21 +1983,28 @@ function actorMessageFields(actor: WorkspaceActor | null): Pick<Message, "userId
 function canAccessBot(bot: BotRecord | null, actor: WorkspaceActor | null): boolean {
   if (!bot) return false;
   if (!actor) return false;
-  if (bot.visibility === "public") return true;
   if (bot.visibility !== "private") return true;
-  return actor.role === "owner" || bot.ownerId === actor.uid || (bot.allowedUserIds ?? []).includes(actor.uid);
+  return bot.ownerId === actor.uid;
 }
 
 function canManageBot(bot: BotRecord | null, actor: WorkspaceActor | null): boolean {
-  return Boolean(bot && actor && (actor.role === "owner" || !bot.ownerId || bot.ownerId === actor.uid));
+  if (!bot || !actor) return false;
+  return bot.visibility !== "private" || bot.ownerId === actor.uid;
 }
 
 function botForReference(id: string): BotRecord | null {
   return store.bot(id) ?? (id.startsWith("mb-") ? store.botByThread(id.slice(3)) : null);
 }
 
+function botSetVisible(botIds: string[], actor: WorkspaceActor | null): boolean {
+  const bots = botIds.map(botForReference);
+  return bots.every((bot) => canAccessBot(bot, actor)) && bots.every((bot, index) =>
+    bots.slice(index + 1).every((peer) => canBotContact(bot, peer)),
+  );
+}
+
 function groupVisible(group: { bot_ids: string[] }, actor: WorkspaceActor | null): boolean {
-  return group.bot_ids.every((id) => canAccessBot(botForReference(id), actor));
+  return botSetVisible(group.bot_ids, actor);
 }
 
 /** Rebuild the provider fleet after a config change so new keys take
@@ -2305,11 +2339,193 @@ function readBody(req: IncomingMessage): Promise<any> {
   });
 }
 
+function identityUser(actor: IdentityActor) {
+  return { id: actor.userId, username: actor.username, displayName: actor.displayName, role: actor.role };
+}
+
+function identitySessionBody(session: CreatedSession & { recoveryCode?: string }, includeSessionToken = false) {
+  return {
+    user: identityUser(session.actor),
+    accessToken: session.accessToken,
+    accessTokenExpiresAt: session.expiresAt,
+    ...(includeSessionToken ? { sessionToken: session.sessionToken } : {}),
+    ...(session.recoveryCode ? { recoveryCode: session.recoveryCode } : {}),
+  };
+}
+
+function identityHandled(res: ServerResponse, status: number, body: unknown): true {
+  json(res, status, body);
+  return true;
+}
+
+function identityRateLimited(req: IncomingMessage, operation: string): boolean {
+  const address = req.socket.remoteAddress ?? "unknown";
+  const key = `${operation}:${address}`;
+  const now = Date.now();
+  const current = identityAttempts.get(key);
+  if (!current || now - current.startedAt >= 60_000) {
+    identityAttempts.set(key, { startedAt: now, count: 1 });
+    return false;
+  }
+  current.count += 1;
+  return current.count > 10;
+}
+
+async function handleIdentityRoute(
+  req: IncomingMessage,
+  res: ServerResponse,
+  path: string,
+  method: string,
+  actor: IdentityActor | null,
+): Promise<boolean> {
+  if (method === "GET" && (path === "/api/public/handshake" || path === "/api/public/server")) {
+    return identityHandled(res, 200, identity.publicInfo());
+  }
+  if (method === "GET" && path === "/api/auth/status") {
+    return identityHandled(res, 200, {
+      protocol: identity.publicInfo().protocol,
+      server: identity.publicInfo(),
+      session: Boolean(actor),
+      user: actor ? identityUser(actor) : null,
+      google: { configured: false },
+    });
+  }
+  if (method === "POST" && path === "/api/setup/server") {
+    if (!isLoopbackRequest(req)) return identityHandled(res, 403, { error: "server setup is local-only" });
+    if (identityRateLimited(req, "setup")) return identityHandled(res, 429, { error: "too many attempts" });
+    try {
+      const body = await readBody(req);
+      const setup = await identity.configureServer(body.name, body.serverPassword);
+      const requestHost = typeof req.headers.host === "string" ? req.headers.host.trim() : "";
+      const forwardedProto = req.headers["x-forwarded-proto"];
+      const protocol = typeof forwardedProto === "string" && forwardedProto ? forwardedProto.split(",")[0].trim() : isSecureRequest(req) ? "https" : "http";
+      const address = PUBLIC_URL || (requestHost && !/^\[?(?:0\.0\.0\.0|::|localhost)\]?(:\d+)?$/i.test(requestHost) ? `${protocol}://${requestHost}` : `http://127.0.0.1:${PORT}`);
+      res.setHeader("cache-control", "no-store");
+      return identityHandled(res, 201, { server: setup.server, serverPassword: setup.serverPassword, serverAddress: address });
+    } catch (error) {
+      const status = error instanceof IdentityError ? error.status : 400;
+      return identityHandled(res, status, { error: error instanceof IdentityError ? error.message : "invalid request" });
+    }
+  }
+  if (method === "POST" && path === "/api/auth/join") {
+    if (identityRateLimited(req, "join")) return identityHandled(res, 429, { error: "too many attempts" });
+    try {
+      const body = await readBody(req);
+      if (!await identity.verifyJoinPassword(body.serverPassword)) return identityHandled(res, 401, { error: "invalid server credentials" });
+      return identityHandled(res, 200, { server: identity.publicInfo() });
+    } catch (error) {
+      const status = error instanceof IdentityError ? error.status : 400;
+      return identityHandled(res, status, { error: error instanceof IdentityError ? error.message : "invalid request" });
+    }
+  }
+  if (method === "POST" && path === "/api/auth/register") {
+    if (identityRateLimited(req, "register")) return identityHandled(res, 429, { error: "too many attempts" });
+    try {
+      const body = await readBody(req);
+      const session = await identity.register({
+        username: body.username,
+        password: body.password,
+        displayName: body.displayName,
+        serverPassword: body.serverPassword,
+        deviceName: body.deviceName,
+      });
+      if (session.actor.role === "owner") store.migrateLegacyOwner(session.actor.userId, session.actor.displayName);
+      res.setHeader("set-cookie", identityCookie(session.sessionToken, isSecureRequest(req)));
+      res.setHeader("cache-control", "no-store");
+      return identityHandled(res, 201, identitySessionBody(session, req.headers["x-multibot-client"] === "native"));
+    } catch (error) {
+      const status = error instanceof IdentityError ? error.status : 400;
+      return identityHandled(res, status, { error: error instanceof IdentityError ? error.message : "invalid request" });
+    }
+  }
+  if (method === "POST" && path === "/api/auth/login") {
+    if (identityRateLimited(req, "login")) return identityHandled(res, 429, { error: "too many attempts" });
+    try {
+      const body = await readBody(req);
+      const session = await identity.login(body.username, body.password, body.deviceName);
+      res.setHeader("set-cookie", identityCookie(session.sessionToken, isSecureRequest(req)));
+      res.setHeader("cache-control", "no-store");
+      return identityHandled(res, 200, identitySessionBody(session, req.headers["x-multibot-client"] === "native"));
+    } catch (error) {
+      const status = error instanceof IdentityError ? error.status : 400;
+      return identityHandled(res, status, { error: error instanceof IdentityError ? error.message : "invalid request" });
+    }
+  }
+  if (method === "POST" && path === "/api/auth/recover") {
+    if (identityRateLimited(req, "recover")) return identityHandled(res, 429, { error: "too many attempts" });
+    try {
+      const body = await readBody(req);
+      const session = await identity.recover(body.username, body.recoveryCode, body.newPassword, body.deviceName);
+      res.setHeader("set-cookie", identityCookie(session.sessionToken, isSecureRequest(req)));
+      res.setHeader("cache-control", "no-store");
+      return identityHandled(res, 200, identitySessionBody(session, req.headers["x-multibot-client"] === "native"));
+    } catch (error) {
+      const status = error instanceof IdentityError ? error.status : 400;
+      return identityHandled(res, status, { error: error instanceof IdentityError ? error.message : "invalid request" });
+    }
+  }
+  if (path.startsWith("/api/auth/") || path === "/api/profile" || path.startsWith("/api/server") || path.startsWith("/api/workspace")) {
+    if (!actor) return identityHandled(res, 401, { error: "unauthorized" });
+    try {
+      if (method === "POST" && path === "/api/auth/access-token") {
+        return identityHandled(res, 200, identity.issueAccessToken(actor));
+      }
+      if (method === "POST" && path === "/api/auth/session") {
+        if (req.headers["x-multibot-client"] === "native") {
+          const session = identity.createSessionForActor(actor, "mobile");
+          res.setHeader("set-cookie", identityCookie(session.sessionToken, isSecureRequest(req)));
+          return identityHandled(res, 200, identitySessionBody(session, true));
+        }
+        return identityHandled(res, 200, { ok: true });
+      }
+      if (method === "GET" && path === "/api/auth/token") return identityHandled(res, 410, { error: "legacy bearer tokens retired" });
+      if (method === "POST" && path === "/api/auth/token/rotate") return identityHandled(res, 410, { error: "legacy bearer tokens retired" });
+      if (method === "GET" && path === "/api/auth/me") {
+        return identityHandled(res, 200, { user: identityUser(actor), server: identity.publicInfo() });
+      }
+      if (method === "POST" && (path === "/api/auth/logout" || path === "/api/auth/logout-all")) {
+        identity.logout(req, path.endsWith("logout-all"));
+        res.setHeader("set-cookie", identityCookie("", isSecureRequest(req), true));
+        return identityHandled(res, 200, { ok: true });
+      }
+      if (method === "GET" && path === "/api/auth/sessions") {
+        return identityHandled(res, 200, { sessions: identity.listSessions(actor) });
+      }
+      const sessionPath = path.match(/^\/api\/auth\/sessions\/([^/]+)$/);
+      if (method === "DELETE" && sessionPath) {
+        return identityHandled(res, identity.revokeSession(actor, decodeURIComponent(sessionPath[1])) ? 200 : 404, { ok: true });
+      }
+      if (method === "GET" && path === "/api/profile") return identityHandled(res, 200, { user: identityUser(actor) });
+      if (method === "PATCH" && path === "/api/profile") {
+        const body = await readBody(req);
+        return identityHandled(res, 200, { user: identityUser(identity.updateProfile(actor, body.displayName)) });
+      }
+      if (method === "GET" && path === "/api/server") return identityHandled(res, 200, identity.publicInfo());
+      if (method === "PATCH" && path === "/api/server") {
+        const body = await readBody(req);
+        return identityHandled(res, 200, await identity.updateServer(actor, body.name, body.serverPassword));
+      }
+      if (method === "GET" && path === "/api/server/members") return identityHandled(res, 200, { members: identity.members() });
+      if (method === "GET" && path === "/api/workspace") {
+        const info = identity.publicInfo();
+        return identityHandled(res, 200, { id: info.serverId, name: info.name, members: identity.members(), currentUser: identityUser(actor) });
+      }
+      if (method === "GET" && path === "/api/workspace/members") return identityHandled(res, 200, { members: identity.members().map((member) => ({ uid: member.userId, name: member.displayName, username: member.username, role: member.role })) });
+      if (method === "POST" && path === "/api/workspace/invites") return identityHandled(res, 410, { error: "invites retired; use server password" });
+    } catch (error) {
+      const status = error instanceof IdentityError ? error.status : 400;
+      return identityHandled(res, status, { error: error instanceof IdentityError ? error.message : "invalid request" });
+    }
+  }
+  return false;
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
   const path = url.pathname;
   const method = req.method ?? "GET";
   const actor = actorForRequest(req);
+  const identityActor = identityActorForRequest(req);
   const adminMutation = method !== "GET" && (
     path === "/api/provision" ||
     path.startsWith("/api/models/custom/") ||
@@ -2321,6 +2537,12 @@ const server = createServer(async (req, res) => {
   const langParam = url.searchParams.get("lang");
   if (langParam === "pl" || langParam === "en") uiLang = langParam;
   try {
+    const identityRoute = path.startsWith("/api/auth/") || path === "/api/profile" || path.startsWith("/api/server") || path.startsWith("/api/workspace");
+    // Let legacy local-token routes fall through to their compatibility
+    // handlers. Remote legacy bearers are rejected by mountAuth before this.
+    if (isIdentityPublicRoute(method, path) || (identityActor && identityRoute)) {
+      if (await handleIdentityRoute(req, res, path, method, identityActor)) return;
+    }
     // ── internal peer-agent comms (localhost + shared token only) ──────
     // The agents-proxy (spawned inside a bot's agent process) calls these to
     // discover peers and hand a message to one. Not part of the public API.
@@ -2330,8 +2552,9 @@ const server = createServer(async (req, res) => {
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const self = url.searchParams.get("self");
+        const caller = store.bot(self ?? "");
         const bots = store.bots
-          .filter((b) => b.id !== self && !b.hidden)
+          .filter((b) => b.id !== self && !b.hidden && canBotContact(caller, b))
           .map((b) => ({
             id: b.id,
             name: b.name,
@@ -2374,10 +2597,14 @@ const server = createServer(async (req, res) => {
         const action = String(body.action ?? "");
         const caller = store.bot(fromBotId);
         if (!caller) return json(res, 404, { error: "no such caller bot" });
-        const access = workspace.access(fromBotId).access;
+        const access = workspace.access(fromBotId, caller.visibility === "private").access;
+        const privateBot = caller.visibility === "private";
+        const teamActions = new Set(["team.memory.list", "team.memory.graph", "team.memory.markdown.get", "team.memory.add"]);
+        if (privateBot && teamActions.has(action)) return json(res, 404, { error: "team scope unavailable to private bot" });
         const readOnlyActions = new Set(["profile.get", "memory.list", "memory.graph", "memory.markdown.get", "team.memory.list", "team.memory.graph", "team.memory.markdown.get", "mail.inbox", "skills.list", "routines.list", "groups.list", "device.info", "file.read"]);
         if (access === "read-only" && !readOnlyActions.has(action)) return json(res, 403, { error: "read-only access" });
         const requireFull = () => {
+          if (privateBot) throw Object.assign(new Error("private bots cannot use Full Access"), { status: 403 });
           if (access !== "full") throw Object.assign(new Error("Full Access required for this action"), { status: 403 });
         };
         const bot = () => store.bot(fromBotId)!;
@@ -2467,7 +2694,7 @@ const server = createServer(async (req, res) => {
             }
             const created = store.createBot({ temporary: body.temporary === true });
             const selection = bootSelection;
-            const updated = store.patchBot(created.id, { name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), modelSelection: selection, ownerId: caller.ownerId, visibility: "team", ...(caller.chiefOfStaff ? { section: caller.section } : {}) });
+            const updated = store.patchBot(created.id, { name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), modelSelection: selection, ownerId: caller.ownerId, visibility: caller.visibility === "private" ? "private" : "team", ...(caller.chiefOfStaff ? { section: caller.section } : {}) });
             if (access === "full") workspace.setAccess(created.id, "full");
             broadcast({ kind: "bot", bot: updated });
             return json(res, 201, updated);
@@ -2476,17 +2703,20 @@ const server = createServer(async (req, res) => {
             requireFull();
             const target = store.bot(String(body.botId ?? ""));
             if (!target) return json(res, 404, { error: "no such target bot" });
+            if (!canBotContact(caller, target)) return json(res, 404, { error: "no such target bot" });
             if (caller.chiefOfStaff && (target.section?.trim() ?? "") !== (caller.section?.trim() ?? "")) return json(res, 403, { error: "chief delegation is limited to its section" });
             const updated = store.patchBot(target.id, { ...(body.patch as Record<string, unknown> ?? {}) });
             broadcast({ kind: "bot", bot: updated });
             return json(res, 200, updated);
           }
           case "groups.list": {
-            return json(res, 200, groupStore.list());
+            return json(res, 200, groupStore.list().filter((group) => group.bot_ids.every((id) => canBotContact(caller, store.bot(id)))));
           }
           case "groups.delete": {
             requireFull();
             const id = String(body.groupId ?? "");
+            const group = groupStore.get(id);
+            if (!group || !group.bot_ids.every((botId) => canBotContact(caller, store.bot(botId)))) return json(res, 404, { error: "no such group" });
             const removed = await deleteGroupRecord(id);
             return removed.found
               ? json(res, 200, { ok: true, engineSynced: removed.engineSynced })
@@ -2496,6 +2726,7 @@ const server = createServer(async (req, res) => {
           case "groups.create": {
             requireFull();
             const botIds: string[] = Array.isArray(body.bot_ids) ? (body.bot_ids as unknown[]).map(String) : [];
+            if (botIds.some((id) => !canBotContact(caller, store.bot(id)))) return json(res, 404, { error: "no such target bot" });
             const engineIds = botIds.map((id) => engineBotIdFor(store.bot(id)?.threadId ?? id));
             const result = await createGroupRecord(String(body.name ?? "Group"), engineIds);
             return json(res, result.status, result.body);
@@ -2503,7 +2734,7 @@ const server = createServer(async (req, res) => {
           case "groups.send": {
             requireFull();
             const group = groupStore.get(String(body.groupId));
-            if (!group) return json(res, 404, { error: "no such group" });
+            if (!group || !group.bot_ids.every((botId) => canBotContact(caller, store.bot(botId)))) return json(res, 404, { error: "no such group" });
             const message = String(body.message ?? "").trim();
             if (!message) return json(res, 422, { error: "message required" });
             groupStore.append(group.id, { from: "you", text: message });
@@ -2542,6 +2773,7 @@ const server = createServer(async (req, res) => {
             }
             const target = store.bot(String(body.bot_id ?? ""));
             if (!target) return json(res, 404, { error: "no such target bot" });
+            if (!canBotContact(caller, target)) return json(res, 404, { error: "no such target bot" });
             const task = String(body.task ?? "").trim();
             if (!task) return json(res, 422, { error: "task required" });
             if (target.busy) return json(res, 200, { busy: true });
@@ -2608,6 +2840,7 @@ const server = createServer(async (req, res) => {
         if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop" });
         const target = store.bot(toBotId);
         if (!target) return json(res, 404, { error: "no such bot" });
+        if (!canBotContact(from, target)) return json(res, 404, { error: "no such bot" });
         if (from.chiefOfStaff && (target.section?.trim() ?? "") !== (from.section?.trim() ?? "")) return json(res, 403, { error: "chief delegation is limited to its section" });
         if (target.busy) return json(res, 200, { busy: true });
         // ask_bot is the synchronous compatibility path; persist it in the
@@ -2732,12 +2965,12 @@ const server = createServer(async (req, res) => {
     // Durable agent mailbox. Unlike collaboration rooms, mail remains after
     // reload and can be opened without entering either bot's main chat.
     if (method === "GET" && path === "/api/mail") {
-      return json(res, 200, { threads: botMail.list().filter((thread) => thread.bot_ids.every((id) => canAccessBot(store.bot(id), actor))) });
+      return json(res, 200, { threads: botMail.list().filter((thread) => botSetVisible(thread.bot_ids, actor)) });
     }
     const mailMatch = path.match(/^\/api\/mail\/([^/]+)$/);
     if (mailMatch && method === "GET") {
       const thread = botMail.get(decodeURIComponent(mailMatch[1]));
-      return thread?.bot_ids.every((id) => canAccessBot(store.bot(id), actor))
+      return thread && botSetVisible(thread.bot_ids, actor)
         ? json(res, 200, thread)
         : json(res, 404, { error: "no such mail thread" });
     }
@@ -2762,7 +2995,7 @@ const server = createServer(async (req, res) => {
       const rawIds: string[] = Array.isArray(body.bot_ids) ? (body.bot_ids as unknown[]).map(String) : [];
       const botIds = rawIds.map((id) => store.bot(id)?.id ?? (id.startsWith("mb-") ? store.botByThread(id.slice(3))?.id : undefined)).filter((id): id is string => !!id);
       if (!name || !botIds.length) return json(res, 422, { error: "group needs at least one bot" });
-      if (botIds.some((id) => !canAccessBot(store.bot(id), actor))) return json(res, 404, { error: "no such bot" });
+      if (!botSetVisible(botIds, actor)) return json(res, 404, { error: "no such bot" });
       try {
         const engineIds = botIds.map((id) => engineBotIdFor(store.bot(id)!.threadId));
         const result = await createGroupRecord(name, engineIds);
@@ -2779,6 +3012,7 @@ const server = createServer(async (req, res) => {
       const botId = String(body.botId ?? "");
       const bot = botForReference(botId);
       if (!bot || !canAccessBot(bot, actor)) return json(res, 404, { error: "no such bot" });
+      if (!group.bot_ids.every((id) => canBotContact(bot, botForReference(id)))) return json(res, 404, { error: "no such bot" });
       const result = await addGroupMemberRecord(m[1], bot.id);
       return json(res, result.status, result.body);
     }
@@ -2880,16 +3114,14 @@ const server = createServer(async (req, res) => {
     }
     // ── durable collaboration rooms (bot-to-bot tasks) ──
     if (method === "GET" && path === "/api/rooms") {
-      return json(res, 200, { rooms: rooms.list().filter((room) => room.bot_ids.every((id) => canAccessBot(store.bot(id), actor))) });
+      return json(res, 200, { rooms: rooms.list().filter((room) => botSetVisible(room.bot_ids, actor)) });
     }
     if (method === "POST" && path === "/api/rooms") {
       const body = await readBody(req);
       const task = String(body.task ?? "").trim();
       const botIds: string[] = Array.isArray(body.bot_ids) ? (body.bot_ids as unknown[]).map(String) : [];
       if (!task || !botIds.length) return json(res, 422, { error: "task and bot_ids required" });
-      for (const id of botIds) {
-        if (!canAccessBot(store.bot(id), actor)) return json(res, 404, { error: `no such bot: ${id}` });
-     }
+      if (!botSetVisible(botIds, actor)) return json(res, 404, { error: "no such bot" });
       const owner = store.bot(botIds[0])!;
       const room = rooms.create({ task, bot_ids: botIds, ownerThread: owner.threadId, ownerBotId: botIds[0] });
       postRoomChip(botIds[0], room);
@@ -2899,13 +3131,18 @@ const server = createServer(async (req, res) => {
     m = path.match(/^\/api\/rooms\/([\w-]+)$/);
     if (m && method === "GET") {
       const room = rooms.get(m[1]);
-      return room ? json(res, 200, room) : json(res, 404, { error: "no such room" });
+      return room && botSetVisible(room.bot_ids, actor)
+        ? json(res, 200, room)
+        : json(res, 404, { error: "no such room" });
     }
     if (method === "POST" && path === "/api/bots") {
+      const body = await readBody(req);
+      const visibility = body.visibility === undefined ? "team" : body.visibility;
+      if (visibility !== "team" && visibility !== "private") return json(res, 422, { error: "visibility must be team or private" });
       const bot = store.createBot();
       // bootSelection was resolved once at startup; rescanning every provider
       // here made the first screen wait on CLI processes.
-      store.patchBot(bot.id, { modelSelection: bootSelection, ownerId: actor?.uid, visibility: "team" });
+      store.patchBot(bot.id, { modelSelection: bootSelection, ownerId: actor?.uid, visibility });
       // multibot (U2): lokalny profil silnika zakładamy w tle przy tworzeniu
       // bota, żeby pierwsza wiadomość nie płaciła kosztu inicjalizacji.
       if (bootSelection.instanceId === "local" && !process.env.VITEST) {
@@ -2933,35 +3170,26 @@ const server = createServer(async (req, res) => {
       if (!bot) return json(res, 404, { error: "no such bot" });
       if (method === "GET") {
         return json(res, 200, {
-          visibility: bot.visibility ?? "team",
+          visibility: bot.visibility === "private" ? "private" : "team",
           ownerId: bot.ownerId ?? null,
-          allowedUserIds: bot.allowedUserIds ?? [],
         });
       }
       if (method === "PATCH") {
         if (!canManageBot(bot, actor)) return json(res, 403, { error: "bot owner access required" });
         const body = await readBody(req);
         const visibility = body.visibility === undefined ? (bot.visibility ?? "team") : body.visibility;
-        if (visibility !== "public" && visibility !== "team" && visibility !== "private") {
-          return json(res, 422, { error: "visibility must be public, team or private" });
+        if (visibility !== "team" && visibility !== "private") {
+          return json(res, 422, { error: "visibility must be team or private" });
         }
-        if (body.allowedUserIds !== undefined && (!Array.isArray(body.allowedUserIds) || body.allowedUserIds.length > 100 || body.allowedUserIds.some((id: unknown) => typeof id !== "string" || id.length > 200))) {
-          return json(res, 422, { error: "allowedUserIds must be at most 100 user ids" });
-        }
-        const known = new Set(workspaceMembers().map((member) => member.uid));
-        const allowedUserIds = body.allowedUserIds === undefined
-          ? (bot.allowedUserIds ?? [])
-          : [...new Set((body.allowedUserIds as string[]).filter((id) => known.has(id)))];
         const updated = store.patchBot(bot.id, {
           visibility,
           ownerId: bot.ownerId ?? actor?.uid,
-          allowedUserIds,
+          allowedUserIds: [],
         });
         broadcast({ kind: "bot", bot: updated });
         return json(res, 200, {
           visibility: updated?.visibility ?? visibility,
           ownerId: updated?.ownerId ?? null,
-          allowedUserIds: updated?.allowedUserIds ?? [],
         });
       }
       return json(res, 405, { error: "method not allowed" });
@@ -3040,7 +3268,7 @@ const server = createServer(async (req, res) => {
       const body = await readBody(req);
       const token = String(body.token ?? "").trim();
       if (!token) return json(res, 422, { error: "token required" });
-      registerPushDevice(m[1], token, body.botId ? String(body.botId) : undefined);
+      registerPushDevice(m[1], token, body.botId ? String(body.botId) : undefined, actor?.uid);
       return json(res, 200, { ok: true });
     }
 
@@ -3458,23 +3686,30 @@ const server = createServer(async (req, res) => {
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/(access|autonomy|permissions|usage)$/);
     if (m) {
-      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
       if (m[2] === "usage") {
         return method === "GET"
           ? json(res, 200, workspace.usage(m[1]))
           : json(res, 405, { error: "method not allowed" });
       }
       if (m[2] === "access") {
-        if (method === "GET") return json(res, 200, workspace.access(m[1]));
+        if (method === "GET") return json(res, 200, workspace.access(m[1], bot?.visibility === "private"));
         if (method === "PATCH") {
           const body = await readBody(req);
+          if (body.access === "full" && (bot?.visibility === "private" || (identityActor && identityActor.role !== "owner"))) {
+            return json(res, 403, { error: "Full Access is restricted to the server owner on Team bots" });
+          }
           return json(res, 200, workspace.setAccess(m[1], body.access));
         }
       }
       if (m[2] === "autonomy") {
-        if (method === "GET") return json(res, 200, workspace.autonomy(m[1]));
+        if (method === "GET") return json(res, 200, workspace.autonomy(m[1], bot?.visibility === "private"));
         if (method === "PATCH") {
           const body = await readBody(req);
+          if (body.autonomy === "autonomous" && (bot?.visibility === "private" || (identityActor && identityActor.role !== "owner"))) {
+            return json(res, 403, { error: "Autonomous Full Access is restricted to the server owner on Team bots" });
+          }
           return json(res, 200, workspace.setAutonomy(m[1], body.autonomy));
         }
       } else {
@@ -3482,6 +3717,10 @@ const server = createServer(async (req, res) => {
         if (method === "PATCH") {
           const body = await readBody(req);
           const patch = typeof body.toolset === "string" ? { [body.toolset]: body.enabled } : body;
+          const next = { ...workspace.permissions(m[1]), ...(patch as Record<string, unknown>) };
+          if (workspace.autonomy(m[1]).autonomy === "autonomous" && Object.values(next).every((value) => value === true) && (bot?.visibility === "private" || (identityActor && identityActor.role !== "owner"))) {
+            return json(res, 403, { error: "Full Access is restricted to the server owner on Team bots" });
+          }
           return json(res, 200, workspace.setPermissions(m[1], patch));
         }
       }
@@ -3730,6 +3969,7 @@ const server = createServer(async (req, res) => {
         }
       }
       for (const group of groupStore.list()) {
+        if (!groupVisible(group, actor)) continue;
         if (searchText(query, group.name, group.bot_ids.join(" "))) {
           results.push({ id: `group:${group.id}`, kind: "group", title: group.name || group.id, subtitle: `${group.bot_ids.length} bots`, groupId: group.id });
         }
@@ -4231,7 +4471,11 @@ revokeAuthSessions = mountAuth(
   // drogą zostaje token — dokładnie jak dotąd.
   (req) => {
     const id = sessionIdFromCookieHeader(req.headers.cookie);
-    return Boolean(id && verifyDeviceSession(id));
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const refreshSession = url.pathname === "/api/auth/access-token" && typeof req.headers["x-multibot-session"] === "string"
+      ? identity.actorForSessionToken(req.headers["x-multibot-session"])
+      : null;
+    return Boolean(identityActorForRequest(req) || refreshSession || (id && verifyDeviceSession(id)));
   },
 ).revokeSessions;
 
@@ -4277,7 +4521,7 @@ server.on("error", (err: NodeJS.ErrnoException) => {
 });
 server.listen(PORT, HOST, () => {
   console.log(`multibot server on http://${HOST}:${PORT}`);
-  if (access.created) console.log(`[multibot] access token (shown once): ${access.token}`);
+  if (access.created) console.log("[multibot] legacy access token initialized");
   void reconcileComputers().catch((e) => console.warn("[multibot] computer reconcile failed:", e));
   // multibot (A2): rozgrzewka rusza PO podniesieniu HTTP i nie czeka na nic —
   // serwer odpowiada od pierwszej sekundy, a workery wstają w tle.

@@ -8,7 +8,6 @@ import { useLanguage } from "@/lib/language";
 import {
   AccessTokenSettings,
   InstallAppSettings,
-  PairDeviceSettings,
   WorkspaceAccessSettings,
 } from "./AppSettingsPanel";
 
@@ -39,7 +38,6 @@ export function ServerAccessPanel() {
         </div>
         <WorkspaceAccessSettings />
         <AccessTokenSettings />
-        <PairDeviceSettings />
         <InstallAppSettings />
       </div>
     </div>
