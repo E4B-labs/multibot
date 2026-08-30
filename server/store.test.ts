@@ -7,13 +7,23 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { Store, type BotRecord } from "./store.ts";
+import { Store, sortMessages, type BotRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
 describe("Store", () => {
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("normalizes history by timestamp and deterministic id tie-break", () => {
+    const messages = [
+      { id: "z", at: 2 },
+      { id: "b", at: 1 },
+      { id: "a", at: 1 },
+    ];
+
+    expect(sortMessages(messages).map((message) => message.id)).toEqual(["a", "b", "z"]);
   });
 
   it("createBot seeds a greeting and an onboarding card", () => {

@@ -144,6 +144,11 @@ export interface SelectionTarget {
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
+/** Canonical order shared by persisted history and every UI transport. */
+export function sortMessages<T extends { id: string; at: number }>(messages: readonly T[]): T[] {
+  return [...messages].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
+}
+
 const COLORS: MausColor[] = [
   "green",
   "blue",
@@ -219,11 +224,17 @@ export class Store {
     let list = this.messages.get(threadId);
     if (!list) {
       try {
-        list = JSON.parse(readFileSync(messagesFile(threadId), "utf8"));
+        const loaded = JSON.parse(readFileSync(messagesFile(threadId), "utf8"));
+        list = Array.isArray(loaded) ? loaded : [];
       } catch {
         list = [];
       }
-      this.messages.set(threadId, list!);
+      const ordered = sortMessages(list);
+      if (ordered.some((message, index) => message !== list![index])) {
+        writeFileSync(messagesFile(threadId), JSON.stringify(ordered, null, 2));
+      }
+      list = ordered;
+      this.messages.set(threadId, list);
     }
     return list!;
   }
@@ -231,8 +242,9 @@ export class Store {
   appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }): Message {
     const full: Message = { id: newId(), at: Date.now(), ...message };
     const list = this.messagesFor(threadId);
-    list.push(full);
-    writeFileSync(messagesFile(threadId), JSON.stringify(list, null, 2));
+    const ordered = sortMessages([...list, full]);
+    this.messages.set(threadId, ordered);
+    writeFileSync(messagesFile(threadId), JSON.stringify(ordered, null, 2));
     return full;
   }
 
@@ -241,8 +253,10 @@ export class Store {
     const idx = list.findIndex((m) => m.id === messageId);
     if (idx === -1) return null;
     list[idx] = { ...list[idx], ...patch, card: patch.card ?? list[idx].card };
-    writeFileSync(messagesFile(threadId), JSON.stringify(list, null, 2));
-    return list[idx];
+    const ordered = sortMessages(list);
+    this.messages.set(threadId, ordered);
+    writeFileSync(messagesFile(threadId), JSON.stringify(ordered, null, 2));
+    return ordered.find((message) => message.id === messageId) ?? null;
   }
 
   bot(id: string) {

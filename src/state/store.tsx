@@ -18,6 +18,7 @@ import { authFetch, authenticatedEventSource } from "@/lib/auth";
 import { getLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { botNotificationIcon, notificationTag, notifyBrowser } from "@/lib/notifications";
+import { sortMessages } from "@/lib/messageOrder";
 import type { AutoVerifySettings } from "@/lib/autoVerifyTypes";
 
 export type { MausColor } from "@/lib/mascot";
@@ -320,9 +321,15 @@ function reducer(state: AppState, action: Action): AppState {
           : (action.bots[0]?.id ?? "");
       // multibot: bot oznaczony przez serwer jako nieprzeczytany, a nie jest
       // właśnie otwarty → zapamiętaj pierwszą nieprzeczytaną wiadomość (ost. wpis)
-      const bots = action.bots.map((b) =>
-        b.unread && b.id !== selectedId ? { ...b, firstUnreadId: b.messages[b.messages.length - 1]?.id ?? null } : b,
-      );
+      const bots = action.bots.map((b) => {
+        const messages = sortMessages(b.messages);
+        return {
+          ...b,
+          messages,
+          firstUnreadId:
+            b.unread && b.id !== selectedId ? (messages.at(-1)?.id ?? null) : b.firstUnreadId,
+        };
+      });
       return { ...state, bots, selectedId };
     }
     case "instances":
@@ -410,9 +417,9 @@ function reducer(state: AppState, action: Action): AppState {
       const viewing = bot.id === state.selectedId;
       const next = updateBot(state, bot.id, (b) => {
         const msgs = withoutPending(b.messages);
-        const messages = msgs.some((m) => m.id === action.message.id)
-          ? msgs
-          : [...msgs, action.message];
+        const messages = sortMessages(
+          msgs.some((m) => m.id === action.message.id) ? msgs : [...msgs, action.message],
+        );
         const firstUnreadId = viewing
           ? null
           : (b.unread && !b.firstUnreadId ? action.message.id : b.firstUnreadId);
@@ -452,7 +459,7 @@ function reducer(state: AppState, action: Action): AppState {
       const next = motion ? withMascotMotion(state, bot.id, motion) : state;
       return updateBot(next, bot.id, (b) => ({
         ...b,
-        messages: b.messages.map((m) => (m.id === action.message.id ? action.message : m)),
+        messages: sortMessages(b.messages.map((m) => (m.id === action.message.id ? action.message : m))),
       }));
     }
     case "streamDelta":
