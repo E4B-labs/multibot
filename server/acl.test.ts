@@ -36,9 +36,9 @@ describe("v2 bot ACL", () => {
     expect(canBotContact(team, team)).toBe(true);
   });
 
-  it("limits Full Access override to server owner on Team bots", () => {
+  it("allows every workspace member Full Access on Team bots", () => {
     expect(canUseFullAccess(bot("team", "team"), owner)).toBe(true);
-    expect(canUseFullAccess(bot("team", "team"), member)).toBe(false);
+    expect(canUseFullAccess(bot("team", "team"), member)).toBe(true);
     expect(canUseFullAccess(bot("private", "private", "u1"), owner)).toBe(false);
   });
 });

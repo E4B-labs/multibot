@@ -3697,8 +3697,8 @@ const server = createServer(async (req, res) => {
         if (method === "GET") return json(res, 200, workspace.access(m[1], bot?.visibility === "private"));
         if (method === "PATCH") {
           const body = await readBody(req);
-          if (body.access === "full" && (bot?.visibility === "private" || (identityActor && identityActor.role !== "owner"))) {
-            return json(res, 403, { error: "Full Access is restricted to the server owner on Team bots" });
+          if (body.access === "full" && bot?.visibility === "private") {
+            return json(res, 403, { error: "Full Access is unavailable for private bots" });
           }
           return json(res, 200, workspace.setAccess(m[1], body.access));
         }
@@ -3707,8 +3707,8 @@ const server = createServer(async (req, res) => {
         if (method === "GET") return json(res, 200, workspace.autonomy(m[1], bot?.visibility === "private"));
         if (method === "PATCH") {
           const body = await readBody(req);
-          if (body.autonomy === "autonomous" && (bot?.visibility === "private" || (identityActor && identityActor.role !== "owner"))) {
-            return json(res, 403, { error: "Autonomous Full Access is restricted to the server owner on Team bots" });
+          if (body.autonomy === "autonomous" && bot?.visibility === "private") {
+            return json(res, 403, { error: "Autonomous Full Access is unavailable for private bots" });
           }
           return json(res, 200, workspace.setAutonomy(m[1], body.autonomy));
         }
@@ -3718,8 +3718,8 @@ const server = createServer(async (req, res) => {
           const body = await readBody(req);
           const patch = typeof body.toolset === "string" ? { [body.toolset]: body.enabled } : body;
           const next = { ...workspace.permissions(m[1]), ...(patch as Record<string, unknown>) };
-          if (workspace.autonomy(m[1]).autonomy === "autonomous" && Object.values(next).every((value) => value === true) && (bot?.visibility === "private" || (identityActor && identityActor.role !== "owner"))) {
-            return json(res, 403, { error: "Full Access is restricted to the server owner on Team bots" });
+          if (workspace.autonomy(m[1]).autonomy === "autonomous" && Object.values(next).every((value) => value === true) && bot?.visibility === "private") {
+            return json(res, 403, { error: "Full Access is unavailable for private bots" });
           }
           return json(res, 200, workspace.setPermissions(m[1], patch));
         }
