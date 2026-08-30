@@ -45,7 +45,7 @@ export function EngineAutonomy({ bot }: { bot: Bot }) {
       {status === "offline" ? (
         <div className="mt-3 text-[13px] text-ink-secondary">{polish ? "Usługa offline" : "Service offline"}</div>
       ) : status === "ready" ? (
-        <div className="mt-3 grid grid-cols-3 gap-1 rounded-lg bg-inset p-1">
+        <div className="mt-3 grid grid-cols-2 gap-1 rounded-lg bg-inset p-1">
           {(Object.keys(labels) as Access[]).map((item) => (
             <button key={item} onClick={() => choose(item)} className={cn("rounded-md px-2 py-2 text-[12px]", access === item ? "bg-accent text-white" : "text-ink-secondary hover:bg-raised")}>
               {polish ? labels[item].pl : labels[item].en}
