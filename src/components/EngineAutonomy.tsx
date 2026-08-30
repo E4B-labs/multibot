@@ -4,10 +4,9 @@ import { api, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useLanguage } from "@/lib/language";
 
-type Access = "read-only" | "approval" | "full";
+type Access = "approval" | "full";
 
 const labels: Record<Access, { en: string; pl: string }> = {
-  "read-only": { en: "Read Only", pl: "Tylko odczyt" },
   approval: { en: "Ask for approval", pl: "Pytaj o zgodę" },
   full: { en: "Full Access", pl: "Pełny dostęp" },
 };
@@ -21,7 +20,7 @@ export function EngineAutonomy({ bot }: { bot: Bot }) {
   useEffect(() => {
     api(`/api/bots/${bot.id}/access`)
       .then((value: { access?: string }) => {
-        setAccess(value.access === "read-only" || value.access === "full" ? value.access : "approval");
+        setAccess(value.access === "full" ? value.access : "approval");
         setStatus("ready");
       })
       .catch(() => setStatus("offline"));
@@ -32,7 +31,7 @@ export function EngineAutonomy({ bot }: { bot: Bot }) {
     setAccess(next);
     setError(null);
     api(`/api/bots/${bot.id}/access`, { method: "PATCH", body: JSON.stringify({ access: next }) })
-      .then((value: { access?: string }) => setAccess(value.access === "read-only" || value.access === "full" ? value.access : "approval"))
+      .then((value: { access?: string }) => setAccess(value.access === "full" ? value.access : "approval"))
       .catch((e: unknown) => {
         setAccess(previous);
         setError(e instanceof Error ? e.message : String(e));

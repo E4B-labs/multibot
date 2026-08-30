@@ -349,7 +349,7 @@ async function loadActiveTarget(win) {
   if (app.isPackaged) {
     // Fragment never reaches HTTP. Renderer stores it, then erases URL before
     // first paint, so fresh packaged installs do not deadlock on login.
-    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}/${localAccessTokenFragment()}` : ERROR_PAGE);
+    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}/` : ERROR_PAGE);
   } else {
     win.loadURL(DEV_URL);
   }

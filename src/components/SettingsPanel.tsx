@@ -34,31 +34,6 @@ function Field({
 const inputCls =
   "w-full rounded-lg border border-hairline/40 bg-inset px-2.5 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline";
 
-function ComposioAccountSelector({ bot }: { bot: Bot }) {
-  const { dispatch } = useStore();
-  const polish = useLanguage() === "pl";
-  const [accounts, setAccounts] = useState<Array<{ id: string; alias?: string; status: string }>>([]);
-  useEffect(() => {
-    authFetch("/api/connectors?services=gmail")
-      .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((body) => setAccounts(body.services?.gmail?.accounts ?? []))
-      .catch(() => setAccounts([]));
-  }, [bot.id]);
-  if (!accounts.length) return null;
-  const current = bot.composioAccounts?.gmail ?? "";
-  const set = (value: string) => dispatch({ type: "updateBot", botId: bot.id, patch: { composioAccounts: { ...(bot.composioAccounts ?? {}), ...(value ? { gmail: value } : {}) } } });
-  return (
-    <div className="rounded-xl bg-card p-3">
-      <div className="text-[14px] font-medium text-ink">{polish ? "Konto Gmail" : "Gmail account"}</div>
-      <div className="mt-0.5 text-[12px] text-ink-secondary">{polish ? "Wybór dotyczy tego bota." : "Selection applies to this bot."}</div>
-      <select value={current} onChange={(event) => set(event.target.value)} className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink" aria-label={polish ? "Konto Gmail" : "Gmail account"}>
-        <option value="">{polish ? "Automatyczny wybór" : "Automatic selection"}</option>
-        {accounts.map((account) => <option key={account.id} value={account.id}>{account.alias || account.id} · {account.status}</option>)}
-      </select>
-    </div>
-  );
-}
-
 interface ApprovalRuleOut {
   id: string;
   label: string;
@@ -260,7 +235,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
         </div>
 
         <div ref={cardsRef} className="flex flex-col gap-3">
-          <ComposioAccountSelector bot={bot} />
+
           {appearanceOpen && (
           <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
             <div className="flex items-center justify-between border-b border-hairline/40 px-2.5 py-2">
