@@ -90,6 +90,7 @@ import { combineQueuedMessages, QueuedUserMessages } from "./queued-turns.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const HOST = process.env.OMB_HOST?.trim() || "127.0.0.1";
+const PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "");
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REMOTE = !new Set(["127.0.0.1", "::1", "localhost"]).has(HOST.toLowerCase());
 // multibot (G2): a remote server owns one origin. Dev keeps Vite separate;
@@ -3577,7 +3578,10 @@ const server = createServer(async (req, res) => {
     if (method === "POST" && path === "/api/pair/start") {
       if (actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
       const { code, expiresAt } = startPairing();
-      const url = `http://${HOST}:${PORT}`;
+      const requestHost = typeof req.headers.host === "string" ? req.headers.host.trim() : "";
+      const forwardedProto = req.headers["x-forwarded-proto"];
+      const protocol = typeof forwardedProto === "string" && forwardedProto ? forwardedProto.split(",")[0].trim() : isSecureRequest(req) ? "https" : "http";
+      const url = PUBLIC_URL || (requestHost && !/^\[?(?:0\.0\.0\.0|::|localhost)\]?(:\d+)?$/i.test(requestHost) ? `${protocol}://${requestHost}` : `http://${HOST}:${PORT}`);
       return json(res, 200, { code, expiresAt, url, pairUrl: `${url}/?pair=${code}`, qrSvg: pairingQrSvg(`${url}/?pair=${code}`) });
     }
     if (method === "GET" && path === "/api/pair") {
