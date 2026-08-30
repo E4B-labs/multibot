@@ -424,12 +424,14 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         </div>
 
         <div className="flex flex-1 flex-col px-5 pb-5">
-          {/* Jedna maszyna na całą instalację — bez tego użytkownik zobaczy ten
-              sam pulpit u każdego bota i uzna to za błąd. */}
+          {/* Zadanie 1: bot ma wiedzieć że to JEGO komputer — jedna trwała maszyna
+              na workspace, wspólna dla wszystkich botów, ale każdy ma pełny dostęp.
+              Banner mówi to samo użytkownikowi: to ICH komputer, z przeglądarką,
+              terminalem i plikami — boty mają z niego korzystać bez pytania. */}
           <div className="mt-2 text-[12px] text-ink-secondary">
             {polish
-              ? "Jeden komputer, wspólny dla wszystkich botów — logowania i pliki widzą wszystkie."
-              : "One computer, shared by all bots — logins and files are visible to every one of them."}
+              ? "To jest TWÓJ komputer — jeden trwały Linux na cały workspace, współdzielony przez wszystkie boty, ale każdy ma do niego pełny dostęp (przeglądarka, terminal, pliki). Boty korzystają z niego bez pytania."
+              : "This is YOUR computer — one persistent Linux desktop per workspace, shared by all bots but fully yours to use (browser, terminal, files). Bots use it without asking."}
           </div>
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
             {/* Znacznik wydania widoczny gołym okiem. Bez niego nie da się z

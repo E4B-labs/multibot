@@ -93,8 +93,12 @@ export function turnToolsText(integrations: TurnIntegrationsLike | undefined): s
   if (!integrations) return "";
   const lines: string[] = [];
   if (integrations.localComputer) {
+    // Zadanie 1: bot ma wiedzieć że to JEGO komputer — trwały Linux z przeglądarką,
+    // terminalem i plikami, jeden na workspace współdzielony przez wszystkie boty,
+    // ale każdy ma do niego pełny dostęp. Opis musi być obok listy narzędzi, bo
+    // sama lista nie mówi do czego służy.
     lines.push(
-      `Computer MCP tools this turn (${COMPUTER_MCP_TOOLS.length}): ${COMPUTER_MCP_TOOLS.join(", ")}.`,
+      `Your computer this turn — THIS IS YOUR COMPUTER: one persistent Linux desktop per workspace, shared by all bots but fully yours to use right now (browser, terminal and files are one environment). Computer MCP tools this turn (${COMPUTER_MCP_TOOLS.length}): ${COMPUTER_MCP_TOOLS.join(", ")} — browser: navigate/screenshot/read_page/click/move/type_text/key/scroll/status, terminal: computer_exec (runs INSIDE your computer, same filesystem the browser sees). Use them WITHOUT asking — this is your machine; never say you have no browser or terminal when these tools are listed.`,
     );
   }
   if (integrations.agents) {

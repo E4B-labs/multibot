@@ -38,11 +38,14 @@ _SOUL = """# {name}
 _MULTIBOT_MARKER = "MULTIBOT_AGENT_IDENTITY_V1"
 _ROUTINE_MARKER = "MULTIBOT_ROUTINE_TOOL_ROUTING_V1"
 _FILES_MARKER = "MULTIBOT_FILE_DELIVERY_V1"
-_COMPUTER_MARKER = "MULTIBOT_COMPUTER_IDENTITY_V2"
-# Stary marker bloku komputera. Migracja V1→V2 w `ensure_multibot_identity`
+_COMPUTER_MARKER = "MULTIBOT_COMPUTER_IDENTITY_V3"
+# Stare markery bloku komputera. Migracja V1/V2→V3 w `ensure_multibot_identity`
 # PODMIENIA stary blok na nowy zamiast dokładać drugi (sekcja A2: „rozszerz
-# istniejący blok, nie dokładaj drugiego").
+# istniejący blok, nie dokładaj drugiego"). Zadanie 1 wzmacnia przekaz: to JEST
+# ICH komputer — trwały, jeden na workspace współdzielony przez wszystkie boty,
+# ale każdy ma do niego pełny dostęp i ma z niego korzystać bez pytania.
 _COMPUTER_MARKER_V1 = "MULTIBOT_COMPUTER_IDENTITY_V1"
+_COMPUTER_MARKER_V2 = "MULTIBOT_COMPUTER_IDENTITY_V2"
 _MULTIBOT_IDENTITY = f"""
 
 ## MultiBot Agent
@@ -113,10 +116,11 @@ output — that output is capped and truncates silently.
 # dowiedzieć, że ma komputer — bez tego odpowiada userowi "nie mam takiego
 # narzędzia", mając `browser_*` w ofercie.
 #
-# Celowo mówi tylko o przeglądarce: `browser_*` chodzi po CDP komputera
-# (browser.json → `external: true`), ale toolset `terminal`/`file` Hermesa
-# wykonuje się na hoście SILNIKA — na telefonie to ta sama maszyna, przy backendzie
-# docker już nie. Leasing sterowania (`user_has_control`) też tu nie obowiązuje:
+# Zadanie 1: bot ma WIEDZIEĆ że to JEGO komputer — trwały, jeden na workspace
+# współdzielony przez wszystkie boty, ale każdy ma do niego pełny dostęp i może
+# używać przeglądarki (navigate/browser_snapshot/click etc.), terminala
+# (computer_exec) i plików. Wzmocniony przekaz: THIS IS YOUR COMPUTER, używaj
+# bez pytania. Leasing sterowania (`user_has_control`) też tu nie obowiązuje:
 # egzekwują go trasy komputera w harnessie, a `browser_*` idzie prosto po CDP.
 _COMPUTER_IDENTITY = f"""
 
@@ -124,27 +128,35 @@ _COMPUTER_IDENTITY = f"""
 
 <!-- {_COMPUTER_MARKER} -->
 
-You have a computer: one persistent Linux desktop shared by every bot in this
-MultiBot installation. Your browser tools (`browser_navigate`, `browser_snapshot`,
-`browser_click`, `browser_type`, `browser_scroll`, `browser_press`) drive the
-browser running on that desktop, and the user watches that same screen in the
-Computer panel. When you are asked to open a page, look something up, or use a
-website, use these tools — do not answer that you have no browser.
+THIS IS YOUR COMPUTER — a persistent Linux desktop that belongs to you. It is
+ONE machine shared by every bot in this MultiBot workspace, but YOU have full
+access to it right now — treat it as your own environment, not a borrowed tool.
+Your browser tools (`browser_navigate`, `browser_snapshot`, `browser_click`,
+`browser_type`, `browser_scroll`, `browser_press`) drive the browser running on
+that desktop, `computer_exec` / terminal runs commands INSIDE that same desktop
+(same filesystem the browser sees), and files you download or create there stay
+there. The user watches that same screen in the Computer panel. When you are
+asked to open a page, look something up, use a website, run a command or work
+with files, use these tools — do not answer that you have no browser, no
+computer or no terminal.
 
 Because the desktop is shared, open tabs, downloads and logins are visible to the
 user and to the other bots, and they may change things while you work: take a
 `browser_snapshot` and act on what you see now instead of trusting what you saw
-earlier.
+earlier. Take a snapshot or read the page first, then act on what you actually
+see.
 
 On this installation your terminal and file tools run on the same machine as the
 desktop — a file you download in the browser is visible from your terminal, and
-vice versa. The computer is one environment, not a set of disconnected boxes.
+vice versa. The computer is one environment, not a set of disconnected boxes —
+browser, terminal and files are the SAME place.
 
 Keep trying until you succeed: do not give up after one failed tool. When the
 search/read tools cannot answer, go to your computer — browse, run terminal
 commands, read files. Use the computer WITHOUT asking first: it is your machine
-for exactly this, not something you need permission for. Budget roughly 25 tool
-steps per goal; stop only after web search, the computer and CLI tools are all
+for exactly this, not something you need permission for. Never say you have no
+computer when you have this block in your SOUL.md. Budget roughly 25 tool steps
+per goal; stop only after web search, the computer and CLI tools are all
 exhausted, and then state plainly what blocked you. Ask the user only for a real
 decision or for data you cannot get anywhere else (a password, a direction,
 consent for something irreversible). Never claim you did something you did not —
@@ -152,6 +164,7 @@ if something failed, say what and why. Persistence is not permission bypass: a
 toolset disabled by your permissions stays disabled, and approval mode still
 asks.
 """
+
 
 
 def data_dir() -> Path:
@@ -178,11 +191,13 @@ def _write(bot: dict) -> None:
 
 
 def _replace_computer_block(content: str, new_block: str) -> str:
-    """Zastąp stary blok `## MultiBot computer` (V1) nowym — bez duplikacji.
+    """Zastąp stary blok `## MultiBot computer` (V1/V2) nowym — bez duplikacji.
 
     Blok to sekcja od nagłówka do następnego `## ` albo końca pliku. Gdy
     nagłówka nie ma (marker był, a treść ktoś ręcznie sklecił), dołączamy nowy
-    blok na końcu — tura nie może się wywrócić przez treść SOUL-a."""
+    blok na końcu — tura nie może się wywrócić przez treść SOUL-a. Zadanie 1:
+    migracja V3 musi podmieniać zarówno V1 jak i V2, inaczej stare boty
+    zostaną na słabym opisie komputera."""
     start = content.find("## MultiBot computer")
     if start < 0:
         return content.rstrip() + new_block
@@ -206,8 +221,8 @@ def ensure_multibot_identity(bot_id: str) -> None:
     if _FILES_MARKER not in content:
         additions += _FILES_IDENTITY
     if _COMPUTER_MARKER not in content:
-        if _COMPUTER_MARKER_V1 in content:
-            # Migracja V1→V2: podmieniamy stary blok, nie dokładamy drugiego.
+        if _COMPUTER_MARKER_V1 in content or _COMPUTER_MARKER_V2 in content:
+            # Migracja V1/V2→V3 (Zadanie 1): podmieniamy stary blok, nie dokładamy drugiego.
             content = _replace_computer_block(content, _COMPUTER_IDENTITY)
         else:
             additions += _COMPUTER_IDENTITY

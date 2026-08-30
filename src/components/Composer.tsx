@@ -613,6 +613,32 @@ export function Composer({ bot }: { bot: Bot }) {
     setAttachOpen(false);
   }, [attachments.length]);
 
+  // multibot Zad.3: Ctrl+V / paste obrazów z schowka — bardzo ważne, użytkownik
+  // wymaga wklejania zdjęć (screenshot, copy image). Wyciągamy pliki z
+  // clipboardData.files oraz clipboardData.items (image/*) i przekazujemy do
+  // addFiles. Działa na PC (Chrome/FF) i w WebView jeśli system udostępnia
+  // schowek. Nie blokuje wklejania tekstu — tylko gdy są pliki/obrazki.
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const files: File[] = [];
+    if (dt.files?.length) {
+      for (const f of Array.from(dt.files)) if (f.size > 0) files.push(f);
+    }
+    if (dt.items?.length) {
+      for (const item of Array.from(dt.items)) {
+        if (item.kind !== "file") continue;
+        if (item.type && !item.type.startsWith("image/")) continue;
+        const f = item.getAsFile();
+        if (f && !files.some((x) => x.name === f.name && x.size === f.size && x.type === f.type)) files.push(f);
+      }
+    }
+    if (files.length) {
+      e.preventDefault();
+      addFiles(files);
+    }
+  }, [addFiles]);
+
   // desktop drag&drop: ChatView dispatches File[] when user drops onto chat
   useEffect(() => {
     const onDropFiles = (e: Event) => {
@@ -938,6 +964,7 @@ export function Composer({ bot }: { bot: Bot }) {
             if (e.key === "Escape" && attachOpen) setAttachOpen(false);
             if (e.key === "Escape" && recording) setRecording(false);
           }}
+          onPaste={handlePaste}
           placeholder={
             recording ? polish ? "Słucham…" : "Listening…" : bot.busy ? polish ? `${botDisplayName(bot, polish ? "pl" : "en")} pracuje…` : `${botDisplayName(bot, polish ? "pl" : "en")} is working…` : polish ? `Wiadomość do ${botDisplayName(bot, polish ? "pl" : "en")}` : `Message ${botDisplayName(bot, polish ? "pl" : "en")}`
           }
