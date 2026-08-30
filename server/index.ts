@@ -1584,8 +1584,8 @@ async function warmBot(botId: string): Promise<boolean> {
   // `permissionMode` i listę wyłączonych narzędzi, a jedno i drugie siedzi w
   // podpisie procesu. Wartości są te same, które ustawi prawdziwa tura.
   setTurnPolicy(bot.threadId, {
-    autonomy: workspace.autonomy(bot.id, bot.visibility === "private").autonomy,
-    access: workspace.access(bot.id, bot.visibility === "private").access,
+    autonomy: workspace.autonomy(bot.id).autonomy,
+    access: workspace.access(bot.id).access,
     permissions: workspace.permissions(bot.id),
     approvalRules: workspace.approvalRules(bot.id),
   });
@@ -1735,8 +1735,8 @@ opts?: {
   if (!isolated) {
     store.patchBot(bot.id, { busy: true, unread: false });
     setTurnPolicy(bot.threadId, {
-      autonomy: workspace.autonomy(bot.id, bot.visibility === "private").autonomy,
-      access: workspace.access(bot.id, bot.visibility === "private").access,
+      autonomy: workspace.autonomy(bot.id).autonomy,
+      access: workspace.access(bot.id).access,
       permissions: workspace.permissions(bot.id),
       approvalRules: workspace.approvalRules(bot.id),
     });
@@ -2597,14 +2597,13 @@ const server = createServer(async (req, res) => {
         const action = String(body.action ?? "");
         const caller = store.bot(fromBotId);
         if (!caller) return json(res, 404, { error: "no such caller bot" });
-        const access = workspace.access(fromBotId, caller.visibility === "private").access;
+        const access = workspace.access(fromBotId).access;
         const privateBot = caller.visibility === "private";
         const teamActions = new Set(["team.memory.list", "team.memory.graph", "team.memory.markdown.get", "team.memory.add"]);
         if (privateBot && teamActions.has(action)) return json(res, 404, { error: "team scope unavailable to private bot" });
         const readOnlyActions = new Set(["profile.get", "memory.list", "memory.graph", "memory.markdown.get", "team.memory.list", "team.memory.graph", "team.memory.markdown.get", "mail.inbox", "skills.list", "routines.list", "groups.list", "device.info", "file.read"]);
         if (access === "read-only" && !readOnlyActions.has(action)) return json(res, 403, { error: "read-only access" });
         const requireFull = () => {
-          if (privateBot) throw Object.assign(new Error("private bots cannot use Full Access"), { status: 403 });
           if (access !== "full") throw Object.assign(new Error("Full Access required for this action"), { status: 403 });
         };
         const bot = () => store.bot(fromBotId)!;
@@ -3694,33 +3693,17 @@ const server = createServer(async (req, res) => {
           : json(res, 405, { error: "method not allowed" });
       }
       if (m[2] === "access") {
-        if (method === "GET") return json(res, 200, workspace.access(m[1], bot?.visibility === "private"));
-        if (method === "PATCH") {
-          const body = await readBody(req);
-          if (body.access === "full" && bot?.visibility === "private") {
-            return json(res, 403, { error: "Full Access is unavailable for private bots" });
-          }
-          return json(res, 200, workspace.setAccess(m[1], body.access));
-        }
+        if (method === "GET") return json(res, 200, workspace.access(m[1]));
+        if (method === "PATCH") return json(res, 200, workspace.setAccess(m[1], (await readBody(req)).access));
       }
       if (m[2] === "autonomy") {
-        if (method === "GET") return json(res, 200, workspace.autonomy(m[1], bot?.visibility === "private"));
-        if (method === "PATCH") {
-          const body = await readBody(req);
-          if (body.autonomy === "autonomous" && bot?.visibility === "private") {
-            return json(res, 403, { error: "Autonomous Full Access is unavailable for private bots" });
-          }
-          return json(res, 200, workspace.setAutonomy(m[1], body.autonomy));
-        }
+        if (method === "GET") return json(res, 200, workspace.autonomy(m[1]));
+        if (method === "PATCH") return json(res, 200, workspace.setAutonomy(m[1], (await readBody(req)).autonomy));
       } else {
         if (method === "GET") return json(res, 200, workspace.permissions(m[1]));
         if (method === "PATCH") {
           const body = await readBody(req);
           const patch = typeof body.toolset === "string" ? { [body.toolset]: body.enabled } : body;
-          const next = { ...workspace.permissions(m[1]), ...(patch as Record<string, unknown>) };
-          if (workspace.autonomy(m[1]).autonomy === "autonomous" && Object.values(next).every((value) => value === true) && bot?.visibility === "private") {
-            return json(res, 403, { error: "Full Access is unavailable for private bots" });
-          }
           return json(res, 200, workspace.setPermissions(m[1], patch));
         }
       }

@@ -25,7 +25,7 @@ export function canBotContact(source: BotRecord | null, target: BotRecord | null
 }
 
 export function canUseFullAccess(bot: BotRecord | null, actor: IdentityActor | null): boolean {
-  // Boty team są wspólne dla każdego zalogowanego członka workspace. Prywatne
-  // boty nadal działają wyłącznie w trybie akceptacji, także u właściciela.
-  return Boolean(bot && actor && botVisibility(bot) === "team");
+  // Boty team są wspólne dla każdego zalogowanego członka workspace. Prywatny
+  // bot może dostać Full Access wyłącznie właścicielowi.
+  return Boolean(bot && actor && (botVisibility(bot) === "team" || bot.ownerId === actor.userId));
 }
