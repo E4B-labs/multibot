@@ -259,6 +259,12 @@ describe("harness HTTP API", () => {
       turns: 0,
     });
 
+    const privateBot = (await api("POST", "/api/bots", { visibility: "private" })).body.bot;
+    expect((await api("PATCH", `/api/bots/${privateBot.id}/access`, { access: "full" })).body).toEqual({ access: "full" });
+    expect((await api("GET", `/api/bots/${privateBot.id}/access`)).body).toEqual({ access: "full" });
+    expect((await api("GET", `/api/bots/${privateBot.id}/autonomy`)).body).toEqual({ autonomy: "autonomous" });
+    expect((await api("DELETE", `/api/bots/${privateBot.id}`)).status).toBe(200);
+
     expect((await api("DELETE", `/api/bots/${bot.id}/skills/review`)).status).toBe(200);
     expect((await api("DELETE", `/api/bots/${bot.id}/memory/facts/${fact.body.id}`)).status).toBe(200);
     expect((await api("GET", "/api/bots/missing/workspace")).status).toBe(404);

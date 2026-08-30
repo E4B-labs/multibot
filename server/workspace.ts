@@ -249,8 +249,8 @@ export class WorkspaceStore {
     return workspace.skills.length !== before;
   }
 
-  autonomy(botId: string, privateBot = false): { autonomy: "approval" | "autonomous" } {
-    return { autonomy: privateBot ? "approval" : this.get(botId).autonomy };
+  autonomy(botId: string): { autonomy: "approval" | "autonomous" } {
+    return { autonomy: this.get(botId).autonomy };
   }
 
   setAutonomy(botId: string, value: unknown): { autonomy: "approval" | "autonomous" } {
@@ -268,9 +268,8 @@ export class WorkspaceStore {
     return { ...this.get(botId).permissions };
   }
 
-  access(botId: string, privateBot = false): { access: AccessProfile } {
-    const access = normalizedAccess(this.get(botId));
-    return { access: privateBot && access === "full" ? "approval" : access };
+  access(botId: string): { access: AccessProfile } {
+    return { access: normalizedAccess(this.get(botId)) };
   }
 
   setAccess(botId: string, value: unknown): { access: AccessProfile } {

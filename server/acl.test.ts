@@ -36,9 +36,10 @@ describe("v2 bot ACL", () => {
     expect(canBotContact(team, team)).toBe(true);
   });
 
-  it("allows every workspace member Full Access on Team bots", () => {
+  it("allows team members and private owners Full Access", () => {
     expect(canUseFullAccess(bot("team", "team"), owner)).toBe(true);
     expect(canUseFullAccess(bot("team", "team"), member)).toBe(true);
-    expect(canUseFullAccess(bot("private", "private", "u1"), owner)).toBe(false);
+    expect(canUseFullAccess(bot("private", "private", "u1"), owner)).toBe(true);
+    expect(canUseFullAccess(bot("private", "private", "u1"), member)).toBe(false);
   });
 });
