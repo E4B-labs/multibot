@@ -148,7 +148,7 @@ function ChatMarkdownComponent({ text, streaming = false, compact = false }: { t
             }
             return (
               <span className="inline-flex translate-y-px items-center gap-1 rounded-full bg-raised px-2 py-0.5 align-middle text-[13px] font-medium text-ink">
-                <MausAvatar color={bot.color} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? "happy"} size={16} animated={false} />
+                <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={normalizeState(bot.mascotExpression) ?? "happy"} size={16} animated={false} />
                 {/* multibot: sama nazwa, bez małpki. Owal z awatarem już mówi,
                     że to bot, a „@" zostawiało dwa różne zapisy tej samej
                     rzeczy: plakietka nadawcy przy wiadomościach bot→bot

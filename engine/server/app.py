@@ -96,6 +96,8 @@ class BotCreate(BaseModel):
     title: str = ""
     description: str = ""
     avatar: dict | None = None
+    createdByBotId: str | None = None
+    creationContext: str | None = None
 
 
 class BotPatch(BaseModel):
@@ -105,6 +107,8 @@ class BotPatch(BaseModel):
     avatar: dict | None = None
     # faza F4: "approval" (default) albo "autonomous"; zła wartość → 422 z `bots`.
     autonomy: str | None = None
+    createdByBotId: str | None = None
+    creationContext: str | None = None
 
 
 class ProviderIn(BaseModel):
@@ -430,7 +434,7 @@ def health() -> dict:
 async def create_bot(body: BotCreate) -> dict:
     # Sync I/O (profil Hermesa na dysku) do wątku — jak `gateway.messages` niżej.
     bot = await asyncio.to_thread(
-        bots.create_bot, body.id, name=body.name, title=body.title, description=body.description
+        bots.create_bot, body.id, name=body.name, title=body.title, description=body.description, createdByBotId=body.createdByBotId, creationContext=body.creationContext
     )
     if body.avatar is not None:
         bot = await asyncio.to_thread(bots.update_bot, body.id, avatar=body.avatar)

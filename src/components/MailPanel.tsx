@@ -126,7 +126,7 @@ export function MailPanel() {
                   return (
                     <article key={message.id} className="flex gap-2.5">
                       {sender ? (
-                        <MausAvatar color={sender.color} shape={sender.mascotShape} state={stateForBot(sender)} size={28} animated={false} />
+                        <MausAvatar color={sender.color} avatarUrl={sender.avatarUrl} shape={sender.mascotShape} state={stateForBot(sender)} size={28} animated={false} />
                       ) : <span className="size-7 shrink-0 rounded-full bg-raised" />}
                       <div className="min-w-0 max-w-[80%]">
                         <div className="mb-1 flex flex-wrap items-baseline gap-2">

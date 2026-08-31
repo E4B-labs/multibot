@@ -266,14 +266,14 @@ function RoomChip({ message }: { message: Message }) {
       >
         <span className="flex items-center gap-1 font-medium text-ink">
           {owner && (
-            <MausAvatar color={owner.color} shape={owner.mascotShape} state={stateForBot(owner)} size={18} animated={false} />
+            <MausAvatar color={owner.color} avatarUrl={owner.avatarUrl} shape={owner.mascotShape} state={stateForBot(owner)} size={18} animated={false} />
           )}
           {owner ? botDisplayName(owner, polish ? "pl" : "en") : room.ownerBotId}
         </span>
         <span>{polish ? "napisał(a) do" : "texted"}</span>
         {peers.map((peer) => (
           <span key={peer.id} className="flex items-center gap-1 font-medium text-ink">
-            <MausAvatar color={peer.color} shape={peer.mascotShape} state={stateForBot(peer)} size={18} animated={false} />
+            <MausAvatar color={peer.color} avatarUrl={peer.avatarUrl} shape={peer.mascotShape} state={stateForBot(peer)} size={18} animated={false} />
             {botDisplayName(peer, polish ? "pl" : "en")}
           </span>
         ))}
@@ -463,7 +463,7 @@ export function ChatView({ bot }: { bot: Bot }) {
         >
           <span className="relative inline-flex shrink-0 rounded-full">
             <MausAvatar
-              color={bot.color}
+              color={bot.color} avatarUrl={bot.avatarUrl}
               shape={bot.mascotShape}
               state={busyMotion?.state ?? stateForBot(bot)}
               size={40}

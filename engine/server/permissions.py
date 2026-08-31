@@ -73,7 +73,7 @@ TOOLSETS = [
     "terminal",
     "todo",
     "vision",
-    "web",
+    "web",  # web_search/web_extract (fetch) — domyślnie włączony (brak w disabled_toolsets = włączony), naprawia fetch/web_search (MULTIBOT_WEB_TOOLS_V1)
 ]
 
 
@@ -90,6 +90,7 @@ def _disabled(cfg: dict) -> list[str]:
     return [str(t) for t in ((cfg.get("agent") or {}).get("disabled_toolsets") or [])]
 
 
+# web_search/web_extract (fetch) domyślnie włączony — brak wpisu w disabled_toolsets = włączony (MULTIBOT_WEB_TOOLS_V1); naprawia fetch/web_search
 def get(bot_id: str) -> dict[str, bool]:
     """`{toolset: włączony?}` dla wszystkich `TOOLSETS`. Brak klucza = wszystkie."""
     off = _disabled(_read(bot_id))

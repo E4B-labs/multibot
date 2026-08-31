@@ -39,6 +39,7 @@ _MULTIBOT_MARKER = "MULTIBOT_AGENT_IDENTITY_V1"
 _ROUTINE_MARKER = "MULTIBOT_ROUTINE_TOOL_ROUTING_V1"
 _FILES_MARKER = "MULTIBOT_FILE_DELIVERY_V1"
 _COMPUTER_MARKER = "MULTIBOT_COMPUTER_IDENTITY_V3"
+_WEB_MARKER = "MULTIBOT_WEB_TOOLS_V1"
 # Stare markery bloku komputera. Migracja V1/V2→V3 w `ensure_multibot_identity`
 # PODMIENIA stary blok na nowy zamiast dokładać drugi (sekcja A2: „rozszerz
 # istniejący blok, nie dokładaj drugiego"). Zadanie 1 wzmacnia przekaz: to JEST
@@ -46,6 +47,11 @@ _COMPUTER_MARKER = "MULTIBOT_COMPUTER_IDENTITY_V3"
 # ale każdy ma do niego pełny dostęp i ma z niego korzystać bez pytania.
 _COMPUTER_MARKER_V1 = "MULTIBOT_COMPUTER_IDENTITY_V1"
 _COMPUTER_MARKER_V2 = "MULTIBOT_COMPUTER_IDENTITY_V2"
+# multibot: bot stworzony przez innego bota ma od razu wiedzieć kto i po co go
+# powołał — to jest DRUGA ścieżka promptu (silnik, SOUL.md). Harness wstrzykuje
+# to samo via bot-prompt.ts dla driverów CLI; tutaj ląduje w profilu Hermesa.
+# Marker jak wyżej, żeby ensure_multibot_identity mogło go dopisać migracyjnie.
+_CREATION_MARKER = "MULTIBOT_CREATION_CONTEXT_V1"
 _MULTIBOT_IDENTITY = f"""
 
 ## MultiBot Agent
@@ -164,7 +170,38 @@ if something failed, say what and why. Persistence is not permission bypass: a
 toolset disabled by your permissions stays disabled, and approval mode still
 asks.
 """
+_WEB_IDENTITY = f"""
 
+## Web search and fetch
+
+<!-- {_WEB_MARKER} -->
+
+You have `web_search(query)` and `web_extract(url)` — use web_search for current information and web_extract as your fetch to read any URL. Never say you cannot search or fetch when you have these tools.
+"""
+
+
+def _creation_block(bot: dict) -> str:
+    """Blok SOUL dla bota stworzonego przez innego bota — kto i po co.
+    Graceful: brak pól = bot od usera, pusty string."""
+    ctx = (bot.get("creationContext") or "").strip()
+    by = (bot.get("createdByBotId") or "").strip()
+    if not ctx and not by:
+        return ""
+    # creationContext już zawiera sformułowanie "Stworzony przez bota X..."
+    # gdy przyszło z harnessu, więc nie dublujemy. Dodajemy uniwersalną
+    # instrukcję startu: nie pytaj kim jesteś, zacznij zadanie od razu.
+    body = ctx if ctx else f"Created by bot id: {by}."
+    # Fallback gdy harness wysłał tylko id bez ctx — i tak ma wiedzieć że to nie user.
+    return f"""
+
+## Creation context
+
+<!-- {_CREATION_MARKER} -->
+
+{body}
+
+If you were just created by another bot, your first task is what your creator asked for when creating you — read your agent mail (read_bot_mail), recent context and memory (recall, read_memory) for that request and start there immediately, even if your profile description is short. Do not wait for the user to repeat the task; the creation message plus your role keywords is your brief. Deduce intent from your name/title when description is brief.
+"""
 
 
 def data_dir() -> Path:
@@ -184,7 +221,7 @@ def profile_dir(bot_id: str) -> Path:
 def _write(bot: dict) -> None:
     d = profile_dir(bot["id"])
     (d / "SOUL.md").write_text(
-        _SOUL.format(**bot) + _MULTIBOT_IDENTITY + _ROUTINE_IDENTITY + _COMPUTER_IDENTITY + _FILES_IDENTITY,
+        _SOUL.format(**bot) + _MULTIBOT_IDENTITY + _ROUTINE_IDENTITY + _COMPUTER_IDENTITY + _WEB_IDENTITY + _FILES_IDENTITY + _creation_block(bot),
         encoding="utf-8",
     )
     (d / "bot.json").write_text(json.dumps(bot, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -226,12 +263,24 @@ def ensure_multibot_identity(bot_id: str) -> None:
             content = _replace_computer_block(content, _COMPUTER_IDENTITY)
         else:
             additions += _COMPUTER_IDENTITY
+    if _WEB_MARKER not in content:
+        additions += _WEB_IDENTITY
+    # multibot: bot stworzony przez innego bota — dopisz kontekst creation jeśli
+    # profil ma te pola a SOUL jeszcze nie ma markera (np. harness proaktywnie
+    # założył profil z creationContext, a SOUL był migrowany).
+    if _CREATION_MARKER not in content:
+        try:
+            b = get_bot(bot_id)
+            if b and (b.get("createdByBotId") or b.get("creationContext")):
+                additions += _creation_block(b)
+        except Exception:
+            pass
     if additions:
         content = content.rstrip() + additions
     path.write_text(content, encoding="utf-8")
 
 
-def create_bot(bot_id: str, name: str, title: str = "", description: str = "") -> dict:
+def create_bot(bot_id: str, name: str, title: str = "", description: str = "", createdByBotId: str | None = None, creationContext: str | None = None) -> dict:
     profile_dir(bot_id)  # walidacja przed jakimkolwiek efektem ubocznym
     # `create_profile()` kotwiczy się na `get_default_hermes_root()`, które czyta
     # WYŁĄCZNIE env `HERMES_HOME` (nie contextvar `set_hermes_home_override`).
@@ -253,6 +302,8 @@ def create_bot(bot_id: str, name: str, title: str = "", description: str = "") -
         "title": title,
         "description": description,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        **({"createdByBotId": createdByBotId} if createdByBotId else {}),
+        **({"creationContext": creationContext} if creationContext else {}),
     }
     _write(bot)  # nadpisuje domyślny SOUL.md Hermesa naszym, z tożsamością bota
     return bot
@@ -281,7 +332,7 @@ def update_bot(bot_id: str, **fields) -> dict:
         raise ValueError(f"invalid autonomy: {fields['autonomy']!r} (oczekiwane {AUTONOMY})")
     bot.update(
         {k: v for k, v in fields.items()
-         if k in ("name", "title", "description", "avatar", "autonomy")}
+         if k in ("name", "title", "description", "avatar", "autonomy", "createdByBotId", "creationContext")}
     )
     _write(bot)  # SOUL.md odtwarzany razem z bot.json — inaczej zostaje nieaktualna tożsamość
     return bot

@@ -24,7 +24,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { approvalRule } from "../approval-rules.ts";
-import { NATIVE_DIR, loadConfig } from "../config.ts";
+import { DATA_DIR, NATIVE_DIR, loadConfig } from "../config.ts";
 import { EngineUnavailableError, ensureEngine, engineBaseUrl } from "../engine/supervisor.ts";
 import { connectors as customConnectors } from "../mcp-connectors.ts";
 import { engineSpec } from "../mcp-servers.ts";
@@ -144,14 +144,42 @@ export const SlafyDriver: ProviderDriver<SlafyConfig> = {
       createdAt: new Date().toISOString(),
     });
 
+    // multibot: bot stworzony przez innego bota — fallback gdy proaktywny
+    // sync z index.ts nie doszedł (silnik offline w chwili stworzenia).
+    // Odczyt z harnessowego bots.json jest tani i nie wymaga importu Store
+    // (cykl). Graceful: brak pliku / parsowania = brak wstrzyknięcia.
+    const harnessCreationForThread = (threadId: string): Record<string, string> | null => {
+      try {
+        const dir = process.env.OMB_DATA_DIR?.trim() || DATA_DIR;
+        const raw = readFileSync(join(dir, "bots.json"), "utf8");
+        const list = JSON.parse(raw) as Array<Record<string, unknown>>;
+        const hit = list.find((b) => b.threadId === threadId) as Record<string, unknown> | undefined;
+        if (!hit) return null;
+        const out: Record<string, string> = {};
+        if (typeof hit.name === "string" && hit.name.trim()) out.name = hit.name.trim();
+        if (typeof hit.title === "string" && hit.title.trim()) out.title = hit.title.trim();
+        if (typeof hit.description === "string" && hit.description.trim()) out.description = hit.description.trim();
+        if (typeof hit.createdByBotId === "string" && hit.createdByBotId.trim()) out.createdByBotId = hit.createdByBotId.trim();
+        if (typeof hit.creationContext === "string" && hit.creationContext.trim()) out.creationContext = hit.creationContext.trim();
+        return Object.keys(out).length ? out : null;
+      } catch {
+        return null;
+      }
+    };
+    const syncedCreation = new Set<string>();
+
     /** Bot silnika zakładany leniwie, przy pierwszym użyciu wątku. */
     const ensureBot = async (baseUrl: string, threadId: string) => {
       const botId = engineBotId(threadId);
       if (!ensuredBots.has(botId)) {
+        const harness = harnessCreationForThread(threadId);
+        const payload: Record<string, unknown> = harness
+          ? { id: botId, name: harness.name ?? botId, ...(harness.title ? { title: harness.title } : {}), ...(harness.description ? { description: harness.description } : {}), ...(harness.createdByBotId ? { createdByBotId: harness.createdByBotId } : {}), ...(harness.creationContext ? { creationContext: harness.creationContext } : {}) }
+          : { id: botId, name: botId };
         const res = await fetch(`${baseUrl}/api/bots`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ id: botId, name: botId }),
+          body: JSON.stringify(payload),
           signal: AbortSignal.timeout(30_000),
         });
         // 409 = bot już jest (restart harnessu, ten sam wątek) — to sukces, nie błąd.
@@ -159,6 +187,36 @@ export const SlafyDriver: ProviderDriver<SlafyConfig> = {
           throw new Error(`engine POST /api/bots → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
         }
         ensuredBots.add(botId);
+        // 409 + harness ma creationContext którego silnik jeszcze nie zna — patch
+        if (res.status === 409 && harness && (harness.createdByBotId || harness.creationContext) && !syncedCreation.has(botId)) {
+          try {
+            await fetch(`${baseUrl}/api/bots/${encodeURIComponent(botId)}`, {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...(harness.name ? { name: harness.name } : {}), ...(harness.title ? { title: harness.title } : {}), ...(harness.description ? { description: harness.description } : {}), ...(harness.createdByBotId ? { createdByBotId: harness.createdByBotId } : {}), ...(harness.creationContext ? { creationContext: harness.creationContext } : {}) }),
+              signal: AbortSignal.timeout(10_000),
+            });
+            syncedCreation.add(botId);
+          } catch {
+            // graceful — prompt z harnessu i tak dowiezie kontekst dla CLI
+          }
+        }
+        if (res.ok && harness && (harness.createdByBotId || harness.creationContext)) syncedCreation.add(botId);
+      } else {
+        // Bot już zapewniony wcześniej, ale może harness dopiero dopisał creationContext
+        // (np. proaktywny sync index.ts nie zdążył). Jednorazowy patch.
+        const harness = harnessCreationForThread(threadId);
+        if (harness && (harness.createdByBotId || harness.creationContext) && !syncedCreation.has(botId)) {
+          try {
+            await fetch(`${baseUrl}/api/bots/${encodeURIComponent(botId)}`, {
+              method: "PATCH",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ ...(harness.createdByBotId ? { createdByBotId: harness.createdByBotId } : {}), ...(harness.creationContext ? { creationContext: harness.creationContext } : {}) }),
+              signal: AbortSignal.timeout(10_000),
+            });
+            syncedCreation.add(botId);
+          } catch {}
+        }
       }
       // multibot (G1): push every turn. Two custom instances can target the
       // same engine bot, so either one may have changed its provider last.

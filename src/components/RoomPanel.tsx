@@ -89,7 +89,7 @@ export function RoomPanel() {
                 <Fragment key={bot.id}>
                   {i > 0 && <ArrowLeftRight size={14} className="shrink-0 text-ink-secondary" />}
                   <span className="flex min-w-0 items-center gap-1.5">
-                    <MausAvatar color={bot.color} shape={bot.mascotShape} state={stateForBot(bot)} size={24} animated={false} />
+                    <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={stateForBot(bot)} size={24} animated={false} />
                     <span className="truncate text-[15px] font-semibold text-ink">{botDisplayName(bot, polish ? "pl" : "en")}</span>
                   </span>
                 </Fragment>
@@ -168,7 +168,7 @@ export function RoomPanel() {
                         title={polish ? `Otwórz czat ${nameOf(entry.from)}` : `Open ${nameOf(entry.from)}'s chat`}
                       >
                         {entryBot && (
-                          <MausAvatar color={entryBot.color} shape={entryBot.mascotShape} state={stateForBot(entryBot)} size={28} animated={false} />
+                          <MausAvatar color={entryBot.color} avatarUrl={entryBot.avatarUrl} shape={entryBot.mascotShape} state={stateForBot(entryBot)} size={28} animated={false} />
                         )}
                         <span className="text-[12.5px] font-semibold text-accent">{nameOf(entry.from)}</span>
                       </button>

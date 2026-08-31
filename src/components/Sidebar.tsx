@@ -356,7 +356,7 @@ function BotHoverCard({ bot, top, left }: { bot: Bot; top: number; left: number 
       className="pointer-events-none fixed z-50 w-72 rounded-xl border border-hairline/50 bg-card p-3 shadow-2xl shadow-black/60"
     >
       <div className="flex items-center gap-2">
-        <MausAvatar color={bot.color} shape={bot.mascotShape} state={stateForBot(bot)} size={28} />
+        <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={stateForBot(bot)} size={28} />
         {/* godzina na wysokości nazwy; flex-1 na nazwie trzyma ją przy prawej
             krawędzi kafelka (ta sama oś X co wcześniej) */}
         <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{botDisplayName(bot, lang)}</span>
@@ -418,7 +418,7 @@ function BotListItem({
       )}
     >
       <MausAvatar
-        color={bot.color}
+        color={bot.color} avatarUrl={bot.avatarUrl}
         shape={bot.mascotShape}
         state={busyMotion?.state ?? stateForBot(bot)}
         size={48}
@@ -744,7 +744,7 @@ function GroupsSection({
             {g.bot_ids.slice(0, 3).map((engineId) => {
               const member = bots.find((b) => `mb-${b.threadId}` === engineId);
               return member ? (
-                <MausAvatar key={engineId} color={member.color} shape={member.mascotShape} state={stateForBot(member)} size={20} />
+                <MausAvatar key={engineId} color={member.color} avatarUrl={member.avatarUrl} shape={member.mascotShape} state={stateForBot(member)} size={20} />
               ) : (
                 <Users key={engineId} size={14} className="shrink-0 text-ink-secondary" />
               );
@@ -1201,7 +1201,7 @@ export function Sidebar() {
                     )}
                   >
                     <MausAvatar
-                      color={b.color}
+                      color={b.color} avatarUrl={b.avatarUrl}
                       shape={b.mascotShape}
                       state={b.busy ? busyMascotMotion(b.id).state : stateForBot(b)}
                       size={avatarSize}

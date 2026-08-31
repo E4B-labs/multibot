@@ -94,6 +94,8 @@ export interface BotRecord {
   mascotExpression?: MausExpression | null;
   /** Optional silhouette from the built-in mascot icon set. */
   mascotShape?: MascotShape;
+  /** Custom avatar photo (data URL or /api/bots/:id/avatar URL). Circular crop. */
+  avatarUrl?: string | null;
   /** Team visibility. Missing legacy values behave as team-visible. */
   visibility?: "public" | "team" | "private";
   /** Firebase UID of creator; legacy bots have no owner and stay team-visible. */
@@ -133,6 +135,12 @@ export interface BotRecord {
    * `/model --once X` albo sama fraza "użyj modelu X" bez zadania; konsumowany
    * i czyszczony przy najbliższej wiadomości. Nie zmienia `modelSelection`. */
   pendingModelOverride?: string | null;
+  /** multibot: bot stworzony przez innego bota — kto i po co go powołał.
+   *  Opcjonalne, więc stare zapisy czytają się bez migracji; brak = bot od usera. */
+  createdByBotId?: string | null;
+  /** multibot: intencja twórcy — np. "Stworzony przez bota X do zadania Y".
+   *  To jest kontekst wstrzykiwany do system prompt nowego bota. */
+  creationContext?: string | null;
   createdAt: number;
 }
 

@@ -471,7 +471,7 @@ export function Composer({ bot }: { bot: Bot }) {
         label: botDisplayName(peer, polish ? "pl" : "en"),
         hint: peer.id === bot.id ? (polish ? "Bieżący" : "Current") : (polish ? "Przełącz" : "Switch to bot"),
         kind: "agent" as const,
-        icon: <MausAvatar color={peer.color} shape={peer.mascotShape} state={normalizeState(peer.mascotExpression) ?? "happy"} size={20} />,
+        icon: <MausAvatar color={peer.color} avatarUrl={peer.avatarUrl} shape={peer.mascotShape} state={normalizeState(peer.mascotExpression) ?? "happy"} size={20} />,
         run: () => dispatch({ type: "select", id: peer.id }),
       })),
       ...(slashRoutines?.rows ?? []).map((routine) => ({
@@ -890,7 +890,7 @@ export function Composer({ bot }: { bot: Bot }) {
         <div className={cn("relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5", !peerChat && "md:mt-[48px]")}>
         {/* Desktop agent avatar: 40 px (zmniejszone z 60 per 0.1.58), no frame, anchored above Attach. */}
         <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
-          <MausAvatar color={bot.color} shape={bot.mascotShape} state={busyMotion?.state ?? normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={40} motion={busyMotion?.motion ?? "none"} motionKey={busyMotion ? 1 : 0} animated />
+          <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={busyMotion?.state ?? normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={40} motion={busyMotion?.motion ?? "none"} motionKey={busyMotion ? 1 : 0} animated />
         </div>
         <button
           type="button"

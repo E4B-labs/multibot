@@ -19,20 +19,20 @@ describe("skala prawego panelu i czatu", () => {
   });
 
   it("awatar na górze panelu jest przyciskiem odsłaniającym wygląd", () => {
-    expect(panel).toContain("setAppearanceOpen");
-    expect(panel).toContain("aria-expanded={appearanceOpen}");
+    expect(panel).toContain("setAppearanceMode");
+    expect(panel).toContain("aria-expanded={appearanceMode !== \"closed\"}");
     // siatki kształtu i koloru wchodzą dopiero za tym warunkiem
-    expect(panel).toContain("{appearanceOpen && (");
+    expect(panel).toContain("{appearanceMode !== \"closed\" && (");
     const grids = panel.indexOf("MASCOT_SHAPES.map");
-    const guard = panel.indexOf("{appearanceOpen && (");
+    const guard = panel.indexOf("{appearanceMode !== \"closed\" && (");
     expect(guard).toBeGreaterThan(-1);
     expect(grids).toBeGreaterThan(guard);
   });
 
   it("filtr szukajki wie o rozwijanej karcie wyglądu", () => {
-    // Bez `appearanceOpen` w zależnościach karta rozwinięta przy aktywnym
+    // Bez `appearanceMode` w zależnościach karta rozwinięta przy aktywnym
     // szukaniu ominęłaby filtr i została na ekranie.
-    expect(panel).toContain("[query, appearanceOpen]");
+    expect(panel).toContain("[query, appearanceMode]");
   });
 
   it("nic w panelu nie jest już większe niż 14 px", () => {

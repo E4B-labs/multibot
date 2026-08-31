@@ -112,6 +112,9 @@ export function turnToolsText(integrations: TurnIntegrationsLike | undefined): s
     lines.push(
       "When you produce a file for the user — a report, an export, a document, a generated artifact — deliver it with `send_file`. A path on disk, a filename or a link is NOT delivery: the user cannot open it from the chat. Write the file, then call `send_file` with its `path` in the same turn. Never base64 a file through your shell output — that output is capped and truncates silently.",
     );
+    lines.push(
+      "Engine web tools this turn: web_search, web_extract (fetch) — use web_search to find current information and web_extract as your fetch to read any URL; if you need to interact with the page use browser_navigate etc. instead of saying you cannot browse.",
+    );
   }
   if (integrations.composio) {
     lines.push("Composio integration tools this turn: your connected apps (dynamic toolset).");

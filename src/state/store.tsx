@@ -84,6 +84,7 @@ export interface Bot {
   color: MausColor;
   mascotExpression?: string | null;
   mascotShape?: MascotShape;
+  avatarUrl?: string | null;
   visibility?: "public" | "team" | "private";
   ownerId?: string;
   allowedUserIds?: string[];
@@ -275,7 +276,7 @@ type Action =
       patch: Partial<
         Pick<
           Bot,
-          "name" | "title" | "description" | "notifications" | "color" | "mascotExpression" | "mascotShape" | "pinned" | "hidden" | "chiefOfStaff" | "composioAccounts"
+          "name" | "title" | "description" | "notifications" | "color" | "mascotExpression" | "mascotShape" | "avatarUrl" | "pinned" | "hidden" | "chiefOfStaff" | "composioAccounts"
         >
         // multibot: sekcja dopuszcza null — JSON.stringify wycina undefined,
         // a null musi dolecieć do serwera, żeby wyczyścić pole.
@@ -675,7 +676,8 @@ function reducer(state: AppState, action: Action): AppState {
       const mascotChanged =
         Object.prototype.hasOwnProperty.call(action.patch, "color") ||
         Object.prototype.hasOwnProperty.call(action.patch, "mascotExpression") ||
-        Object.prototype.hasOwnProperty.call(action.patch, "mascotShape");
+        Object.prototype.hasOwnProperty.call(action.patch, "mascotShape") ||
+        Object.prototype.hasOwnProperty.call(action.patch, "avatarUrl");
       const next = mascotChanged
         ? withMascotMotion(state, action.botId, "customize")
         : state;

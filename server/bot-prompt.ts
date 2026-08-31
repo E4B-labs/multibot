@@ -27,6 +27,8 @@ interface BotLike {
   chiefOfStaff?: boolean;
   composioAccounts?: Record<string, string>;
   visibility?: "public" | "team" | "private";
+  createdByBotId?: string | null;
+  creationContext?: string | null;
 }
 
 /** Strukturalny widok na WorkspaceStore — test podstawia własną atrapę. */
@@ -149,6 +151,24 @@ export function botSystemPrompt(
     isolated && "You are answering in a shared group room. Use only this room's conversation as context.",
   ].filter(Boolean).join("\n");
 
+  // multibot: bot stworzony przez innego bota ma wiedzieć kto i po co go powołał.
+  // To jest DRUGA ścieżka promptu (harness → drivery CLI). Driver slafy dostaje
+  // tożsamość z engine/server/bots.py — tam ląduje ten sam kontekst via SOUL.md.
+  // Graceful: brak pól = bot od usera, zero wstrzyknięcia.
+  const creationBlock = (() => {
+    if (!bot.createdByBotId && !bot.creationContext) return "";
+    const creatorName = (o.roster ?? []).find((b) => b.id === bot.createdByBotId)?.name;
+    const creatorLabel = creatorName ? `@${creatorName} (id: ${bot.createdByBotId})` : bot.createdByBotId ? `id: ${bot.createdByBotId}` : "another bot";
+    const ctx = (bot.creationContext ?? "").trim().slice(0, 2000);
+    if (bot.createdByBotId && ctx) {
+      return `# Creation context\nYou were created by ${creatorLabel} for this task: "${ctx}". This assignment is your first priority — begin it right away. Do not ask "who am I" or wait for the user to repeat it; your name is ${bot.name}${bot.title ? `, role: ${bot.title}` : ""} and the creation task plus your profile keywords are your brief. Infer intent from name/title when description is brief, and check your inbox (read_bot_mail) and memory (recall, read_memory) for the original request. If you were just created by another bot, your first task is what your creator asked for when creating you — read your agent mail, recent context and memory for that request and start there immediately, even if your description is short.`;
+    }
+    if (ctx) {
+      return `# Creation context\nYou were created to handle this task: "${ctx}". Start it immediately — do not ask who you are; your profile and task are your brief. If you were just created by another bot, read your agent mail (read_bot_mail) and memory (recall, read_memory) for that request and start immediately.`;
+    }
+    return `# Creation context\nYou were created by ${creatorLabel}. Your creator's intent is in your name/title/description — start that work immediately, checking mail (read_bot_mail) and memory if needed. Do not ask who you are.`;
+  })();
+
   // multibot (A2): bot ma OD RAZU wiedzieć, jakie narzędzia faktycznie
   // dostał w tej turze — wyliczenie trafia do promptu systemowego.
   const toolsText = turnToolsText(integrations);
@@ -190,6 +210,7 @@ export function botSystemPrompt(
     // search pokazuje namespaces, nie pojedyncze narzędzia).
     computer &&
       "To open a URL call navigate(url) — prefer it over shell commands. The shell tools you may also have (bash, exec_command, run_command) run on the HOST machine, never inside your computer; for anything on the computer use only the computer tools (navigate, screenshot, read_page, click, move, type_text, key, scroll, status, computer_exec). If a computer tool is not visible, search for it in the mcp__computer tool namespace.",
+    "Web search and fetch — you have `web_search(query)` to search the internet and `web_extract(url)` to fetch and read a page (this is your `fetch`). Use them for any question needing current information, documentation, or URL content. If you need to interact with the page, use your computer's `browser_navigate`/`browser_snapshot` etc. instead of saying you cannot browse. Budget ~25 tool steps: try web search first, then computer, then CLI tools; say what blocked you only after all are exhausted.",
     integrations.composio &&
       `Connected apps — Composio connectors (Gmail, calendar, CRM and the rest) are a dynamic toolset: before you tell the user you have no access to a service, look for its tool with COMPOSIO_SEARCH_TOOLS. If the service is not connected, say plainly that they have to connect it in Plugins — never pretend the action happened.${bot.composioAccounts && Object.keys(bot.composioAccounts).length ? ` This bot's selected connected accounts are ${JSON.stringify(bot.composioAccounts)}; pass matching connected_account_id when a Composio tool supports it.` : ""}`,
     agents &&
@@ -242,6 +263,6 @@ export function botSystemPrompt(
     + currentTimeLine(o.now ?? new Date(), o.timeZone) + "\n"
     + environmentLine(agents);
 
-  return ([who, have, how, environment, chief, knowledge, peers]
+  return ([who, creationBlock, have, how, environment, chief, knowledge, peers]
     .filter(Boolean).join("\n\n") + taggedReplies).replace(/[—–]/g, "-");
 }

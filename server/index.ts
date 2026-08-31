@@ -2693,9 +2693,30 @@ const server = createServer(async (req, res) => {
             }
             const created = store.createBot({ temporary: body.temporary === true });
             const selection = bootSelection;
-            const updated = store.patchBot(created.id, { name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), modelSelection: selection, ownerId: caller.ownerId, visibility: caller.visibility === "private" ? "private" : "team", ...(caller.chiefOfStaff ? { section: caller.section } : {}) });
+            const creator = store.bot(fromBotId);
+            const rawIntent = String(body.description ?? body.title ?? body.name ?? "").trim().slice(0, 2000);
+            const creationContext = rawIntent
+              ? `Stworzony przez bota ${creator?.name ?? fromBotId} (id: ${fromBotId}) do zadania: ${rawIntent}. Twoim pierwszym zadaniem jest to zadanie — zacznij od razu, nie pytaj kim jesteś.`
+              : `Stworzony przez bota ${creator?.name ?? fromBotId} (id: ${fromBotId}). Sprawdź swój profil (name/title/description) i skrzynkę (read_bot_mail) — to jest Twoje zadanie. Zacznij od razu, nie pytaj kim jesteś.`;
+            const updated = store.patchBot(created.id, { name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), modelSelection: selection, ownerId: caller.ownerId, visibility: caller.visibility === "private" ? "private" : "team", ...(caller.chiefOfStaff ? { section: caller.section } : {}), createdByBotId: fromBotId, creationContext });
+            console.log(`[multibot] bot ${created.id} (${String(body.name ?? created.name)}) created by bot ${fromBotId} (${creator?.name ?? "unknown"}) — intent: ${rawIntent.slice(0, 120)}`);
             if (access === "full") workspace.setAccess(created.id, "full");
             broadcast({ kind: "bot", bot: updated });
+            if (!engineDisabled()) {
+              void ensureEngine().then(async (baseUrl) => {
+                try {
+                  const engineBotId = engineBotIdFor(created.threadId);
+                  const payload = { id: engineBotId, name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), createdByBotId: fromBotId, creationContext };
+                  const r = await fetch(`${baseUrl}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(5000) });
+                  if (!r.ok && r.status !== 409) throw new Error(`engine create ${r.status}`);
+                  if (r.status === 409) {
+                    await fetch(`${baseUrl}/api/bots/${encodeURIComponent(engineBotId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: payload.name, title: payload.title, description: payload.description, createdByBotId: fromBotId, creationContext }), signal: AbortSignal.timeout(5000) }).catch(() => {});
+                  }
+                } catch (e) {
+                  console.warn(`[multibot] engine sync for created bot ${created.id} failed (graceful):`, e instanceof Error ? e.message : String(e));
+                }
+              }).catch(() => {});
+            }
             return json(res, 201, updated);
           }
           case "agent.update": {
@@ -3206,8 +3227,16 @@ const server = createServer(async (req, res) => {
         if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
       }
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "color", "mascotExpression", "mascotShape", "pinned", "hidden", "composioAccounts"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "color", "mascotExpression", "mascotShape", "pinned", "hidden", "composioAccounts", "avatarUrl"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+      // avatarUrl validation — allow data: URL or /api/bots/:id/avatar path, max 500KB string (covers 512x512 webp base64 ~100KB)
+      if (patch.avatarUrl !== undefined) {
+        if (patch.avatarUrl !== null && typeof patch.avatarUrl !== "string") return json(res, 400, { error: "avatarUrl must be a string or null" });
+        if (typeof patch.avatarUrl === "string" && patch.avatarUrl.length > 700_000) return json(res, 413, { error: "avatar image too large (max ~500KB)" });
+        if (typeof patch.avatarUrl === "string" && patch.avatarUrl.length > 0 && !patch.avatarUrl.startsWith("data:image/") && !patch.avatarUrl.startsWith("/api/bots/") && !patch.avatarUrl.startsWith("http")) {
+          return json(res, 400, { error: "avatarUrl must be data:image/* or /api/bots/... URL" });
+        }
       }
       if (body.composioAccounts !== undefined) {
         if (!body.composioAccounts || typeof body.composioAccounts !== "object" || Array.isArray(body.composioAccounts)) return json(res, 400, { error: "composioAccounts must be an object" });
@@ -3296,6 +3325,40 @@ const server = createServer(async (req, res) => {
           "x-content-type-options": "nosniff",
           "cache-control": "private, max-age=31536000, immutable",
         });
+        return res.end(bytes);
+      }
+      return json(res, 405, { error: "method not allowed" });
+    }
+
+    // multibot: custom avatar photo — circular crop, stored as data URL in bots.json (≤500KB)
+    m = path.match(/^\/api\/bots\/([\w-]+)\/avatar$/);
+    if (m) {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (method === "POST") {
+        const body = await readBody(req);
+        const image = String(body.image ?? body.avatarUrl ?? "").trim();
+        if (!image) return json(res, 422, { error: "image required (data:image/* base64)" });
+        if (image.length > 700_000) return json(res, 413, { error: "avatar image too large (max ~500KB)" });
+        if (!image.startsWith("data:image/")) return json(res, 422, { error: "image must be data:image/* URL" });
+        const updated = store.patchBot(bot.id, { avatarUrl: image });
+        broadcast({ kind: "bot", bot: updated });
+        return json(res, 200, { bot: updated });
+      }
+      if (method === "DELETE") {
+        const updated = store.patchBot(bot.id, { avatarUrl: null });
+        broadcast({ kind: "bot", bot: updated });
+        return json(res, 200, { bot: updated });
+      }
+      if (method === "GET") {
+        const avatar = bot.avatarUrl;
+        if (!avatar || !avatar.startsWith("data:image/")) return json(res, 404, { error: "no avatar" });
+        // legacy: if avatar is data URL, decode and serve as image
+        const match = avatar.match(/^data:(image\/[a-z0-9+.-]+);base64,(.*)$/i);
+        if (!match) return json(res, 404, { error: "no avatar" });
+        const mime = match[1].toLowerCase();
+        const bytes = Buffer.from(match[2], "base64");
+        res.writeHead(200, { "content-type": mime, "content-length": String(bytes.length), "cache-control": "private, max-age=3600" });
         return res.end(bytes);
       }
       return json(res, 405, { error: "method not allowed" });
