@@ -54,8 +54,12 @@ export interface AcpSupport {
   loginNote: string;
   /** CLI argv AFTER the binary name to enter ACP stdio mode. */
   spawnArgs(config: AcpConfig, turn: SendTurnInput): string[];
-  /** Mutate the child env in place (e.g. strip a key). Optional. */
-  transformEnv?(env: Record<string, string | undefined>): void;
+  /** Mutate child env in place (e.g. strip a key). Optional. */
+  transformEnv?(env: Record<string, string | undefined>, turn?: SendTurnInput): void;
+  /** Refresh mutable model catalog before registry.describe(). Optional. */
+  refreshModels?(): Promise<void>;
+  /** Reject a turn before spawning child process. Optional. */
+  validateTurn?(turn: SendTurnInput, env: Record<string, string | undefined>): void;
   /** Pick the ACP authenticate methodId from initialize's advertised
    * authMethods; return null to skip the authenticate step. */
   pickAuthMethod(authMethods: Array<{ id?: string }>): string | null;
@@ -119,13 +123,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         createdAt: new Date().toISOString(),
       });
 
-      const childEnv = () => {
+      const childEnv = (turn?: SendTurnInput) => {
         const env: Record<string, string | undefined> = {
           ...process.env,
           ...input.environment,
           PATH: augmentedPath(),
         };
-        support.transformEnv?.(env);
+        support.transformEnv?.(env, turn);
         return env;
       };
 
@@ -199,7 +203,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (active.has(threadId)) throw new Error("a turn is already running on this thread");
         const turnId = newId();
         const cwd = turn.cwd ?? config.workspace ?? homedir();
-        const env = childEnv();
+        const env = childEnv(turn);
+        support.validateTurn?.(turn, env);
         const mcpServers = acpMcpServers(turn);
         const policy = turnPolicy(threadId);
         const effectiveConfig = policy
@@ -542,6 +547,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
 
       const snapshot = async (): Promise<ProviderSnapshot> => {
+        await support.refreshModels?.();
         const env = childEnv();
         const version = await new Promise<string | null>((resolve) => {
           const cli = resolveCliSpawn(config.cli, ["--version"]); // multibot

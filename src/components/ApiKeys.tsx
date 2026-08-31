@@ -7,7 +7,7 @@ import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useLanguage } from "@/lib/language";
 
-export type ConfigSection = "composio" | "composioApi" | "box";
+export type ConfigSection = "composio" | "composioApi" | "box" | "opencode";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -19,6 +19,7 @@ const SECTIONS: Record<
     flag: (c) => c.composio.apiKeyConfigured ?? false,
   },
   box: { body: (v) => ({ box: { token: v } }), flag: (c) => c.box.configured },
+  opencode: { body: (v) => ({ opencode: { key: v } }), flag: (c) => c.opencode?.configured ?? false },
 };
 
 export function ApiKeyRow({

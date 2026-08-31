@@ -9,6 +9,7 @@ describe("instanceConfigs", () => {
     const cfg: AppConfig = {
       instances: {
         codex: { driver: "codex", enabled: false },
+        opencodeGo: { driver: "slafy", environment: { OPENAI_API_KEY: "legacy-value" } },
         local: {
           driver: "slafy",
           displayName: "Local Qwen",
@@ -20,8 +21,10 @@ describe("instanceConfigs", () => {
 
     const fleet = instanceConfigs(cfg);
     expect(Object.keys(fleet)).toEqual(
-      expect.arrayContaining(["grok", "gemini", "kimi", "qwen", "claude", "codex", "local"]),
+      expect.arrayContaining(["grok", "gemini", "kimi", "qwen", "claude", "codex", "opencode", "local"]),
     );
+    expect(fleet.opencodeGo).toBeUndefined();
+    expect(fleet.opencode.environment?.OPENCODE_API_KEY).toBe("legacy-value");
     expect(fleet.slafy).toBeUndefined();
     expect(fleet.codex.enabled).toBe(false);
     expect(fleet.local).toMatchObject({
@@ -69,6 +72,16 @@ describe("saveConfig: ustawienia aplikacji", () => {
     saveConfig({ autoVerify: { enabled: true, rules: [{ id: "a", when: "jeden", decision: "allow" }] } });
     saveConfig({ autoVerify: { enabled: false, rules: [] } });
     expect(loadConfig().autoVerify).toEqual({ enabled: false, rules: [] });
+  });
+
+  it("utrwala wspólny klucz OpenCode bez zmiany kształtu instancji", () => {
+    ensureDirs();
+    saveConfig({ opencode: { key: "configured-value" } });
+    const disk = JSON.parse(readFileSync(join(DATA_DIR, "config.json"), "utf8"));
+    expect(disk.opencode).toEqual({ key: "configured-value" });
+    expect(instanceConfigs({ opencode: { key: "configured-value" } }).opencode.environment).toEqual({
+      OPENCODE_API_KEY: "configured-value",
+    });
   });
 });
 

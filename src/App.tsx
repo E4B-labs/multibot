@@ -110,9 +110,17 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   };
   const configured = status?.server?.configured ?? false;
   const field = "mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[14px] text-ink outline-none focus:border-hairline";
+  const backToOnboarding = () => {
+    const useLocalHost = window.ogb?.useLocalHost;
+    if (useLocalHost) void useLocalHost();
+    else window.history.back();
+  };
   return (
     <main className="multibot-login flex h-full min-h-screen items-center justify-center bg-app px-5 text-ink">
       <form onSubmit={(event) => { event.preventDefault(); void submit(); }} className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-xl">
+        <button type="button" onClick={backToOnboarding} className="mb-4 text-left text-[12px] text-ink-secondary hover:text-ink">
+          ← {polish ? "Wstecz" : "Back"}
+        </button>
         <h1 className="text-[18px] font-semibold">{configured ? (polish ? "Zaloguj się do serwera" : "Sign in to server") : polish ? "Utwórz serwer" : "Create server"}</h1>
         <p className="mt-1 text-[13px] text-ink-secondary">{status?.server?.name ?? (polish ? "Bezpieczny wspólny workspace" : "Secure shared workspace")}</p>
         {mode === "host" && <input value={serverName} onChange={(event) => setServerName(event.target.value)} placeholder={polish ? "Nazwa serwera" : "Server name"} aria-label="Server name" className={field} autoFocus />}

@@ -81,6 +81,13 @@ export const CLI_TOOLS: readonly CliToolMetadata[] = [
     loginHint: "W CLI wpisz /auth → Alibaba ModelStudio → Coding Plan.",
     install: { command: "npm", args: ["install", "-g", "@qwen-code/qwen-code@latest"] },
   },
+  {
+    id: "opencode",
+    driverKind: "opencode",
+    displayName: "OpenCode",
+    install: { command: "npm", args: ["install", "-g", "opencode-ai@latest"] },
+    loginHint: "OpenCode Go needs a shared API key; free OpenCode Zen models need no key in MultiBot.",
+  },
 ] as const;
 
 export const installCommandText = (install: CliInstall | undefined) =>

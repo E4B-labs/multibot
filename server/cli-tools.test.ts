@@ -16,6 +16,10 @@ describe("CLI tool metadata", () => {
       loginMode: "device",
     });
     expect(byId.grok.install).toBeUndefined();
+    expect(byId.opencode).toMatchObject({
+      driverKind: "opencode",
+      install: { command: "npm", args: ["install", "-g", "opencode-ai@latest"] },
+    });
     for (const tool of CLI_TOOLS) {
       expect(installCommandText(tool.install) ?? "").not.toMatch(/\b(?:sudo|runas)\b/i);
     }

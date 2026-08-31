@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld("ogb", {
    * with the page — that's expected. */
   addRemoteHost: (url) =>
     ipcRenderer.invoke("hosts:add-remote", { url }).then((host) => ipcRenderer.invoke("hosts:use-host", host.id)),
+  useLocalHost: () => ipcRenderer.invoke("hosts:use-local"),
 
   /** Unread-conversation count for the taskbar badge (Windows overlay icon,
    * macOS/Linux dock badge). Fire-and-forget; dormant in plain browsers. */

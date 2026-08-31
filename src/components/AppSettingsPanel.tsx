@@ -1122,6 +1122,11 @@ export function AppSettingsPanel() {
                     : "Shared by all bots. Saving a key reloads providers instantly; keys are stored locally and never shown again."}
                 </div>
                 <div className="mt-4 flex flex-col gap-4">
+                  <ApiKeyRow
+                    section="opencode"
+                    label="OpenCode Go API key"
+                    placeholder="Wklej klucz OpenCode Go"
+                  />
                   <ApiKeyRow section="composio" label="Composio Connect key" placeholder="ck_…" />
                   <ApiKeyRow
                     section="composioApi"

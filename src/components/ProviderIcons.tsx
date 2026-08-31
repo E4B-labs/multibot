@@ -65,6 +65,14 @@ export function QwenMark({ size = 16, className }: IconProps) {
   return <img src={qwenLogo} width={size} height={size} alt="Qwen" className={cn("rounded-full", className)} />;
 }
 
+export function OpenCodeMark({ size = 16, className }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={cn("fill-none stroke-current", className)} aria-label="OpenCode">
+      <path d="M8.2 4.5 3.5 12l4.7 7.5M15.8 4.5l4.7 7.5-4.7 7.5M13.5 3.5 10.5 20.5" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function LocalMark(props: IconProps) {
   return <BadgeMark {...props} label="L" tone="bg-emerald-500 text-white" />;
 }
@@ -84,6 +92,8 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <KimiMark size={size} className={className} />;
     case "qwenAgent":
       return <QwenMark size={size} className={className} />;
+    case "opencode":
+      return <OpenCodeMark size={size} className={className} />;
     case "boxAgent":
       return <ComputerMark size={size} className={className} />;
     case "slafy":

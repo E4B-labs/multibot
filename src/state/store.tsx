@@ -109,6 +109,7 @@ export interface Bot {
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
   xai?: { configured: boolean };
+  opencode?: { configured: boolean };
   composio: { configured: boolean; apiKeyConfigured?: boolean };
   box: { configured: boolean };
   /** strefa czasowa bota; pusty ciąg albo brak = wykryj z systemu */
@@ -130,7 +131,7 @@ export interface InstanceInfo {
     authenticated?: boolean;
     version?: string | null;
   };
-  models: { default: string; options: Array<{ id: string; label: string }> };
+  models: { default: string; options: Array<{ id: string; label: string }>; updatedAt?: string };
 }
 
 // multibot: F9-FE — grupa silnika (engine `groups.py`): {id, name, bot_ids}.
@@ -989,6 +990,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     const sessionReady = getAuthMode() === "v2" ? ensureBrowserSession() : Promise.resolve();
     void sessionReady.finally(loadAll);
+    const catalogTimer = window.setInterval(() => {
+      api("/api/instances")
+        .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
+        .catch(() => {});
+    }, 12 * 60 * 60 * 1000);
 
     let lastSequence = 0;
     const es = authenticatedEventSource(`/api/events?lang=${getLanguage()}`);
@@ -1078,7 +1084,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "config":
           rawDispatch({
             type: "configStatus",
-            config: { xai: frame.xai, composio: frame.composio, box: frame.box, profile: frame.profile },
+            config: { xai: frame.xai, opencode: frame.opencode, composio: frame.composio, box: frame.box, profile: frame.profile },
           });
           api("/api/instances")
             .then(({ instances }) => rawDispatch({ type: "instances", instances }))
@@ -1088,6 +1094,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     return () => {
       alive = false;
+      window.clearInterval(catalogTimer);
       es.close();
     };
   }, []);

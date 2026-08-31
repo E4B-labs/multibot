@@ -50,6 +50,7 @@ import { CLI_TOOLS, installCommandText } from "./cli-tools.ts";
 import { deviceInfo, deviceResources } from "./device.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { openCodeCatalog, startOpenCodeModelRefresh } from "./drivers/acp/opencode-catalog.ts";
 // multibot: silnik slafy — proxy `/api/engine/*`, pipe WS i uwaga botów (D7)
 import { engineBotIdFor, threadIdOfEngineBot } from "./drivers/slafy.ts";
 import { engineDisabled, ensureEngine } from "./engine/supervisor.ts";
@@ -136,6 +137,7 @@ function staticHeaders(file: string): Record<string, string> {
 }
 
 ensureDirs();
+startOpenCodeModelRefresh();
 const cfg = loadConfig();
 const identity = new IdentityStore();
 identity.init();
@@ -733,6 +735,16 @@ function drainQueuedUserMessages(botId: string) {
 }
 const bootFleet = await registry.describe();
 bootSelection = await defaultSelection(bootFleet);
+// Legacy OpenCode Go used a visible slafy instance. Move only its selection;
+// bots, messages and memory keep their existing records.
+for (const bot of store.bots) {
+  if (bot.modelSelection.instanceId !== "opencodeGo") continue;
+  const oldModel = bot.modelSelection.model;
+  const model = oldModel.startsWith("opencode/") || oldModel.startsWith("opencode-go/")
+    ? oldModel
+    : `opencode-go/${oldModel}`;
+  store.patchBot(bot.id, { modelSelection: { instanceId: "opencode", model } });
+}
 // multibot (G1): legacy bots selected the removed `slafy` default instance.
 // Repair before the first API response, preferring a named custom model.
 store.migrateOrphanedSelections(bootFleet);
@@ -755,6 +767,16 @@ if (codexCatalog) {
     if (bot.modelSelection.instanceId === "codex" && !valid.has(bot.modelSelection.model)) {
       store.patchBot(bot.id, { modelSelection: { instanceId: "codex", model: codexCatalog.default } });
     }
+  }
+}
+const openCodeModels = bootFleet.find((provider) => provider.instanceId === "opencode")?.models;
+if (openCodeModels && openCodeCatalog.lastRefreshSucceeded) {
+  const valid = new Set(openCodeModels.options.map((option) => option.id));
+  for (const bot of store.bots) {
+    if (bot.modelSelection.instanceId !== "opencode" || valid.has(bot.modelSelection.model)) continue;
+    const prefix = bot.modelSelection.model.startsWith("opencode/") ? "opencode/" : "opencode-go/";
+    const replacement = openCodeModels.options.find((option) => option.id.startsWith(prefix))?.id;
+    if (replacement) store.patchBot(bot.id, { modelSelection: { instanceId: "opencode", model: replacement } });
   }
 }
 const existingEngineProfile = findExistingEngineProfile(ROOT);
@@ -1322,14 +1344,21 @@ async function handleModelCommand(bot: ReturnType<Store["bot"]>, text: string): 
     return `Current model: ${bot.modelSelection.model || "unknown"}\nProvider: ${current?.displayName ?? (bot.modelSelection.instanceId || "unknown")}\n\n${lines.join("\n")}\n\nUse /model <provider>/<model> or /model <model> --provider <provider>.`;
   }
 
-  let provider = providerFlag ? findProvider(providerFlag) : undefined;
-  let model = target;
+  const exactOption = providerFlag
+    ? undefined
+    : described.find((item) => item.models.options.some((option) =>
+      option.id.toLowerCase() === target.toLowerCase() || option.label.toLowerCase() === target.toLowerCase()));
+  let provider = providerFlag ? findProvider(providerFlag) : exactOption;
+  let model = exactOption?.models.options.find((option) =>
+    option.id.toLowerCase() === target.toLowerCase() || option.label.toLowerCase() === target.toLowerCase())?.id ?? target;
   if (!provider && target.includes("/")) {
     const slash = target.indexOf("/");
     const candidate = findProvider(target.slice(0, slash));
     if (candidate) {
       provider = candidate;
-      model = target.slice(slash + 1);
+      model = candidate.instanceId === "opencode" && candidate.models.options.some((option) => option.id === target)
+        ? target
+        : target.slice(slash + 1);
     }
   }
   if (!provider && target.includes(":")) {
@@ -1959,6 +1988,11 @@ function configStatusFor(actor: WorkspaceActor | null) {
   const identityMember = actor && identity.members().find((item) => item.userId === actor.uid);
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
+    opencode: {
+      configured: Boolean(cfg.opencode?.key !== undefined
+        ? cfg.opencode.key
+        : cfg.instances?.opencodeGo?.environment?.OPENAI_API_KEY),
+    },
     composio: { configured: Boolean(cfg.composio?.key), apiKeyConfigured: Boolean(cfg.composio?.apiKey) },
     box: { configured: Boolean(cfg.box?.token) },
     // not a secret — the sidebar shows it
@@ -2162,6 +2196,7 @@ function routineView(botId: string, routine: HarnessRoutine) {
 const RESERVED_INSTANCE_IDS = new Set([
   ...Object.keys(DEFAULT_INSTANCE_CONFIGS),
   ...BUILT_IN_DRIVERS.map((driver) => driver.driverKind),
+  "opencodeGo",
   "slafy",
   "__proto__",
   "prototype",
@@ -4339,6 +4374,13 @@ const server = createServer(async (req, res) => {
       const patch: Record<string, object> = {};
       for (const key of ["xai", "composio", "box"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
+      }
+      if (body.opencode !== undefined) {
+        if (!body.opencode || typeof body.opencode !== "object" || Array.isArray(body.opencode)
+          || typeof (body.opencode as { key?: unknown }).key !== "string") {
+          return json(res, 400, { error: "opencode.key must be a string" });
+        }
+        patch.opencode = { key: (body.opencode as { key: string }).key.trim() };
       }
       if (body.profile && (!actor || actor.uid === "legacy-token" || actor.uid === "local")) patch.profile = body.profile;
       if (body.profile && actor && actor.uid !== "legacy-token" && actor.uid !== "local") {

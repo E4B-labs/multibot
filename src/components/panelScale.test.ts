@@ -9,6 +9,7 @@ const panel = readFileSync(new URL("./SettingsPanel.tsx", import.meta.url), "utf
 const chat = readFileSync(new URL("./ChatView.tsx", import.meta.url), "utf8");
 const composer = readFileSync(new URL("./Composer.tsx", import.meta.url), "utf8");
 const picker = readFileSync(new URL("./ModelPicker.tsx", import.meta.url), "utf8");
+const providerIcons = readFileSync(new URL("./ProviderIcons.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("skala prawego panelu i czatu", () => {
@@ -52,6 +53,14 @@ describe("skala prawego panelu i czatu", () => {
     // na czym bot pracuje, bez otwierania listy
     expect(picker).toContain("{!compact && <span");
     expect(picker).toContain("aria-label={activeLabel || selection.model}");
+  });
+
+  it("OpenCode ma jedną ikonę, grupy Go/Zen i formularz klucza", () => {
+    expect(providerIcons).toContain("export function OpenCodeMark");
+    expect(providerIcons).toContain('case "opencode":');
+    expect(picker).toContain("groupOpenCodeModels");
+    expect(picker).toContain('section="opencode"');
+    expect(picker).toContain("railInstance.models.updatedAt");
   });
 
   it("podpis poziomu rozumowania znika przy otwartym panelu", () => {

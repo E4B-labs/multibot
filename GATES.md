@@ -39,3 +39,42 @@
 - [x] E-DECISION — companion cloud/iOS/ACP/skill-recorder/boxAgent/VPS ports remain rejected because multibot architecture has no matching runtime.
   EVIDENCE: `PORT-HANDOFF.md` section E plus implementation report.
   ABANDON: E-DECISION not implementing unrelated architecture ports; add only after owner supplies concrete runtime/use case.
+
+# OpenCode Go + Zen
+
+- [x] OC-CATALOG — Go catalog loads all models; Zen exposes only free models including `big-pickle`; cache refreshes every 12h and keeps last good data on failure.
+  CHECK: `npx vitest run server/`
+  EXPECT: OpenCode catalog, filtering, TTL and fallback tests pass.
+  EVIDENCE: feature tests passed: catalog parsing/filtering, `big-pickle`, TTL, cache fallback; 24 tests passed.
+- [x] OC-CONFIG — shared OpenCode Go key persists owner-only, stays redacted, and legacy `instances.opencodeGo` remains readable.
+  CHECK: `npx vitest run server/`
+  EXPECT: config/auth tests pass; no raw key in responses or logs.
+  EVIDENCE: config/credential tests passed; owner-only existing config boundary retained; raw key excluded from status/catalog/cache.
+- [x] OC-ACP — OpenCode launches through ACP with official model IDs, full existing MCP/tools/autonomy, and no Go key for Zen turns.
+  CHECK: `npx vitest run server/`
+  EXPECT: OpenCode spawn/env/ACP tests pass.
+  EVIDENCE: fake ACP tests passed for `--model <id> acp`, Go validation, and Zen key stripping.
+- [x] OC-UI — one OpenCode icon, expandable Go/Zen groups, catalog timestamp, and Go-key form with retry after save.
+  CHECK: `npx vitest run src/`
+  EXPECT: model picker tests pass.
+  EVIDENCE: UI helper/static panel tests passed for one icon, groups, key form, and timestamp.
+- [x] OC-MIGRATION — old OpenCode selections migrate without changing bot/message/memory saved shape; removed models repair only after successful refresh.
+  CHECK: `npx vitest run server/`
+  EXPECT: migration tests pass.
+  EVIDENCE: legacy `opencodeGo` config/selection tests passed; migration preserves bot record fields and repairs only after successful catalog refresh.
+- [x] OC-TYPECHECK — TypeScript gates pass.
+  CHECK: `npx tsc -b && npx tsc -p tsconfig.server.build.json`
+  EXPECT: exit 0.
+  EVIDENCE: `npx tsc -b` and `npx tsc -p tsconfig.server.build.json` exit 0.
+- [x] OC-TESTS — complete Vitest suite passes.
+  CHECK: `$env:MULTIBOT_COMPUTER='off'; npx vitest run`
+  EXPECT: exit 0.
+  EVIDENCE: `npx vitest run` exit 0; 101 files passed, 1 skipped; 610 tests passed, 7 skipped.
+- [x] OC-BUILD — frontend build passes.
+  CHECK: `npx vite build`
+  EXPECT: exit 0.
+  EVIDENCE: `npx vite build` exit 0; 2464 modules transformed.
+- [x] OC-DIFF — diff has no whitespace errors and no secrets.
+  CHECK: `git diff --check`
+  EXPECT: exit 0.
+  EVIDENCE: `git diff --check` exit 0; no whitespace errors. Secret-bearing fields remain write-only/redacted.

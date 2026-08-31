@@ -9,6 +9,7 @@ import { GeminiAgentDriver } from "./acp/gemini.ts";
 // multibot (G3): official ACP stdio integrations.
 import { KimiAgentDriver } from "./acp/kimi.ts";
 import { QwenAgentDriver } from "./acp/qwen.ts";
+import { OpenCodeAgentDriver } from "./acp/opencode.ts";
 // multibot: driver silnika slafy (sidecar Pythona) — patrz drivers/slafy.ts
 import { SlafyDriver } from "./slafy.ts";
 
@@ -24,6 +25,7 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   GeminiAgentDriver,
   KimiAgentDriver, // multibot (G3)
   QwenAgentDriver, // multibot (G3)
+  OpenCodeAgentDriver,
   ClaudeDriver,
   CodexDriver,
 ];

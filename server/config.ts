@@ -30,6 +30,8 @@ export interface AppConfig {
   /** multibot (G2): remote-access bearer token. Never returned by /api/config. */
   auth?: { token?: string };
   xai?: { key?: string; url?: string };
+  /** Shared OpenCode Go key. Never returned by /api/config. */
+  opencode?: { key?: string };
   /** key = ck_… Connect consumer key (connections + agent tools);
    * apiKey = ak_… project API key — optional, unlocks the full toolkit
    * catalog with official logos in the plugins marketplace. */
@@ -135,6 +137,7 @@ export function loadConfig(): AppConfig {
     /* first run — env fallbacks below */
   }
   cfg.xai = { key: process.env.XAI_API_KEY, ...cfg.xai };
+  cfg.opencode = { key: process.env.OPENCODE_API_KEY, ...cfg.opencode };
   cfg.composio = { key: process.env.COMPOSIO_KEY, ...cfg.composio };
   cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
   cfg.voice = { key: process.env.OMB_TTS_KEY, ...cfg.voice };
@@ -157,6 +160,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   for (const key of [
     "auth",
     "xai",
+    "opencode",
     "composio",
     "box",
     "voice",
@@ -200,6 +204,7 @@ export const DEFAULT_INSTANCE_CONFIGS = {
   qwen: { driver: "qwenAgent" },
   claude: { driver: "claudeAgent" },
   codex: { driver: "codex" },
+  opencode: { driver: "opencode", displayName: "OpenCode" },
   // multibot (A5): `computer` (box.ascii.dev, boxAgent) celowo usunięty z
   // domyślnej floty — MultiBot ma swój komputer (wspólny pulpit na hoście,
   // integrations.localComputer), a ta instancja tylko pokazywała w model
@@ -207,7 +212,7 @@ export const DEFAULT_INSTANCE_CONFIGS = {
   // w configu przywróci boxa każdemu, kto go chce.
 } satisfies InstanceConfigMap;
 // multibot (G3): Kimi/Qwen share the same durable allow switch API.
-export const BUILT_IN_CLI_IDS = ["grok", "gemini", "claude", "codex", "kimi", "qwen"] as const;
+export const BUILT_IN_CLI_IDS = ["grok", "gemini", "claude", "codex", "kimi", "qwen", "opencode"] as const;
 
 // Default fleet: one instance per built-in driver (upstream
 // defaultInstanceIdForDriver — instanceId defaults to the driver kind).
@@ -228,6 +233,9 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     ...(cfg.instances ?? {}),
   };
   for (const [id, configured] of Object.entries(configuredInstances)) {
+    // Legacy credential storage used a visible slafy instance. Keep its key
+    // readable below, but never expose a second OpenCode rail entry.
+    if (id === "opencodeGo") continue;
     const model = configured.model;
     const entry: InstanceConfig = {
       ...configured,
@@ -240,6 +248,12 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       ...(cfg.box?.token ? { BOX_TOKEN: cfg.box.token } : {}),
       ...entry.environment,
     };
+    if (id === "opencode") {
+      const legacyKey = cfg.instances?.opencodeGo?.environment?.OPENAI_API_KEY;
+      const key = cfg.opencode?.key !== undefined ? cfg.opencode.key : legacyKey;
+      if (key) entry.environment.OPENCODE_API_KEY = key;
+      else delete entry.environment.OPENCODE_API_KEY;
+    }
     map[id] = entry;
   }
   return map;

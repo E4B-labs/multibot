@@ -20,7 +20,7 @@ export function credentialConfigPatch(target: CredentialTargetId, value: string)
   switch (target) {
     case "xaiApiKey": return { xai: { key: clean } };
     case "boxToken": return { box: { token: clean } };
-    case "opencodeGoApiKey": return { instances: { opencodeGo: { driver: "slafy", environment: { OPENAI_API_KEY: clean } } } };
+    case "opencodeGoApiKey": return { opencode: { key: clean } };
     case "ttsKey": return { voice: { key: clean } };
     case "openaiImageApiKey": return { instances: { openaiImage: { driver: "slafy", environment: { OPENAI_API_KEY: clean } } } };
   }
@@ -29,7 +29,9 @@ export function credentialConfigPatch(target: CredentialTargetId, value: string)
 export function credentialIsConfigured(cfg: AppConfig, target: CredentialTargetId): boolean {
   if (target === "xaiApiKey") return Boolean(cfg.xai?.key);
   if (target === "boxToken") return Boolean(cfg.box?.token);
-  if (target === "opencodeGoApiKey") return Boolean(cfg.instances?.opencodeGo?.environment?.OPENAI_API_KEY);
+  if (target === "opencodeGoApiKey") return Boolean(cfg.opencode?.key !== undefined
+    ? cfg.opencode.key
+    : cfg.instances?.opencodeGo?.environment?.OPENAI_API_KEY);
   if (target === "openaiImageApiKey") return Boolean(cfg.instances?.openaiImage?.environment?.OPENAI_API_KEY);
   return target === "ttsKey" ? Boolean(cfg.voice?.key) : false;
 }
