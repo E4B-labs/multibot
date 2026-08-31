@@ -14,10 +14,13 @@
 // Blok jest przeliczany przy każdej turze, bo `busy` zmienia się w trakcie
 // pracy floty — zapamiętany raz byłby gorszy niż żaden: wyglądałby na aktualny.
 
+import type { FleetEnvironment, FleetEnvironmentBot } from "./fleet-environment.ts";
+
 export type FleetBot = {
   id: string;
   name: string;
   busy?: boolean;
+  needsAttention?: string | null;
   hidden?: boolean;
   title?: string;
   description?: string;
@@ -25,11 +28,15 @@ export type FleetBot = {
 };
 
 /** Jedna linijka na bota: kto to, czym się zajmuje, na czym stoi i czy wolny. */
-function line(bot: FleetBot): string {
-  const model = bot.modelSelection?.model;
+function line(bot: FleetBot, live?: FleetEnvironmentBot): string {
+  const model = live?.model ?? bot.modelSelection?.model;
   const persona = [bot.title, bot.description].filter(Boolean).join(" — ");
   const head = `- ${bot.name} (id: ${bot.id}${model ? `, model: ${model}` : ""})`;
-  const state = bot.busy ? "working on a turn right now" : "idle";
+  const state = live?.state === "waiting"
+    ? "waiting for human input"
+    : live?.state === "working" || bot.busy
+      ? "working on a turn right now"
+      : "idle";
   return persona ? `${head} — ${state} — ${persona}` : `${head} — ${state}`;
 }
 
@@ -40,12 +47,19 @@ function line(bot: FleetBot): string {
  * Boty ukryte pomijamy: nie są widoczne dla użytkownika, więc odwoływanie się
  * do nich myliłoby i bota, i czytającego transkrypt.
  */
-export function fleetStatusBlock(bots: readonly FleetBot[], selfId: string): string {
+export function fleetStatusBlock(
+  bots: readonly FleetBot[],
+  selfId: string,
+  environment?: FleetEnvironment,
+): string {
   const peers = bots.filter((bot) => bot.id !== selfId && !bot.hidden);
   if (!peers.length) return "";
+  const liveById = new Map(environment?.bots.map((bot) => [bot.id, bot]));
+  const refreshed = environment ? `, refreshed ${new Date(environment.refreshedAt).toISOString()}` : "";
   return [
     "[Fleet status — refreshed for this turn, no need to call list_bots for it]",
-    ...peers.map(line),
+    ...(environment ? [`Live workspace snapshot${refreshed}, refreshed every 10 seconds.`] : []),
+    ...peers.map((bot) => line(bot, liveById.get(bot.id))),
     "Use it to decide whom to involve: a bot marked idle can take work now, one working on a turn will answer late.",
   ].join("\n");
 }

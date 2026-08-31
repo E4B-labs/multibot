@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld("ogb", {
   hardwareAcceleration: {
     get: () => ipcRenderer.invoke("prefs:hardware-acceleration"),
     set: (enabled) => ipcRenderer.invoke("prefs:set-hardware-acceleration", enabled),
+    status: () => ipcRenderer.invoke("prefs:gpu-status"),
   },
 
   /** Własne kontrolki okna — obecne wyłącznie tam, gdzie okno leci bez ramki

@@ -38,6 +38,18 @@ describe("Store", () => {
     expect(bot.modelSelection).toEqual(selection());
   });
 
+  it("keeps provider and model selection independent per bot", () => {
+    const store = new Store(selection);
+    const first = store.createBot();
+    const second = store.createBot();
+    store.patchBot(first.id, { modelSelection: { instanceId: "codex", model: "gpt-5.6-luna" } });
+    store.patchBot(second.id, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+
+    expect(store.bot(first.id)?.modelSelection).toEqual({ instanceId: "codex", model: "gpt-5.6-luna" });
+    expect(store.bot(second.id)?.modelSelection).toEqual({ instanceId: "claude", model: "claude-sonnet-5" });
+    expect(new Store(selection).bot(first.id)?.modelSelection).toEqual({ instanceId: "codex", model: "gpt-5.6-luna" });
+  });
+
   it("rotates colors across created bots", () => {
     const store = new Store(selection);
     const first = store.createBot();

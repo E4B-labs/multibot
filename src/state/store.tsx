@@ -170,8 +170,25 @@ export interface MailThread {
   updatedAt: number;
 }
 
+export interface FleetEnvironmentBot {
+  id: string;
+  name: string;
+  title?: string;
+  description?: string;
+  model?: string;
+  state: "idle" | "working" | "waiting";
+}
+
+export interface FleetEnvironment {
+  revision?: number;
+  refreshedAt: number;
+  refreshIntervalMs: number;
+  bots: FleetEnvironmentBot[];
+}
+
 interface AppState {
   bots: Bot[];
+  environment: FleetEnvironment | null;
   instances: InstanceInfo[];
   config: ConfigStatus | null;
   selectedId: string;
@@ -218,6 +235,7 @@ interface AppState {
 
 type Action =
   | { type: "hydrate"; bots: Bot[] }
+  | { type: "environment"; environment: FleetEnvironment }
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
@@ -336,6 +354,9 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case "instances":
       return { ...state, instances: action.instances };
+    case "environment":
+      if ((action.environment.revision ?? 0) < (state.environment?.revision ?? -1)) return state;
+      return { ...state, environment: action.environment };
     case "workspaceChanged":
       return { ...state, workspaceVersion: state.workspaceVersion + 1 };
     case "configStatus":
@@ -718,6 +739,7 @@ function reducer(state: AppState, action: Action): AppState {
 
 const initialState: AppState = {
   bots: [],
+  environment: null,
   instances: [],
   config: null,
   selectedId: "",
@@ -947,6 +969,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       api("/api/bots")
         .then(({ bots }) => alive && rawDispatch({ type: "hydrate", bots }))
         .catch(() => {});
+      api("/api/environment")
+        .then(({ environment }) => alive && environment && rawDispatch({ type: "environment", environment }))
+        .catch(() => {});
       api("/api/instances")
         .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
         .catch(() => {});
@@ -984,6 +1009,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         lastSequence = frame.sequence;
       }
       switch (frame.kind) {
+        case "environment.snapshot":
+          if (frame.environment) rawDispatch({ type: "environment", environment: frame.environment });
+          break;
         case "message":
           rawDispatch({ type: "messageAdded", threadId: frame.threadId, message: frame.message });
           break;

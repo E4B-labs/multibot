@@ -12,6 +12,12 @@ import { botSystemPrompt } from "./bot-prompt.ts";
 // multibot: autoweryfikacja — filtr na prośbach o zgodę, patrz server/auto-verify.ts.
 import { decideAction, normalizeAutoVerify, type AutoVerifyState } from "./auto-verify.ts";
 import { fleetStatusBlock } from "./fleet-status.ts";
+import {
+  buildFleetEnvironment,
+  fleetEnvironmentForBots,
+  FLEET_ENVIRONMENT_REFRESH_MS,
+  type FleetEnvironment,
+} from "./fleet-environment.ts";
 import * as box from "./box.ts";
 import { AttachmentStore, MAX_FILE_BYTES, resolveBotFile } from "./attachments.ts";
 import { ensureAccessToken, mountAuth, rotateAccessToken, tokenMatches } from "./auth.ts";
@@ -783,11 +789,37 @@ if (existingEngineProfile && (!hadHarnessBots || seededPlaceholder || localFirst
 }
 
 // ── SSE fan-out to clients ─────────────────────────────────────────────
+// One ephemeral workspace snapshot is shared by the desktop and mobile
+// clients. It is never written to chat history or provider event logs.
+let fleetEnvironmentRevision = 0;
+let fleetEnvironment: FleetEnvironment = {
+  ...buildFleetEnvironment(store.bots),
+  revision: fleetEnvironmentRevision,
+};
+
+function publicFleetEnvironment(): FleetEnvironment {
+  return fleetEnvironmentForBots(
+    fleetEnvironment,
+    store.bots.filter((bot) => bot.visibility !== "private"),
+  );
+}
+
+function fleetEnvironmentForActor(actor: WorkspaceActor | null): FleetEnvironment {
+  return fleetEnvironmentForBots(
+    fleetEnvironment,
+    store.bots.filter((bot) => canAccessBot(bot, actor)),
+  );
+}
+
 type EventClient = { res: ServerResponse; actor: WorkspaceActor | null };
 
 function eventVisible(payload: unknown, actor: WorkspaceActor | null): boolean {
   if (!payload || typeof payload !== "object") return true;
   const event = payload as Record<string, any>;
+  if (event.kind === "environment.snapshot") {
+    const snapshotBots = Array.isArray(event.environment?.bots) ? event.environment.bots : [];
+    return snapshotBots.every((entry: any) => canAccessBot(store.bot(String(entry?.id ?? "")), actor));
+  }
   const botFor = (id: unknown) => {
     if (typeof id !== "string") return null;
     return store.bot(id) ?? (id.startsWith("mb-") ? store.botByThread(id.slice(3)) : null);
@@ -867,6 +899,18 @@ function broadcast(payload: unknown) {
   // ten sam strumień po WS — SSE nie przechodzi przez buforujące tunele
   broadcastWs(text);
 }
+
+function refreshFleetEnvironment(): void {
+  fleetEnvironmentRevision += 1;
+  fleetEnvironment = {
+    ...buildFleetEnvironment(store.bots),
+    revision: fleetEnvironmentRevision,
+  };
+  broadcast({ kind: "environment.snapshot", environment: publicFleetEnvironment() });
+}
+
+const fleetEnvironmentTimer = setInterval(refreshFleetEnvironment, FLEET_ENVIRONMENT_REFRESH_MS);
+fleetEnvironmentTimer.unref?.();
 
 // ── server-side event folding (upstream's ingestion worker, miniature) ──
 // The canonical stream is the source of truth; the persisted transcript
@@ -1860,7 +1904,7 @@ opts?: {
         // silnika. Przeliczany co turę, bo `busy` zmienia się w trakcie
         // pracy floty; zapamiętany raz byłby gorszy niż żaden.
         text: [
-          fleetStatusBlock(visibleRoster, bot.id),
+          fleetStatusBlock(visibleRoster, bot.id, fleetEnvironmentForBots(fleetEnvironment, visibleRoster)),
           text,
           turnAttachments.length ? `Attached files:\n${turnAttachments.map((file) => `- ${file.name}: ${file.path}`).join("\n")}` : "",
         ]
@@ -2550,6 +2594,15 @@ const server = createServer(async (req, res) => {
       if (req.headers.authorization !== `Bearer ${COMMS_TOKEN}`) {
         return json(res, 401, { error: "unauthorized" });
       }
+      if (method === "GET" && path === "/api/internal/environment") {
+        const self = url.searchParams.get("self") ?? "";
+        const caller = store.bot(self);
+        if (!caller) return json(res, 404, { error: "no such bot" });
+        const visible = store.bots.filter((candidate) =>
+          candidate.id === self || canBotContact(caller, candidate),
+        );
+        return json(res, 200, { environment: fleetEnvironmentForBots(fleetEnvironment, visible) });
+      }
       if (method === "GET" && path === "/api/internal/agents") {
         const self = url.searchParams.get("self");
         const caller = store.bot(self ?? "");
@@ -2922,6 +2975,11 @@ const server = createServer(async (req, res) => {
         connection: "keep-alive",
       });
       res.write(`data: ${JSON.stringify({ kind: "hello" })}\n\n`);
+      res.write(`data: ${JSON.stringify({
+        kind: "environment.snapshot",
+        environment: fleetEnvironmentForActor(actor),
+        sequence: ++eventSequence,
+      })}\n\n`);
       const client = { res, actor: actorForRequest(req) };
       sseClients.add(client);
       const keepalive = setInterval(() => {
@@ -2981,6 +3039,9 @@ const server = createServer(async (req, res) => {
           .filter((b) => canAccessBot(b, actor))
           .map((b) => ({ ...b, messages: store.messagesFor(b.threadId) })),
       });
+    }
+    if (method === "GET" && path === "/api/environment") {
+      return json(res, 200, { environment: fleetEnvironmentForActor(actor) });
     }
     // Durable agent mailbox. Unlike collaboration rooms, mail remains after
     // reload and can be opened without entering either bot's main chat.
@@ -4497,6 +4558,11 @@ mountEventsWs(server, (url, send, req) => {
   const lang = url.searchParams.get("lang");
   if (lang === "pl" || lang === "en") uiLang = lang;
   send(JSON.stringify({ kind: "hello" }));
+  send(JSON.stringify({
+    kind: "environment.snapshot",
+    environment: fleetEnvironmentForActor(actorForRequest(req)),
+    sequence: ++eventSequence,
+  }));
   return (text) => {
     try {
       return eventVisible(JSON.parse(text), actorForRequest(req));

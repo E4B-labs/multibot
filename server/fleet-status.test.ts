@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { fleetStatusBlock, type FleetBot } from "./fleet-status.ts";
+import type { FleetEnvironment } from "./fleet-environment.ts";
 
 const bot = (over: Partial<FleetBot> & { id: string; name: string }): FleetBot => ({ ...over });
 
@@ -44,5 +45,17 @@ describe("stan floty doklejany do tury", () => {
     expect(block).toContain("- Atlas (id: a) — idle");
     expect(block).not.toContain("model:");
     expect(block).not.toContain("undefined");
+  });
+
+  it("przyjmuje snapshot środowiska i rozróżnia oczekiwanie na człowieka", () => {
+    const environment: FleetEnvironment = {
+      revision: 4,
+      refreshedAt: 1_700_000_000_000,
+      refreshIntervalMs: 10_000,
+      bots: [{ id: "a", name: "Atlas", state: "waiting" }],
+    };
+    const block = fleetStatusBlock([bot({ id: "a", name: "Atlas" }), bot({ id: "self", name: "Ja" })], "self", environment);
+    expect(block).toContain("waiting for human input");
+    expect(block).toContain("refreshed every 10 seconds");
   });
 });

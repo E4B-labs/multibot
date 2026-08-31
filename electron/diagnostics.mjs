@@ -78,7 +78,18 @@ export function decodeLogTail(buffer, truncated = false) {
   return { tail: complete.toString("utf8"), bytes: complete.length };
 }
 
-const APP_INFO_KEYS = ["version", "platform", "arch", "electron", "node", "packaged", "uptimeSeconds"];
+const APP_INFO_KEYS = [
+  "version",
+  "platform",
+  "arch",
+  "electron",
+  "node",
+  "packaged",
+  "uptimeSeconds",
+  "gpuAcceleration",
+  "gpuCompositing",
+  "gpuRasterization",
+];
 
 // A config summary entry is publishable only when it carries no credential:
 // Only booleans and finite numbers pass. Strings can contain names, paths,

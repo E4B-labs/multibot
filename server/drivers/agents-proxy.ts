@@ -45,6 +45,12 @@ const TOOLS = [
     },
   },
   {
+    name: "get_environment_snapshot",
+    description:
+      "Read the latest live MultiBot workspace snapshot: which other bots are idle, working, or waiting for human input. Use it once when current availability matters before delegating work.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "send_bot_mail",
     description:
       "Send asynchronous mail to another bot. It returns immediately; the target gets a fresh turn and can reply later. Do not wait or poll for a reply, and do not send acknowledgement-only mail.",
@@ -134,6 +140,17 @@ async function api(path: string, init?: { method?: string; body?: string; header
 }
 
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
+  if (name === "get_environment_snapshot") {
+    const r = await api(`/api/internal/environment?self=${encodeURIComponent(BOT_ID)}`);
+    const environment = r.environment as Json | undefined;
+    const bots = (environment?.bots as Array<Json>) ?? [];
+    if (!bots.length) return { text: "No other bots are visible in this workspace." };
+    const lines = bots.map((b) => {
+      const persona = [b.title, b.description].filter(Boolean).join(" — ");
+      return `- ${b.name} (id: ${b.id}) — ${b.state}${b.model ? ` — model: ${b.model}` : ""}${persona ? ` — ${persona}` : ""}`;
+    });
+    return { text: `Live MultiBot environment, refreshed at ${environment?.refreshedAt ?? "unknown"}:\n${lines.join("\n")}` };
+  }
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
     const bots = (r.bots as Array<Json>) ?? [];

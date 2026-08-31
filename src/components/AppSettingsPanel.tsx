@@ -904,12 +904,18 @@ function MotionSettings({ polish }: { polish: boolean }) {
 // więc w karcie System zostaje wtedy sam mikrofon.
 function HardwareAccelerationRow({ polish }: { polish: boolean }) {
   const [enabled, setEnabled] = useState(false);
+  const [gpuActive, setGpuActive] = useState<boolean | null>(null);
   useEffect(() => {
     let alive = true;
-    window.ogb?.hardwareAcceleration
+    const hardware = window.ogb?.hardwareAcceleration;
+    hardware
       ?.get()
       .then((value) => alive && setEnabled(value === true))
       .catch(() => alive && setEnabled(false));
+    hardware
+      ?.status?.()
+      .then((value) => alive && setGpuActive(value.active === true))
+      .catch(() => alive && setGpuActive(null));
     return () => {
       alive = false;
     };
@@ -935,6 +941,13 @@ function HardwareAccelerationRow({ polish }: { polish: boolean }) {
           {polish
             ? "Rysowanie interfejsu przez kartę graficzną. Zmiana zadziała po ponownym uruchomieniu aplikacji."
             : "Render the interface on the GPU. Takes effect after you restart the app."}
+        </div>
+        <div className="mt-1 text-[12px] text-ink-secondary">
+          {gpuActive === true
+            ? polish ? "GPU aktywne teraz" : "GPU active now"
+            : enabled
+              ? polish ? "GPU włączy się przy następnym uruchomieniu" : "GPU will be used after the next restart"
+              : polish ? "GPU wyłączone" : "GPU disabled"}
         </div>
       </div>
       <button

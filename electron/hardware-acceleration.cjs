@@ -1,19 +1,12 @@
-// Preferencja akceleracji sprzętowej — czysty CJS, żeby dało się ją sprawdzić
-// testem bez Electrona (ten sam podział co window-state.cjs).
-//
-// DOMYŚLNIE WYŁĄCZONA — decyzja Kacpra z 29.08. Electron sam z siebie
-// akcelerację WŁĄCZA, więc to my musimy ją zdjąć: brak pliku, uszkodzony JSON
-// i każda wartość spoza schematu muszą dawać „wyłączone". Inaczej pierwsze
-// uruchomienie po aktualizacji zachowałoby się odwrotnie niż to, co panel
-// pokazuje użytkownikowi.
-//
-// Czytane SYNCHRONICZNIE na starcie main.mjs, bo `app.disableHardwareAcceleration()`
-// działa wyłącznie przed gotowością aplikacji — stąd zwykły plik JSON, a nie
-// stan trzymany w rendererze.
-const DEFAULT_ENABLED = false;
+// Hardware acceleration preference, kept Electron-free for unit tests.
+// Electron decides this before app.whenReady(), so main.mjs reads the JSON
+// preference synchronously during process startup.
 
-/** Wyłącznie jawne `true` włącza akcelerację. Wszystko inne — brak wartości,
- *  śmieci, zły typ — zostaje przy domyślnym wyłączeniu. */
+// The normal desktop path keeps Chromium's GPU compositing/rasterization on.
+const DEFAULT_ENABLED = true;
+
+/** Only an explicit true or false changes the stored preference. Missing,
+ * malformed, or wrongly typed data falls back to the enabled default. */
 function parseHardwareAcceleration(raw) {
   let value;
   try {
@@ -21,12 +14,12 @@ function parseHardwareAcceleration(raw) {
   } catch {
     return DEFAULT_ENABLED;
   }
-  if (!value || typeof value !== "object") return DEFAULT_ENABLED;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return DEFAULT_ENABLED;
+  if (!("hardwareAcceleration" in value)) return DEFAULT_ENABLED;
   return value.hardwareAcceleration === true;
 }
 
-/** Preferencje po zmianie jednej wartości; reszta pliku zostaje nietknięta,
- *  żeby dopisanie kolejnej opcji nie kasowało poprzednich. */
+/** Update one preference without deleting any other preferences. */
 function withHardwareAcceleration(raw, enabled) {
   let value;
   try {
@@ -34,7 +27,7 @@ function withHardwareAcceleration(raw, enabled) {
   } catch {
     value = null;
   }
-  const base = value && typeof value === "object" ? value : {};
+  const base = value && typeof value === "object" && !Array.isArray(value) ? value : {};
   return { ...base, hardwareAcceleration: enabled === true };
 }
 

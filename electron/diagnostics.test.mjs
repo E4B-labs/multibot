@@ -34,6 +34,9 @@ describe("buildDiagnosticsReport", () => {
     node: "24.0.0",
     packaged: true,
     uptimeSeconds: 42,
+    gpuAcceleration: "active",
+    gpuCompositing: "hardware_accelerated",
+    gpuRasterization: "hardware_accelerated",
   };
 
   it("renders app facts and a sorted config summary", () => {
@@ -49,6 +52,9 @@ describe("buildDiagnosticsReport", () => {
     expect(report).toContain("version=0.1.27");
     expect(report).toContain("platform=darwin");
     expect(report).toContain("arch=arm64");
+    expect(report).toContain("gpuAcceleration=active");
+    expect(report).toContain("gpuCompositing=hardware_accelerated");
+    expect(report).toContain("gpuRasterization=hardware_accelerated");
     expect(report).toContain("xai.configured=true");
     expect(report).toContain("box.configured=false");
     expect(report).toContain("rooms.turnTimeoutMinutes=5");

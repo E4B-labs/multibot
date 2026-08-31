@@ -16,6 +16,7 @@ import { buildDiagnosticsReport, decodeLogTail, diagnosticsFileName } from "./di
 const require = createRequire(import.meta.url);
 const { normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
 const { parseHardwareAcceleration, withHardwareAcceleration } = require("./hardware-acceleration.cjs");
+const { gpuCommandLineSwitches, summarizeGpuFeatureStatus } = require("./gpu.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // multibot (G6): Task Scheduler starts packaged app without a window. Electron
@@ -43,11 +44,31 @@ function hardwareAccelerationEnabled() {
   try {
     return parseHardwareAcceleration(fs.readFileSync(appPrefsFile(), "utf8"));
   } catch {
-    return false;
+    return true;
   }
 }
 
-if (!hardwareAccelerationEnabled()) app.disableHardwareAcceleration();
+// Electron's default GPU pipeline is intentionally retained. These switches
+// make the local UI's rasterization path explicit; they must be registered
+// before app.whenReady(), just like disableHardwareAcceleration(). A user can
+// still opt out when a driver is unstable, and that choice applies next boot.
+const hardwareAccelerationAtStartup = hardwareAccelerationEnabled();
+if (hardwareAccelerationAtStartup) {
+  for (const switchName of gpuCommandLineSwitches(hardwareAccelerationAtStartup)) app.commandLine.appendSwitch(switchName);
+} else {
+  app.disableHardwareAcceleration();
+}
+
+// With no preference file, hardwareAccelerationEnabled() resolves to true.
+// The old opt-out remains available for driver troubleshooting.
+function gpuStatus() {
+  const enabled = hardwareAccelerationEnabled();
+  try {
+    return summarizeGpuFeatureStatus(app.getGPUFeatureStatus(), enabled);
+  } catch {
+    return summarizeGpuFeatureStatus(null, enabled);
+  }
+}
 // multibot: Windows i Linux jadą bez ramki systemowej — jasny pasek tytułu
 // z ikoną i min/max/close siedział osobnym pasem nad interfejsem, więc
 // kontrolki okna rysuje sobie sam interfejs (src/components/WindowControls.tsx)
@@ -153,6 +174,7 @@ function trackWindowForState(win) {
 // licznik. Kacper 28.08 — zdejmujemy; wróci dopiero z osobną grafiką
 // plakietki (kropka albo liczba), nie z miniaturą ikony.
 ipcMain.handle("prefs:hardware-acceleration", () => hardwareAccelerationEnabled());
+ipcMain.handle("prefs:gpu-status", () => gpuStatus());
 ipcMain.handle("prefs:set-hardware-acceleration", (_event, enabled) => {
   const file = appPrefsFile();
   let raw = null;
@@ -591,8 +613,20 @@ ipcMain.handle("desktop:export-diagnostics", async (event) => {
     const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config`);
     if (response.ok) configSummary = await response.json();
   } catch {}
+  const gpu = gpuStatus();
   const report = buildDiagnosticsReport({
-    appInfo: { version: app.getVersion(), platform: process.platform, arch: process.arch, electron: process.versions.electron, node: process.versions.node, packaged: app.isPackaged, uptimeSeconds: Math.round(process.uptime()) },
+    appInfo: {
+      version: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      electron: process.versions.electron,
+      node: process.versions.node,
+      packaged: app.isPackaged,
+      uptimeSeconds: Math.round(process.uptime()),
+      gpuAcceleration: gpu.active ? "active" : gpu.enabled ? "enabled-but-not-active" : "disabled",
+      gpuCompositing: gpu.compositing,
+      gpuRasterization: gpu.rasterization,
+    },
     configSummary,
     logTail: decodeLogTail(logTail, logTail.length === 128 * 1024).tail,
   });

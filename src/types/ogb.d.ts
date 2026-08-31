@@ -37,6 +37,12 @@ declare global {
       hardwareAcceleration?: {
         get(): Promise<boolean>;
         set(enabled: boolean): Promise<boolean>;
+        status?(): Promise<{
+          enabled: boolean;
+          active: boolean;
+          compositing: string;
+          rasterization: string;
+        }>;
       };
       /** Własne kontrolki okna. Preload wystawia je tylko tam, gdzie ramka
        * systemowa jest zdjęta (Windows, Linux) — nieobecne pod macOS i w
