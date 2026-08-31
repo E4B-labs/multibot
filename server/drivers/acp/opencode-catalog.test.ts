@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   OpenCodeCatalogStore,
   OPENCODE_GO_MODELS_URL,
-  OPENCODE_ZEN_MODELS_URL,
   parseOpenCodeCatalog,
 } from "./opencode-catalog.ts";
 
