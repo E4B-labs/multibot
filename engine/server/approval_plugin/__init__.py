@@ -49,6 +49,10 @@ from pathlib import Path
 # leci bez pytania — czytanie i pamiętanie nie jest działaniem.
 _ASK = ("terminal", "process", "execute_code", "write_file", "patch", "cronjob", "delegate_task")
 
+# Web operations are read-only. These aliases are deliberately not added to
+# `_ASK`; the permission/toolset layer still controls whether they exist.
+_WEB_ALIASES = {"fetch": "web_extract", "webfetch": "web_extract", "websearch": "web_search"}
+
 # Podgląd argumentów w karcie zgody. Krótko: to ma się mieścić w dymku czatu, a
 # pełne argumenty i tak przechodzą przez `redact_sensitive_text` gatewaya.
 _PREVIEW_LIMIT = 200

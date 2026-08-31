@@ -10,6 +10,8 @@ import { removeConnector, saveConnector } from "../mcp-connectors.ts";
 import { startFakeEngine, type FakeEngine, type FakeEngineMode } from "../testing/fake-engine.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { SlafyDriver } from "./slafy.ts";
+import { setTurnPolicy, clearTurnPolicy } from "../turn-policy.ts";
+import { enginePermissionsForTurn } from "./slafy.ts";
 
 describe("SlafyDriver.decodeConfig", () => {
   it("defaults the engine bot-id prefix", () => {
@@ -24,6 +26,24 @@ describe("SlafyDriver.decodeConfig", () => {
     ).toEqual({
       botPrefix: "mb-",
       model: { default: "qwen2.5", baseUrl: "http://127.0.0.1:11434/v1" },
+    });
+  });
+});
+
+describe("provider capability and permission forwarding", () => {
+  afterEach(() => clearTurnPolicy("policy-thread"));
+
+  it("declares native web support and maps the browser policy to engine web", async () => {
+    setTurnPolicy("policy-thread", {
+      autonomy: "approval",
+      permissions: { browser: false, terminal: true, file: false },
+    });
+    expect(SlafyDriver.metadata.displayName).toBe("Custom model");
+    expect(enginePermissionsForTurn("policy-thread")).toEqual({
+      browser: false,
+      web: false,
+      file: false,
+      terminal: true,
     });
   });
 });
@@ -132,6 +152,30 @@ describe("SlafyDriver turns (fake engine)", () => {
       base_url: "http://127.0.0.1:11434/v1",
       has_key: true,
     });
+  });
+
+  it("forwards the current harness tool policy to the engine and caches it", async () => {
+    await create();
+    setTurnPolicy("t-policy", {
+      autonomy: "approval",
+      permissions: { browser: false, terminal: true, file: true, memory: true, skills: true, delegation: false },
+    });
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-policy", text: "czesc" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(engine.permissions).toMatchObject({
+        "mb-t-policy:browser": false,
+        "mb-t-policy:web": false,
+        "mb-t-policy:terminal": true,
+        "mb-t-policy:delegation": false,
+      });
+      const calls = engine.permissionCalls.length;
+      await instance.adapter.sendTurn({ threadId: "t-policy", text: "druga" });
+      await recorder.until(() => recorder.events.filter((event) => event.type === "turn.completed").length === 2);
+      expect(engine.permissionCalls).toHaveLength(calls);
+    } finally {
+      clearTurnPolicy("t-policy");
+    }
   });
 
   it("turns a mid-turn engine kill into a clean runtime.error", async () => {

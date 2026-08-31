@@ -455,7 +455,7 @@ export function SkillsPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside className="animate-panel-in flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside className="animate-panel-in flex h-full w-[360px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
       {/* Header */}
       <div data-shell-header className="flex items-center justify-between px-4 py-3">
         <span className="w-[26px]" />

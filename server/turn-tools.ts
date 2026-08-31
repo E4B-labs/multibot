@@ -79,6 +79,8 @@ export const AGENTS_MCP_TOOLS = [
 
 export interface TurnIntegrationsLike {
   agents?: unknown;
+  web?: unknown;
+  webNative?: unknown;
   localComputer?: unknown;
   computer?: unknown;
   composio?: unknown;
@@ -102,6 +104,13 @@ export function turnToolsText(integrations: TurnIntegrationsLike | undefined): s
       `Your computer this turn — THIS IS YOUR COMPUTER: one persistent Linux desktop per workspace, shared by all bots but fully yours to use right now (browser, terminal and files are one environment). Computer MCP tools this turn (${COMPUTER_MCP_TOOLS.length}): ${COMPUTER_MCP_TOOLS.join(", ")} — browser: navigate/screenshot/read_page/click/move/type_text/key/scroll/status, terminal: computer_exec (runs INSIDE your computer, same filesystem the browser sees). Use them WITHOUT asking — this is your machine; never say you have no browser or terminal when these tools are listed.`,
     );
   }
+  if (integrations.web || integrations.webNative || integrations.agents) {
+    if (integrations.web || integrations.webNative) {
+      lines.push(
+        "Web search and fetch this turn: `web_search(query)` searches the public web; `web_extract(url)` fetches and reads a URL; `fetch(url)` is an alias for `web_extract`. Use these tools for current information and never claim browsing is unavailable when they are listed.",
+      );
+    }
+  }
   if (integrations.agents) {
     lines.push(
       `Agents/workspace MCP tools this turn (${AGENTS_MCP_TOOLS.length}): ${AGENTS_MCP_TOOLS.join(", ")}.`,
@@ -112,9 +121,6 @@ export function turnToolsText(integrations: TurnIntegrationsLike | undefined): s
     // miejscem, w którym pada, że ścieżka nie jest dostarczeniem.
     lines.push(
       "When you produce a file for the user — a report, an export, a document, a generated artifact — deliver it with `send_file`. A path on disk, a filename or a link is NOT delivery: the user cannot open it from the chat. Write the file, then call `send_file` with its `path` in the same turn. Never base64 a file through your shell output — that output is capped and truncates silently.",
-    );
-    lines.push(
-      "Engine web tools this turn: web_search, web_extract (fetch) — use web_search to find current information and web_extract as your fetch to read any URL; if you need to interact with the page use browser_navigate etc. instead of saying you cannot browse.",
     );
   }
   if (integrations.composio) {

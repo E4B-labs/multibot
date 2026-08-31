@@ -71,6 +71,7 @@ const DENY_TIMEOUT_NOTE =
 export function codexMcpConfig(turn: SendTurnInput): { config?: { mcp_servers: Record<string, unknown> } } {
   const mcp_servers: Record<string, unknown> = {};
   if (turn.integrations?.agents) mcp_servers.agents = turn.integrations.agents;
+  if (turn.integrations?.web && canUseIntegration(turn.threadId, "browser")) mcp_servers.web = turn.integrations.web;
   // `required` — bez tego bot bywa BEZ komputera, cicho i losowo.
   //
   // Codex startuje serwery MCP równolegle z turą i kompletuje listę narzędzi w
@@ -670,7 +671,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
-        capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true },
+        capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true, webTools: "mcp" },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {

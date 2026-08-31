@@ -496,7 +496,7 @@ export function ChatView({ bot }: { bot: Bot }) {
                 }}
                 className={cn(
                   "rounded-md p-1.5 hover:bg-raised",
-                  findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+                  findOpen ? "text-accent" : "text-ink hover:text-ink",
                 )}
                 title={polish ? "Szukaj w rozmowie (Ctrl+F)" : "Find in chat (Ctrl+F)"}
                 aria-label={polish ? "Szukaj w rozmowie" : "Find in chat"}
@@ -505,7 +505,7 @@ export function ChatView({ bot }: { bot: Bot }) {
               </button>
               <button
                 onClick={() => dispatch({ type: "toggleInspector" })}
-                className={cn("rounded-md p-1.5 hover:bg-raised", state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink")}
+                className={cn("rounded-md p-1.5 hover:bg-raised", state.inspectorOpen ? "text-accent" : "text-ink hover:text-ink")}
                 title={polish ? "Inspector runtime" : "Runtime inspector"}
                 aria-label={polish ? "Inspector runtime" : "Runtime inspector"}
               >
@@ -515,7 +515,7 @@ export function ChatView({ bot }: { bot: Bot }) {
                 onClick={() => dispatch({ type: "toggleComputer" })}
                 className={cn(
                   "rounded-md p-1.5 hover:bg-raised",
-                  state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+                  state.computerOpen ? "text-accent" : "text-ink hover:text-ink",
                 )}
                 title={polish ? "Komputer bota" : "Bot's computer"}
               >
@@ -525,7 +525,7 @@ export function ChatView({ bot }: { bot: Bot }) {
                 onClick={() => dispatch({ type: "toggleRoutines" })}
                 className={cn(
                   "rounded-md p-1.5 hover:bg-raised",
-                  state.routinesOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+                  state.routinesOpen ? "text-accent" : "text-ink hover:text-ink",
                 )}
                 title={polish ? "Rutyny bota" : "Bot routines"}
                 aria-label={polish ? "Rutyny bota" : "Bot routines"}
@@ -536,7 +536,7 @@ export function ChatView({ bot }: { bot: Bot }) {
                 onClick={() => dispatch({ type: "toggleSkills" })}
                 className={cn(
                   "rounded-md p-1.5 hover:bg-raised",
-                  state.skillsOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+                  state.skillsOpen ? "text-accent" : "text-ink hover:text-ink",
                 )}
                 title={polish ? "Umiejętności bota" : "Bot skills"}
                 aria-label={polish ? "Umiejętności bota" : "Bot skills"}
@@ -582,7 +582,7 @@ export function ChatView({ bot }: { bot: Bot }) {
           if (!follow && atEnd()) setFollow(true);
         }}
       >
-        <div className="flex w-full flex-col gap-2 pb-4">
+        <div className="flex w-full flex-col gap-2 pb-10">
           {bot.messages.map((m) => {
             let child: ReactNode;
             switch (m.kind) {

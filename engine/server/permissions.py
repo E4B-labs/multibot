@@ -76,6 +76,22 @@ TOOLSETS = [
     "web",  # web_search/web_extract (fetch) — domyślnie włączony (brak w disabled_toolsets = włączony), naprawia fetch/web_search (MULTIBOT_WEB_TOOLS_V1)
 ]
 
+# Older profiles and providers used the public names directly. Keep their
+# spelling compatible while storing one Hermes toolset (`web`).
+TOOLSET_ALIASES = {
+    "fetch": "web",
+    "webfetch": "web",
+    "web_fetch": "web",
+    "websearch": "web",
+    "web_search": "web",
+    "web_extract": "web",
+}
+
+
+def canonical_toolset(toolset: str) -> str:
+    key = str(toolset).strip().lower().replace("-", "_")
+    return TOOLSET_ALIASES.get(key, key)
+
 
 def _path(bot_id: str):
     return profile_dir(bot_id) / "config.yaml"  # ValueError na złym id → 422
@@ -87,7 +103,7 @@ def _read(bot_id: str) -> dict:
 
 
 def _disabled(cfg: dict) -> list[str]:
-    return [str(t) for t in ((cfg.get("agent") or {}).get("disabled_toolsets") or [])]
+    return [canonical_toolset(str(t)) for t in ((cfg.get("agent") or {}).get("disabled_toolsets") or [])]
 
 
 # web_search/web_extract (fetch) domyślnie włączony — brak wpisu w disabled_toolsets = włączony (MULTIBOT_WEB_TOOLS_V1); naprawia fetch/web_search
@@ -99,6 +115,7 @@ def get(bot_id: str) -> dict[str, bool]:
 
 def set(bot_id: str, toolset: str, enabled: bool) -> dict[str, bool]:  # noqa: A001
     """Włącz/wyłącz jeden toolset. Idempotentne, merge do istniejącego configu."""
+    toolset = canonical_toolset(toolset)
     if toolset not in TOOLSETS:
         raise ValueError(f"unknown toolset: {toolset!r} (znane: {', '.join(TOOLSETS)})")
     cfg = _read(bot_id)

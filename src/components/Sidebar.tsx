@@ -200,9 +200,6 @@ function BotContextMenu({
           dispatch({ type: "select", id: bot.id });
           dispatch({ type: "toggleSettings", open: true });
         }),
-        item(<Crown size={16} className={bot.chiefOfStaff ? "text-accent" : "text-ink-secondary"} />, bot.chiefOfStaff ? polish ? "Zdejmij szefa sekcji" : "Remove section chief" : polish ? "Ustaw szefa sekcji" : "Set section chief", () =>
-          dispatch({ type: "updateBot", botId: bot.id, patch: { chiefOfStaff: !bot.chiefOfStaff } }),
-        ),
         item(<Copy size={16} className="text-ink-secondary" />, polish ? "Duplikuj" : "Duplicate", () =>
           dispatch({ type: "duplicateBot", botId: bot.id }),
         ),
@@ -1293,8 +1290,8 @@ export function Sidebar() {
           onClick={() => dispatch({ type: "togglePlugins", open: true })}
           title={collapsed ? (polish ? "Wtyczki" : "Plugins") : undefined}
           className={cn(
-            "flex w-full items-center rounded-xl py-2 text-left hover:bg-raised/50",
-            collapsed ? "justify-center px-0" : "gap-3 px-3",
+            "flex w-full items-center rounded-xl gap-3 px-3 py-2 text-left hover:bg-raised/50",
+            collapsed ? "justify-center px-0" : "",
           )}
         >
           <Puzzle size={20} className="text-ink-secondary" />

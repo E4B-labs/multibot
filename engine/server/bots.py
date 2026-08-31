@@ -176,7 +176,7 @@ _WEB_IDENTITY = f"""
 
 <!-- {_WEB_MARKER} -->
 
-You have `web_search(query)` and `web_extract(url)` — use web_search for current information and web_extract as your fetch to read any URL. Never say you cannot search or fetch when you have these tools.
+You have `web_search(query)` and `web_extract(url)`; `fetch(url)` is an alias for `web_extract`. Use web_search for current information and web_extract/fetch to read any URL. Never say you cannot search or fetch when you have these tools.
 """
 
 

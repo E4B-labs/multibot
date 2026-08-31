@@ -116,6 +116,10 @@ export interface SendTurnInput {
   system?: string;
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
+    /** Provider-neutral web MCP server for drivers without native web tools. */
+    web?: { command: string; args: string[]; env: Record<string, string> };
+    /** Marker used only to describe native engine web tools in the prompt. */
+    webNative?: boolean;
     composio?: { url?: string; key: string };
     /** The bot's cloud computer (box.ascii.dev) for desktop/browser use. */
     computer?: { boxId: string; token: string };
@@ -144,6 +148,8 @@ export interface ProviderAdapter {
      * the harness only offers agents tooling (and prompts about it) to
      * drivers that can actually hand it to the agent. */
     agentsMcp?: boolean;
+    /** How this driver receives MultiBot web tools. */
+    webTools?: "native" | "mcp" | "functions" | "none";
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;

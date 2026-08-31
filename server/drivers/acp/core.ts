@@ -153,6 +153,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: Object.entries(agents.env).map(([name, value]) => ({ name, value: String(value) })),
           });
         }
+        const web = turn.integrations?.web;
+        if (web && canUseIntegration(turn.threadId, "browser")) {
+          servers.push({
+            name: "web",
+            command: web.command,
+            args: web.args,
+            env: Object.entries(web.env).map(([name, value]) => ({ name, value: String(value) })),
+          });
+        }
         // multibot (H3): ten sam komputer bota, co u claude'a i codexa — bez
         // tego agent ACP widzi ekran użytkownika w panelu, ale nie ma czym na
         // nim działać.
@@ -571,7 +580,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         snapshot,
         adapter: {
           provider: DRIVER_KIND,
-          capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true },
+          capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true, webTools: "mcp" },
           sendTurn,
           interruptTurn: async (threadId) => active.get(threadId)?.interrupt(),
           respondToRequest: async (threadId, requestId, decision) => {

@@ -18,6 +18,9 @@ describe("turn policy", () => {
     expect(toolsetFor("apply_patch")).toBe("file");
     expect(toolsetFor("mcp__agents__ask_bot")).toBe("delegation");
     expect(toolsetFor("computer.navigate")).toBe("browser");
+    expect(toolsetFor("fetch")).toBe("browser");
+    expect(toolsetFor("web_extract")).toBe("browser");
+    expect(toolsetFor("WebSearch")).toBe("browser");
   });
 
   it("hard-denies disabled tools and integrations in every autonomy mode", () => {

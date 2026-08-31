@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, Brain, CalendarClock, Camera, File as FileIcon, Images, Loader2, Mic, Plus, Puzzle, Shield, SlidersHorizontal, Wand2, Wrench, X } from "lucide-react";
+import { ArrowUp, Brain, CalendarClock, File as FileIcon, Loader2, Mic, Plus, Puzzle, Shield, SlidersHorizontal, Wand2, Wrench, X } from "lucide-react";
 import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
@@ -254,8 +254,6 @@ export function Composer({ bot }: { bot: Bot }) {
   const peerChat = usePeerChat(bot.id);
   const busyMotion = bot.busy ? busyMascotMotion(bot.id) : null;
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
-  const photosRef = useRef<HTMLInputElement>(null);
   const filesRef = useRef<HTMLInputElement>(null);
   const previewUrls = useRef(new Set<string>());
   // what was typed before the mic went on — partials append after it
@@ -770,8 +768,6 @@ export function Composer({ bot }: { bot: Bot }) {
         </div>
       )}
       <div className="relative w-full">
-        <input ref={cameraRef} hidden type="file" accept="image/*" capture="environment" onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
-        <input ref={photosRef} hidden type="file" accept="image/*" multiple onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
         <input ref={filesRef} hidden type="file" multiple onChange={(event) => { addFiles(event.target.files); event.target.value = ""; }} />
         {/* multibot: F8 — picker po "/", ten sam dropdown co @mention; pięć
             kategorii mieści się dzięki przewijaniu i etykiecie typu po prawej */}
@@ -868,15 +864,10 @@ export function Composer({ bot }: { bot: Bot }) {
         {attachOpen && (
           <div id="attachment-menu" className="absolute bottom-full left-0 z-30 mb-2 min-w-44 overflow-hidden rounded-xl border border-hairline/40 bg-card p-1 shadow-xl" role="menu">
             {[
-              // multibot: click() na inputcie musi iść w tym samym gesture co tap
-              // (inaczej WebView potrafi zignorować otwarcie wyboru pliku),
-              // dopiero po nim chowamy menu.
-              { label: polish ? "Aparat" : "Camera", icon: Camera, action: () => { cameraRef.current?.click(); setAttachOpen(false); } },
-              { label: polish ? "Zdjęcia" : "Photos", icon: Images, action: () => { photosRef.current?.click(); setAttachOpen(false); } },
               { label: polish ? "Pliki" : "Files", icon: FileIcon, action: () => { filesRef.current?.click(); setAttachOpen(false); } },
             ].map(({ label, icon: Icon, action }) => (
               <button key={label} type="button" role="menuitem" onClick={action} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-ink hover:bg-raised">
-                <Icon size={16} className="text-ink-secondary" /> {label}
+                <Icon size={16} className="text-ink" /> {label}
               </button>
             ))}
           </div>
@@ -887,9 +878,9 @@ export function Composer({ bot }: { bot: Bot }) {
             Gdy scena gra, jej rząd awatara ZASTĘPUJE pas md:mt-[48px] — inaczej
             margines wsunąłby 48px przerwy i partner nie stałby na równi. */}
         {peerChat && <PeerChatIndicator bot={bot} view={peerChat} />}
-        <div className={cn("relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5", !peerChat && "md:mt-[48px]")}>
-        {/* Desktop agent avatar: 40 px (zmniejszone z 60 per 0.1.58), no frame, anchored above Attach. */}
-        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
+        <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5">
+        {/* The avatar floats above the composer without reserving a full-width strip. */}
+        <div className="pointer-events-none absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
           <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={busyMotion?.state ?? normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={40} motion={busyMotion?.motion ?? "none"} motionKey={busyMotion ? 1 : 0} animated />
         </div>
         <button
@@ -900,7 +891,7 @@ export function Composer({ bot }: { bot: Bot }) {
           aria-haspopup="menu"
           aria-controls="attachment-menu"
           disabled={bot.busy || uploading}
-          className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
           title={polish ? "Dołącz" : "Attach"}
         >
           <Plus size={20} />

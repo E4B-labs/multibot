@@ -406,6 +406,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers.agents = { ...turn.integrations.agents };
         allowed.push("mcp__agents");
       }
+      if (turn.integrations?.web && canUseIntegration(threadId, "browser")) {
+        mcpServers.web = { ...turn.integrations.web };
+        allowed.push("mcp__web");
+      }
       const brokerNeeded = Boolean(policy || config.permissionMode !== "bypassPermissions");
       if (brokerNeeded) {
         args.push("--permission-prompt-tool", "mcp__ogb__approve");
@@ -422,7 +426,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         ...(policy ? [
           ...(policy.permissions.terminal === false ? ["Bash"] : []),
           ...(policy.permissions.file === false ? ["Read", "Edit", "Write", "NotebookEdit", "Glob", "Grep"] : []),
-          ...(policy.permissions.browser === false ? ["WebFetch", "WebSearch"] : []),
+          ...(policy.permissions.browser === false ? ["WebFetch", "WebSearch", "mcp__web"] : []),
         ] : []),
       ];
       args.push("--disallowedTools", denied.join(","));
@@ -806,7 +810,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
-        capabilities: { sessionModelSwitch: "in-session", agentsMcp: true },
+        capabilities: { sessionModelSwitch: "in-session", agentsMcp: true, webTools: "mcp" },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {

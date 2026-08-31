@@ -274,7 +274,7 @@ body {
 
 /* Ikona siada tam, gdzie wylądowała kropka. */
 .menu-icon-in {
-  animation: menu-icon-in 0.28s ease-out both;
+  animation: menu-icon-in 0.2s ease-out both;
 }
 @keyframes menu-icon-in {
   from { opacity: 0; transform: scale(0.55); }

@@ -201,7 +201,10 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
-        capabilities: { sessionModelSwitch: "in-session" },
+        // This transcript-only API driver has no function/tool-call loop.
+        // Marking it explicitly prevents the harness from promising web tools
+        // that the xAI chat-completions request cannot execute.
+        capabilities: { sessionModelSwitch: "in-session", webTools: "none" },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.abort.abort(),
         respondToRequest: async () => {

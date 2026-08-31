@@ -28,7 +28,7 @@ import { DATA_DIR, NATIVE_DIR, loadConfig } from "../config.ts";
 import { EngineUnavailableError, ensureEngine, engineBaseUrl } from "../engine/supervisor.ts";
 import { connectors as customConnectors } from "../mcp-connectors.ts";
 import { engineSpec } from "../mcp-servers.ts";
-import { approvalRuleAllowed } from "../turn-policy.ts";
+import { approvalRuleAllowed, turnPolicy } from "../turn-policy.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "slafy";
@@ -38,6 +38,22 @@ export const ENGINE_PLUGIN_PREFIX = "mb-";
  * Kolizji nie ma: `agents` jest zarezerwowane w `mcp-connectors.ts`, a ten wpis
  * żyje w configu PROFILU, nie w `plugins.json`, więc prune z F7 go nie widzi. */
 export const ENGINE_AGENTS_MCP = "mb-agents";
+
+/** Map the harness policy to Hermes' real toolset names. `browser` covers both
+ * the interactive browser and read-only web search/fetch in the engine. */
+export function enginePermissionsForTurn(threadId: string): Record<string, boolean> | null {
+  const policy = turnPolicy(threadId);
+  if (!policy) return null;
+  const permissions = policy.permissions;
+  return {
+    ...(permissions.browser === undefined ? {} : { browser: permissions.browser, web: permissions.browser }),
+    ...(permissions.delegation === undefined ? {} : { delegation: permissions.delegation }),
+    ...(permissions.file === undefined ? {} : { file: permissions.file }),
+    ...(permissions.memory === undefined ? {} : { memory: permissions.memory }),
+    ...(permissions.skills === undefined ? {} : { skills: permissions.skills }),
+    ...(permissions.terminal === undefined ? {} : { terminal: permissions.terminal }),
+  };
+}
 
 /** Domyślny prefiks id bota w silniku. Odwzorowanie `mb-<threadId>` jest
  * wyliczalne w obie strony, więc nikt (ani driver, ani harness przy uwadze
@@ -244,6 +260,7 @@ export const SlafyDriver: ProviderDriver<SlafyConfig> = {
     // nasze wpisy od pluginów zainstalowanych w marketplace silnika — kasujemy
     // wyłącznie własne, gdy znikną z configu harnessu.
     let syncedConnectors: string | null = null;
+    const syncedPermissions = new Map<string, string>();
     const syncConnectors = async (baseUrl: string) => {
       const wanted = customConnectors();
       // multibot: Composio do silnika — Hermes musi widzieć te same narzędzia
@@ -328,6 +345,25 @@ export const SlafyDriver: ProviderDriver<SlafyConfig> = {
         );
       }
       syncedAgents.set(botId, signature);
+    };
+
+    const syncPermissions = async (baseUrl: string, botId: string, threadId: string) => {
+      const wanted = enginePermissionsForTurn(threadId);
+      if (!wanted) return;
+      const signature = JSON.stringify(wanted);
+      if (syncedPermissions.get(botId) === signature) return;
+      for (const [toolset, enabled] of Object.entries(wanted)) {
+        const res = await fetch(`${baseUrl}/api/bots/${encodeURIComponent(botId)}/permissions`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ toolset, enabled }),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) {
+          throw new Error(`engine PATCH /api/bots/${botId}/permissions (${toolset}) → HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`);
+        }
+      }
+      syncedPermissions.set(botId, signature);
     };
 
     // ── D4: attach-sync ────────────────────────────────────────────────────
@@ -487,6 +523,9 @@ export const SlafyDriver: ProviderDriver<SlafyConfig> = {
       // wywracania tury, gdy nie wyjdzie: rozmowa bez ask_bot jest lepsza niż brak.
       await syncAgents(baseUrl, botId, turn.integrations?.agents).catch((e) =>
         appendNative(threadId, { dir: "out", source: "slafy.agents", msg: { error: String(e) } }),
+      );
+      await syncPermissions(baseUrl, botId, threadId).catch((e) =>
+        appendNative(threadId, { dir: "out", source: "slafy.permissions", msg: { error: String(e) } }),
       );
 
       const turnId = newId();
@@ -664,7 +703,7 @@ export const SlafyDriver: ProviderDriver<SlafyConfig> = {
         // narzędzia" — montuje je nie w procesie agenta (nie ma go), tylko w
         // profilu bota po stronie silnika (`syncAgents`). Dla harnessu to ta sama
         // obietnica, więc gate w `index.ts` i podpowiedź w personie zostają wspólne.
-        capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true },
+        capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true, webTools: "native" },
         sendTurn,
         interruptTurn: async (threadId) => {
           const running = active.get(threadId);

@@ -92,6 +92,7 @@ import { inspectorEvents, recordInspectorEvent, replayInspectorEvents } from "./
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
 import { WorkspaceStore } from "./workspace.ts";
 import { canUseIntegration, clearTurnPolicy, rememberApprovalRule, setTurnPolicy } from "./turn-policy.ts";
+import { webMcpIntegration } from "./drivers/web-proxy.ts";
 // multibot (F12): jednorazowy wybór modelu dla bieżącego zadania (natural
 // language) — rozpoznawanie frazy + wycinanie jej z treści wiadomości.
 import { detectOneShotModelRequest, stripModelRequest } from "./model-request.ts";
@@ -1895,6 +1896,15 @@ opts?: {
         instance.adapter.capabilities.agentsMcp === true
       ) {
         integrations.agents = agentsIntegration(bot.id, commsDepth);
+      }
+      // All non-Hermes providers receive the same provider-neutral web MCP.
+      // Slafy exposes web_search/web_extract natively through Hermes instead;
+      // mounting a second server there would create duplicate tool names.
+      if (!isolated && instance.adapter.capabilities.webTools === "mcp" && canUseIntegration(bot.threadId, "browser")) {
+        integrations.web = webMcpIntegration();
+      }
+      if (!isolated && instance.adapter.capabilities.webTools === "native" && canUseIntegration(bot.threadId, "browser")) {
+        integrations.webNative = true;
       }
       // @mentions in the user's message (the composer's tagging UI) become
       // an explicit delegation nudge — the agent still does the ask_bot call

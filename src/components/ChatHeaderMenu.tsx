@@ -173,7 +173,7 @@ export function ChatHeaderMenu({ onToggleFind }: { onToggleFind: () => void }) {
           role="menu"
           data-menu-phase={phase}
           className={cn(
-            "absolute right-0 top-full z-30 mt-1.5 w-56 rounded-xl border border-hairline/40 bg-card p-1.5 shadow-lg",
+            "absolute right-0 top-full z-30 mt-1.5 w-48 rounded-xl border border-hairline/40 bg-card p-1 shadow-lg",
             // Zwój tylko w pierwszej fazie: klasa znika razem z przycięciem,
             // więc kropki mogą potem lecieć spoza obrysu panelu.
             phase === "unroll" && "menu-unroll",
@@ -190,7 +190,7 @@ export function ChatHeaderMenu({ onToggleFind }: { onToggleFind: () => void }) {
                   run();
                   setOpen(false);
                 }}
-                className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink hover:bg-raised"
+                className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] text-ink hover:bg-raised"
               >
                 <span
                   ref={(el) => {
@@ -214,7 +214,7 @@ export function ChatHeaderMenu({ onToggleFind }: { onToggleFind: () => void }) {
                   <Icon
                     size={16}
                     className={cn(
-                      "text-ink-secondary",
+                      "text-ink",
                       (phase === "unroll" || phase === "fly") && "opacity-0",
                       phase === "type" && "menu-icon-in",
                     )}

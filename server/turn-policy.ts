@@ -47,7 +47,8 @@ export function rememberApprovalRule(threadId: string, rule: { provider: string;
 export function toolsetFor(tool: string): string {
   const name = tool.toLowerCase().replace(/[^a-z0-9]+/g, "_");
   if (/(?:ask_bot|list_bots|agent|delegat|peer)/.test(name)) return "delegation";
-  if (/(?:browser|computer|navigate|screenshot|webfetch|websearch|web_extract|web_search|fetch|open_url)/.test(name)) return "browser";
+  if (name === "web_search" || name === "websearch" || name === "web_extract" || name === "webfetch" || name === "web_fetch" || name === "fetch" || name === "open_url") return "browser";
+  if (/(?:browser|computer|navigate|screenshot)/.test(name)) return "browser";
   if (/(?:memory|remember|recall)/.test(name)) return "memory";
   if (/(?:skill)/.test(name)) return "skills";
   if (/(?:bash|shell|terminal|command|execute|process|computer_exec)/.test(name)) return "terminal";

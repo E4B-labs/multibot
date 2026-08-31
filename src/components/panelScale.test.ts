@@ -19,15 +19,12 @@ describe("skala prawego panelu i czatu", () => {
     for (const width of widths) expect(width).toBeLessThanOrEqual(340);
   });
 
-  it("awatar na górze panelu jest przyciskiem odsłaniającym wygląd", () => {
+  it("awatar na górze panelu otwiera wyłącznie upload zdjęcia", () => {
     expect(panel).toContain("setAppearanceMode");
-    expect(panel).toContain("aria-expanded={appearanceMode !== \"closed\"}");
-    // siatki kształtu i koloru wchodzą dopiero za tym warunkiem
-    expect(panel).toContain("{appearanceMode !== \"closed\" && (");
-    const grids = panel.indexOf("MASCOT_SHAPES.map");
-    const guard = panel.indexOf("{appearanceMode !== \"closed\" && (");
-    expect(guard).toBeGreaterThan(-1);
-    expect(grids).toBeGreaterThan(guard);
+    expect(panel).toContain("aria-expanded={appearanceMode === \"photo\"}");
+    expect(panel).toContain("{appearanceMode === \"photo\" && (");
+    expect(panel).toContain("Prześlij zdjęcie");
+    expect(panel).not.toContain("MASCOT_SHAPES.map");
   });
 
   it("filtr szukajki wie o rozwijanej karcie wyglądu", () => {

@@ -33,6 +33,10 @@ export interface FakeEngine {
   provider: { provider?: string; model?: string; base_url?: string; has_key: boolean };
   /** per-bot browser mode synchronized by harness (G4). */
   computerModes: Record<string, "own" | "shared">;
+  /** per-bot toolset permissions synchronized by the slafy driver. */
+  permissions: Record<string, boolean>;
+  /** request trace for permission synchronization. */
+  permissionCalls: string[];
   /** historia wątku bota — to, co silnik oddaje na GET /api/bots/:id/messages. */
   history: Record<string, EngineMessage[]>;
   /** stan uwagi (D7) czytany przy podłączeniu klienta WS. */
@@ -87,6 +91,8 @@ export async function startFakeEngine(mode: FakeEngineMode = "happy"): Promise<F
     chats: [],
     provider: { has_key: false },
     computerModes: {},
+    permissions: {},
+    permissionCalls: [],
     history: {},
     attention: {},
     approvals: [],
@@ -231,6 +237,17 @@ export async function startFakeEngine(mode: FakeEngineMode = "happy"): Promise<F
       if (body.mode !== "own" && body.mode !== "shared") return json(422, { detail: "bad mode" });
       state.computerModes[botId] = body.mode;
       return json(200, { running: false, url: null, mode: body.mode, concurrency: body.mode === "shared" ? "queue" : "independent", busy: false });
+    }
+
+    const permissions = path.match(/^\/api\/bots\/([^/]+)\/permissions$/);
+    if (permissions && method === "PATCH") {
+      const botId = decodeURIComponent(permissions[1]);
+      if (!state.createdBots.includes(botId)) return json(404, { detail: "no such bot" });
+      const body = await readBody(req);
+      if (typeof body.toolset !== "string" || typeof body.enabled !== "boolean") return json(422, { detail: "bad permission" });
+      state.permissions[`${botId}:${body.toolset}`] = body.enabled;
+      state.permissionCalls.push(`${botId}/${body.toolset}=${body.enabled}`);
+      return json(200, { [body.toolset]: body.enabled });
     }
 
     // F4: odpowiedź na zgodę odwiesza turę stojącą w `chat` (patrz `pending`).

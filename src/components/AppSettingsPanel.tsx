@@ -1,7 +1,7 @@
 // App-level settings screen: who you are + credentials
 // shared by all bots. Per-bot settings (name, persona, model, computer)
 // live in SettingsPanel; contextual Box-token entry stays in ComputerPanel.
-import { ArrowLeft, ChevronRight, FileDown, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FileDown, Loader2, Plus, Trash2 } from "lucide-react";
 // multibot: ikony szyny sekcji przerysowane z lucide, żeby dało się animować
 // ich części na kliknięcie (suwaki jeżdżą, strzałki się kręcą, klucz dokręca).
 import { RefreshTabIcon, SlidersTabIcon, WrenchTabIcon } from "./SettingsTabIcons";
@@ -21,10 +21,6 @@ import { SkinPicker } from "./SkinPicker";
 import { MicrophoneRow } from "./MicrophoneRow";
 import { BotSettingsCard } from "./BotSettingsCard";
 import { applyMotionMode, readMotionMode, type MotionMode } from "@/lib/motion";
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt(): Promise<void>;
-}
 
 const slug = (value: string) =>
   value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
@@ -296,63 +292,6 @@ export function WorkspaceAccessSettings() {
         </div>
       )}
       {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
-    </div>
-  );
-}
-
-export function InstallAppSettings() {
-  const polish = useLanguage() === "pl";
-  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(false);
-  useEffect(() => {
-    const onPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallEvent(event as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => {
-      setInstalled(true);
-      setInstallEvent(null);
-    };
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    setInstalled(window.matchMedia("(display-mode: standalone)").matches);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
-  }, []);
-  const install = async () => {
-    if (!installEvent) return;
-    await installEvent.prompt();
-    setInstallEvent(null);
-  };
-  const userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent;
-  const isAppleMobile = /iPhone|iPad|iPod/.test(userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  const installHint = isAppleMobile
-    ? polish ? "Safari na iPhonie/iPadzie: Udostępnij → Dodaj do ekranu początkowego." : "iPhone/iPad Safari: Share → Add to Home Screen."
-    : /Android/.test(userAgent)
-      ? polish ? "Chrome na Androidzie: ⋮ → Zainstaluj aplikację lub Dodaj do ekranu głównego." : "Android Chrome: ⋮ → Install app or Add to Home screen."
-      : /Firefox/.test(userAgent)
-        ? polish ? "Firefox: otwórz tę stronę w Chrome lub Edge, aby zainstalować aplikację." : "Firefox: open this page in Chrome or Edge to install it as an app."
-        : polish ? "Chrome/Edge: użyj ikony instalacji przy pasku adresu lub w menu przeglądarki." : "Chrome/Edge: use the install icon in the address bar or browser menu.";
-  return (
-    <div className="mt-4 rounded-xl bg-card p-4">
-      <div className="text-[15px] font-medium text-ink">{polish ? "Zainstaluj aplikację" : "Install app"}</div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">
-        {installed
-          ? polish ? "MultiBot jest zainstalowany na tym urządzeniu." : "Multibot is installed on this device."
-          : polish ? "Używaj MultiBota jako aplikacji pełnoekranowej na telefonie lub komputerze." : "Use Multibot as a full-screen app on phone or computer."}
-      </div>
-      {installEvent ? (
-        <button onClick={() => void install()} className="mt-3 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover">
-          {polish ? "Zainstaluj MultiBota" : "Install Multibot"}
-        </button>
-      ) : isAppleMobile && !installed ? (
-        <div className="mt-3 text-[12px] text-ink-secondary">
-          {installHint}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1050,7 +989,7 @@ export function AppSettingsPanel() {
                   // więc przycisk nie wychodzi poza swoje miejsce w szynie.
                   // Żadnej kolorowej nakładki na kafelku: na kliknięcie rusza
                   // się wnętrze ikony, a nie tło pod nią (Kacper 28.08).
-                  "relative flex size-11 items-center justify-center rounded-xl",
+                   "relative flex size-10 items-center justify-center rounded-lg",
                   "transition-[background-color,color,transform] duration-150 ease-out active:scale-[0.92]",
                   "before:absolute before:left-0 before:h-5 before:w-0.5 before:rounded-full",
                   active
@@ -1145,16 +1084,6 @@ export function AppSettingsPanel() {
 
           {tab === "other" && (
             <>
-              {/* multibot: G2 — server token + parowanie urządzeń zebrane w
-                  jeden panel „Serwer i urządzenia" (otwierany stąd i z 3-kropek). */}
-              <button
-                onClick={() => dispatch({ type: "toggleServerAccess", open: true })}
-                className="flex w-full items-center justify-between rounded-xl bg-card px-4 py-3 text-left text-[14px] text-ink hover:bg-raised"
-              >
-                <span>{polish ? "Serwer i urządzenia" : "Server & devices"}</span>
-                <ChevronRight size={16} className="text-ink-secondary" />
-              </button>
-
               {/* multibot: G1 — custom model catalog lives at app level, never per bot. */}
               <CustomModels />
               {/* multibot: G1 — CLI allowlist UI; provisioning actions land in G3. */}

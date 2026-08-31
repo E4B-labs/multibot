@@ -13,7 +13,7 @@ export function WindowControls() {
   const polish = useLanguage() === "pl";
   if (!hasCustomWindowControls()) return null;
 
-  const button = "rounded-md p-1.5 text-ink-secondary transition-colors hover:bg-raised hover:text-ink";
+  const button = "rounded-md p-1.5 text-ink transition-colors hover:bg-raised";
 
   // 72 px to wysokość nagłówka czatu (py-3 + 48 px przycisku z awatarem) —
   // kontrolki mają stać w jednej linii z jego przyciskami, nie nad nimi.
