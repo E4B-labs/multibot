@@ -67,8 +67,11 @@ export function QwenMark({ size = 16, className }: IconProps) {
 
 export function OpenCodeMark({ size = 16, className }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={cn("fill-none stroke-current", className)} aria-label="OpenCode">
-      <path d="M8.2 4.5 3.5 12l4.7 7.5M15.8 4.5l4.7 7.5-4.7 7.5M13.5 3.5 10.5 20.5" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width={size} height={size} viewBox="0 0 300 300" className={cn(className)} aria-label="OpenCode">
+      <g transform="translate(30 0)">
+        <path d="M180 240H60V120H180V240Z" fill="#4B4646" />
+        <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="#F1ECEC" />
+      </g>
     </svg>
   );
 }
