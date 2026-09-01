@@ -171,7 +171,7 @@ export function buildInstallScript({ installerPath, exePath, installDir }) {
     "@echo off",
     "taskkill /f /im MultiBot.exe >nul 2>&1",
     "ping -n 3 127.0.0.1 >nul",
-    `start "" /wait "${installerPath}" /S --updated ${dArg}`,
+    `"${installerPath}" /S --updated ${dArg}`,
     `start "" "${exePath}"`,
     "",
   ].join("\r\n");

@@ -162,9 +162,24 @@ test("ścieżki są cytowane, a /D= zostaje na końcu wiersza", async () => {
     installDir: "C:\Programy\MultiBot",
   });
   const run = script.split("\r\n").find((l) => l.includes("installer.exe"));
+  assert.ok(!run.startsWith('start "" /wait '), `installer nie może przechodzić przez start: ${run}`);
   assert.ok(run.includes('"C:\cache\installer.exe"'), `ścieżka bez cudzysłowów: ${run}`);
   assert.ok(run.trimEnd().endsWith("/D=C:\Programy\MultiBot"), `/D= musi kończyć wiersz: ${run}`);
   assert.ok(script.includes('start "" "C:\Programy\MultiBot\MultiBot.exe"'), "brak relanszu aplikacji");
+});
+
+test("installer dostaje /D= bez parsera polecenia start", async () => {
+  const { buildInstallScript } = await freshModule();
+  const slash = String.fromCharCode(92);
+  const installerPath = ["C:", "cache", "installer.exe"].join(slash);
+  const installDir = ["C:", "Program Files", "MultiBot"].join(slash);
+  const script = buildInstallScript({
+    installerPath,
+    exePath: ["C:", "Program Files", "MultiBot", "MultiBot.exe"].join(slash),
+    installDir,
+  });
+  const run = script.split("\r\n").find((l) => l.includes("installer.exe"));
+  assert.equal(run, `"${installerPath}" /S --updated /D="${installDir}"`);
 });
 
 test("katalog ze spacjami dostaje /D= w cudzysłowach", async () => {
