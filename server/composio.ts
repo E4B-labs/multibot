@@ -156,7 +156,9 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
   if (toolkitCache && Date.now() - toolkitCache.at < 10 * 60_000) {
     return { cards: toolkitCache.cards, source: "api" };
   }
-  const backendKey = cfg.composio?.apiKey ?? cfg.composio?.key;
+  // Connect consumer keys (`ck_*`) authenticate only the Connect MCP. The
+  // Platform catalog accepts project API keys (`ak_*`) in `x-api-key`.
+  const backendKey = cfg.composio?.apiKey;
   if (backendKey) {
     try {
       const res = await fetch(`${BACKEND_URL}/toolkits?limit=500&sort_by=usage`, {

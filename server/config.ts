@@ -138,7 +138,7 @@ export function loadConfig(): AppConfig {
   }
   cfg.xai = { key: process.env.XAI_API_KEY, ...cfg.xai };
   cfg.opencode = { key: process.env.OPENCODE_API_KEY, ...cfg.opencode };
-  cfg.composio = { key: process.env.COMPOSIO_KEY, ...cfg.composio };
+  cfg.composio = { key: process.env.COMPOSIO_KEY, apiKey: process.env.COMPOSIO_API_KEY, ...cfg.composio };
   cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
   cfg.voice = { key: process.env.OMB_TTS_KEY, ...cfg.voice };
   return cfg;

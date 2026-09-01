@@ -1069,8 +1069,8 @@ export function AppSettingsPanel() {
                   <ApiKeyRow section="composio" label="Composio Connect key" placeholder="ck_…" />
                   <ApiKeyRow
                     section="composioApi"
-                    label="Composio API key (optional)"
-                    placeholder="ak_…  unlocks the full app catalog"
+                    label="Composio Project API key (optional)"
+                    placeholder="ak_…  unlocks the full marketplace"
                   />
                   {/* multibot (A5): box.ascii.dev usunięty z rejestracji driverów — pole tokena martwe, więc go nie ma */}
                 </div>
