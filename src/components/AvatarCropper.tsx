@@ -117,9 +117,6 @@ export function AvatarCropper({
         <canvas ref={canvasRef} width={preview} height={preview} className="block touch-none" style={{ width: preview, height: preview }} />
         {!imgLoaded && <div className="absolute inset-0 flex items-center justify-center text-[13px] text-ink-secondary">{polish ? "Wczytywanie..." : "Loading..."}</div>}
       </div>
-      <div className="text-center text-[11px] text-ink-secondary max-w-[220px]">
-        {polish ? "Przeciągnij by ustawić kadr, suwakiem powiększ" : "Drag to reposition, use slider to zoom"}
-      </div>
       <div className="flex items-center gap-2 w-full max-w-[220px]">
         <span className="text-[11px] text-ink-secondary">−</span>
         <input

@@ -10,6 +10,7 @@ const chat = readFileSync(new URL("./ChatView.tsx", import.meta.url), "utf8");
 const composer = readFileSync(new URL("./Composer.tsx", import.meta.url), "utf8");
 const picker = readFileSync(new URL("./ModelPicker.tsx", import.meta.url), "utf8");
 const providerIcons = readFileSync(new URL("./ProviderIcons.tsx", import.meta.url), "utf8");
+const computerPanel = readFileSync(new URL("./ComputerPanel.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 describe("skala prawego panelu i czatu", () => {
@@ -19,12 +20,17 @@ describe("skala prawego panelu i czatu", () => {
     for (const width of widths) expect(width).toBeLessThanOrEqual(340);
   });
 
-  it("awatar na górze panelu otwiera wyłącznie upload zdjęcia", () => {
+  it("awatar otwiera zakładki Bot, Generuj i Prześlij", () => {
     expect(panel).toContain("setAppearanceMode");
-    expect(panel).toContain("aria-expanded={appearanceMode === \"photo\"}");
-    expect(panel).toContain("{appearanceMode === \"photo\" && (");
-    expect(panel).toContain("Prześlij zdjęcie");
-    expect(panel).not.toContain("MASCOT_SHAPES.map");
+    expect(panel).toContain("aria-expanded={appearanceMode !== \"closed\"}");
+    expect(panel).toContain('type AppearanceMode = "closed" | "bot" | "generate" | "photo"');
+    expect(panel).toContain("MASCOT_SHAPES.map");
+    expect(panel).toContain("MAUS_COLOR_NAMES.map");
+    expect(panel).toContain('setAppearanceMode("generate")');
+    expect(panel).toContain("Prześlij");
+    expect(panel).toContain("Generuj");
+    expect(panel).not.toContain("Photo will be cropped to a circle like Facebook/GrokBot");
+    expect(panel).not.toContain("Zdjęcie zostanie przycięte do koła jak na Facebooku/GrokBot");
   });
 
   it("filtr szukajki wie o rozwijanej karcie wyglądu", () => {
@@ -62,6 +68,10 @@ describe("skala prawego panelu i czatu", () => {
 
   it("podpis poziomu rozumowania znika przy otwartym panelu", () => {
     expect(composer).toContain("{!state.settingsOpen && (");
+  });
+
+  it("przycisk ustawień ma symetryczny obszar podświetlenia", () => {
+    expect(computerPanel).toContain("inline-flex size-8 items-center justify-center rounded-md p-0");
   });
 
   it("pole pisania nie pokazuje własnego paska przewijania", () => {

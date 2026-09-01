@@ -1,8 +1,9 @@
-import { ChevronLeft, ImagePlus, Search, Trash2, X } from "lucide-react";
+import { ChevronLeft, ImagePlus, Pencil, Search, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useStore, type Bot } from "@/state/store";
 import { MausAvatar } from "./Avatar";
-import { stateForBot } from "@/lib/mascot";
+import { MAUS_COLORS, MAUS_COLOR_NAMES, stateForBot } from "@/lib/mascot";
+import { MASCOT_SHAPES } from "@/lib/mascotShapes";
 import { ModelPicker } from "./ModelPicker";
 import { EngineAutonomy } from "./EngineAutonomy";
 import { cn } from "@/lib/cn";
@@ -133,14 +134,14 @@ function BotSharing({ bot }: { bot: Bot }) {
   );
 }
 
-type AppearanceMode = "closed" | "photo";
+type AppearanceMode = "closed" | "bot" | "generate" | "photo";
 
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [query, setQuery] = useState("");
-  // Kliknięcie nagłówka czatu otwiera ten panel, a kliknięcie awatara w edycji
-  // otwiera bezpośrednio upload i kadr zdjęcia.
+  // Kliknięcie awatara otwiera panel wyglądu; wybór konkretnego trybu odbywa
+  // się w zakładkach Bot / Generuj / Prześlij.
   const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>("closed");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -163,7 +164,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const activeState = stateForBot(bot);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
 
-  const handleAvatarClick = () => setAppearanceMode((m) => (m === "photo" ? "closed" : "photo"));
+  const handleAvatarClick = () => setAppearanceMode((m) => (m === "closed" ? "bot" : "closed"));
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -247,10 +248,10 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           <button
             type="button"
             onClick={handleAvatarClick}
-            aria-expanded={appearanceMode === "photo"}
-            title={polish ? "Dodaj lub zmień zdjęcie profilowe" : "Add or change profile photo"}
-            aria-label={polish ? "Dodaj lub zmień zdjęcie profilowe" : "Add or change profile photo"}
-            className="rounded-full ring-offset-4 ring-offset-panel transition hover:opacity-90 focus:outline-none"
+            aria-expanded={appearanceMode !== "closed"}
+            title={polish ? "Zmień wygląd bota" : "Change bot appearance"}
+            aria-label={polish ? "Zmień wygląd bota" : "Change bot appearance"}
+            className="group relative rounded-full ring-offset-4 ring-offset-panel transition hover:opacity-90 focus:outline-none"
           >
             <MausAvatar
               color={bot.color}
@@ -261,52 +262,130 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               motion={mascotMotion?.kind ?? "none"}
               motionKey={mascotMotion?.nonce ?? 0}
             />
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
+              <Pencil size={24} strokeWidth={2.2} />
+            </span>
           </button>
-          {appearanceMode === "photo" && (
+          {appearanceMode === "bot" && (
             <div className="text-[11px] text-ink-secondary/70">
-              {polish ? "Zdjęcie profilowe — okrągły kadr" : "Profile photo — circular crop"}
+              {polish ? "Wybierz kształt i kolor awatara" : "Choose the avatar shape and color"}
             </div>
           )}
         </div>
 
         <div ref={cardsRef} className="flex flex-col gap-3">
 
-          {appearanceMode === "photo" && (
-          <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
-            <div className="flex items-center justify-between border-b border-hairline/40 px-2.5 py-2">
-              <div className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
-                <ImagePlus size={14} /> {polish ? "Prześlij zdjęcie" : "Upload photo"}
+          {appearanceMode !== "closed" && (
+            <div key={appearanceMode} className="animate-panel-in overflow-hidden rounded-xl border border-hairline/40 bg-card">
+              <div className="flex items-center justify-between border-b border-hairline/40 px-2.5 py-2">
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setAppearanceMode("bot")}
+                    className={cn("rounded-lg px-2.5 py-1 text-[13px] font-medium", appearanceMode === "bot" ? "bg-accent text-white" : "bg-raised text-ink-secondary hover:text-ink")}
+                  >
+                    {polish ? "Bot" : "Bot"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAppearanceMode("generate")}
+                    className={cn("rounded-lg px-2.5 py-1 text-[13px] font-medium", appearanceMode === "generate" ? "bg-accent text-white" : "bg-raised text-ink-secondary hover:text-ink")}
+                  >
+                    {polish ? "Generuj" : "Generate"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAppearanceMode("photo")}
+                    className={cn("flex items-center gap-1 rounded-lg px-2.5 py-1 text-[13px] font-medium", appearanceMode === "photo" ? "bg-accent text-white" : "bg-raised text-ink-secondary hover:text-ink")}
+                  >
+                    <ImagePlus size={14} /> {polish ? "Prześlij" : "Upload"}
+                  </button>
+                </div>
+                {appearanceMode === "bot" && (
+                  <button
+                    type="button"
+                    onClick={() => patch({ color: "green", mascotExpression: null, mascotShape: "blob" })}
+                    className="rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"
+                  >
+                    {polish ? "Resetuj" : "Reset"}
+                  </button>
+                )}
+                {appearanceMode === "photo" && bot.avatarUrl && (
+                  <button type="button" onClick={removeAvatar} disabled={avatarBusy} className="rounded-md px-2 py-1 text-[12px] text-danger hover:bg-raised">
+                    {polish ? "Usuń" : "Remove"}
+                  </button>
+                )}
               </div>
-              {bot.avatarUrl && (
-                <button type="button" onClick={removeAvatar} disabled={avatarBusy} className="rounded-md px-2 py-1 text-[12px] text-danger hover:bg-raised">
-                  {polish ? "Usuń" : "Remove"}
-                </button>
+
+              {appearanceMode === "bot" ? (
+                <div className="p-2.5">
+                  <div className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+                    {polish ? "Kształt ikony" : "Icon shape"}
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {MASCOT_SHAPES.map((shape) => (
+                      <button
+                        type="button"
+                        key={shape}
+                        onClick={() => patch({ mascotShape: shape })}
+                        className={cn(
+                          "flex h-[46px] items-center justify-center rounded-lg bg-inset transition-colors hover:bg-raised",
+                          (bot.mascotShape ?? "blob") === shape && "ring-2 ring-accent-border",
+                        )}
+                        title={shape}
+                        aria-label={`${polish ? "Użyj kształtu ikony" : "Use"} ${shape}`}
+                      >
+                        <MausAvatar color={bot.color} shape={shape} avatarUrl={null} state={activeState} size={32} motion={mascotMotion?.kind ?? "none"} motionKey={mascotMotion?.nonce ?? 0} />
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mb-1.5 mt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+                    {polish ? "Kolor" : "Color"}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {MAUS_COLOR_NAMES.map((color) => (
+                      <button
+                        type="button"
+                        key={color}
+                        onClick={() => patch({ color })}
+                        className={cn(
+                          "size-7 rounded-full border-2 border-transparent transition-transform hover:scale-110",
+                          bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
+                        )}
+                        style={{ backgroundColor: MAUS_COLORS[color] }}
+                        title={color}
+                        aria-label={`${polish ? "Użyj koloru awatara" : "Use mascot color"}: ${color}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : appearanceMode === "generate" ? (
+                <div className="flex min-h-[120px] items-center justify-center p-4 text-center text-[13px] text-ink-secondary">
+                  {polish ? "Generowanie awatara jest obecnie niedostępne." : "Avatar generation is currently unavailable."}
+                </div>
+              ) : (
+                <div className="p-3">
+                  {!pendingFile ? (
+                    <div className="flex flex-col items-center gap-3">
+                      {bot.avatarUrl ? (
+                        <img src={bot.avatarUrl} alt="avatar" className="size-[120px] rounded-full border border-hairline/30 object-cover" />
+                      ) : (
+                        <div className="flex size-[120px] items-center justify-center rounded-full border border-dashed border-hairline bg-inset">
+                          <ImagePlus size={28} className="text-ink-secondary" />
+                        </div>
+                      )}
+                      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFilePick} />
+                      <button type="button" onClick={() => fileInputRef.current?.click()} disabled={avatarBusy} className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50">
+                        {bot.avatarUrl ? (polish ? "Zmień zdjęcie" : "Change photo") : (polish ? "Wybierz zdjęcie" : "Choose photo")}
+                      </button>
+                    </div>
+                  ) : (
+                    <AvatarCropper file={pendingFile} onSave={saveAvatar} onCancel={() => setPendingFile(null)} />
+                  )}
+                </div>
               )}
             </div>
-
-            <div className="p-3">
-                {!pendingFile ? (
-                  <div className="flex flex-col items-center gap-3">
-                    {bot.avatarUrl ? (
-                      <img src={bot.avatarUrl} alt="avatar" className="size-[120px] rounded-full object-cover border border-hairline/30" />
-                    ) : (
-                      <div className="flex size-[120px] items-center justify-center rounded-full bg-inset border border-dashed border-hairline">
-                        <ImagePlus size={28} className="text-ink-secondary" />
-                      </div>
-                    )}
-                    <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFilePick} />
-                    <button type="button" onClick={() => fileInputRef.current?.click()} disabled={avatarBusy} className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50">
-                      {bot.avatarUrl ? (polish ? "Zmień zdjęcie" : "Change photo") : (polish ? "Wybierz zdjęcie" : "Choose photo")}
-                    </button>
-                    <div className="text-center text-[11px] text-ink-secondary max-w-[260px]">
-                      {polish ? "Zdjęcie zostanie przycięte do koła jak na Facebooku/GrokBot. Przeciągnij i powiększ by ustawić kadr." : "Photo will be cropped to a circle like Facebook/GrokBot. Drag and zoom to frame."}
-                    </div>
-                  </div>
-                ) : (
-                  <AvatarCropper file={pendingFile} onSave={saveAvatar} onCancel={() => setPendingFile(null)} />
-                )}
-            </div>
-          </div>
           )}
 
           <Field label={polish ? "Nazwa" : "Name"}>

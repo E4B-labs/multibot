@@ -409,7 +409,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         <div data-shell-header className="flex items-center justify-between px-4 py-3">
           <button
             onClick={() => dispatch({ type: "toggleSettings", open: true })}
-            className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+            className="inline-flex size-8 items-center justify-center rounded-md p-0 text-ink-secondary hover:bg-raised hover:text-ink"
             title={polish ? "Ustawienia bota" : "Bot settings"}
           >
             <Settings size={18} />
