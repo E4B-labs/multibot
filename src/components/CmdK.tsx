@@ -5,7 +5,7 @@
 // toggleAppSettings / togglePlugins. Fuzzy filter = plain case-insensitive
 // subsequence match, no libraries.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Eye, FileText, GraduationCap, Link2, ListTodo, MessageSquare, Monitor, Plus, Puzzle, Search, Settings, SlidersHorizontal, Users, Wand2, Wrench } from "lucide-react";
+import { Eye, FileText, GraduationCap, Link2, ListTodo, MessageSquare, Monitor, Plus, Plug, Search, Settings, SlidersHorizontal, Users, Wand2, Wrench } from "lucide-react";
 import { useStore } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
@@ -235,7 +235,7 @@ export function CmdK() {
       id: "plugins",
       label: polish ? "Wtyczki" : "Plugins",
       hint: "Panel",
-      icon: <Puzzle size={16} />,
+      icon: <Plug size={16} />,
       run: close(() => dispatch({ type: "togglePlugins", open: true })),
     });
     if (current) {

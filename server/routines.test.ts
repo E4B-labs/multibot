@@ -39,6 +39,15 @@ describe("driver-neutral routines", () => {
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ botId: "bot-custom", prompt: "check now" }), undefined);
   });
 
+  it("updates routine fields and keeps ownership scoped to the bot", () => {
+    const routines = new HarnessRoutines(file(), async () => {}, () => 1_000, 0);
+    const job = routines.create("bot-cli", { name: "Old", prompt: "old", schedule: "every 1m" });
+
+    const updated = routines.update("bot-cli", job.id, { name: "New", prompt: "new", schedule: "every 2m", enabled: false });
+    expect(updated).toMatchObject({ name: "New", prompt: "new", schedule: "every 2m", enabled: false, nextRunAt: null });
+    expect(routines.update("other-bot", job.id, { name: "not allowed" })).toBeNull();
+  });
+
   it("persists jobs and records unavailable or busy driver failures", async () => {
     const path = file();
     const routines = new HarnessRoutines(path, async () => { throw new Error("bot is already working"); }, () => 1_000, 0);

@@ -156,6 +156,8 @@ describe("botSystemPrompt", () => {
   it("routine halucynacja zablokowana — tylko create_routine, zero cloud", () => {
     const text = prompt(ALL);
     expect(text).toContain("create_routine");
+    expect(text).toContain("update_routine");
+    expect(text).toContain("delete_routine");
     expect(text).toContain("never call ToolSearch, /schedule");
     expect(text).toContain("Routines are local MultiBot routines and persist on this server");
     expect(text).toContain("Do not use provider-private memory, external cloud schedules");
