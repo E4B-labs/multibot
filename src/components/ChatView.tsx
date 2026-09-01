@@ -286,10 +286,10 @@ function RoomChip({ message }: { message: Message }) {
 // start rutyny z przelotki (`[Routine: nazwa]`) i sam wybór z pickera `/`.
 // Obie pokazujemy jako pigułkę zamiast surowego tekstu; start rutyny jest
 // niebieski, żeby wiązał się z listą rutyn.
-function userEventChip(message: Message) {
+function userEventChip(message: Message, onOpenRoutines: () => void) {
   if (message.role !== "user" || message.kind !== "text" || message.attachments?.length) return null;
   const routine = routineStartName(message.text);
-  if (routine) return <EventChip key={message.id} icon={<CalendarClock size={13} />} value={routine} accent />;
+  if (routine) return <EventChip key={message.id} icon={<CalendarClock size={13} />} value={routine} accent onClick={onOpenRoutines} title="Otwórz rutyny / Open routines" />;
   const command = slashCommandLabel(message.text);
   if (command) return <EventChip key={message.id} icon={<Wand2 size={13} />} value={command} />;
   return null;
@@ -614,7 +614,7 @@ export function ChatView({ bot }: { bot: Bot }) {
               default:
                 // multibot: pigułka zdarzenia wygrywa z dymkiem, gdy treść
                 // wiadomości jest samym zdarzeniem (patrz userEventChip)
-                child = userEventChip(m) ?? (
+                child = userEventChip(m, () => dispatch({ type: "toggleRoutines", open: true })) ?? (
                   <Bubble
                     key={m.id}
                     botId={bot.id}
