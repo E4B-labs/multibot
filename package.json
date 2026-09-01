@@ -2,7 +2,7 @@
   "name": "multibot",
   "description": "MultiBot Desktop — self-hosted workspace for a fleet of AI bots",
   "private": true,
-  "version": "0.3.7",
+  "version": "0.3.11",
   "type": "module",
   "main": "electron/main.mjs",
   "engines": {
