@@ -1,7 +1,7 @@
 {
   "platform": "android",
-  "version": "0.3.4",
-  "versionCode": 17,
-  "apkUrl": "https://expo.dev/artifacts/eas/EdKe_nNTSJeh2Vm__XW6H6hGQr0MS7vix-Jb-43cVNE.apk",
-  "notes": "Latest mobile build with current MultiBot UI and automatic APK installer updates."
+  "version": "0.3.5",
+  "versionCode": 18,
+  "apkUrl": "https://expo.dev/artifacts/eas/hPX117ezVxfA8yxA08ltfDniVGt--261ccSylJlvRzU.apk",
+  "notes": "Latest mobile build with hidden bot recovery, OpenCode model search, and automatic APK installer updates."
 }
