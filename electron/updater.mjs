@@ -27,7 +27,7 @@ const electronApi =
     ? electronNs.default
     : electronNs;
 const { app, ipcMain } = electronApi;
-const UPDATE_FEED_URL = "https://github.com/E4B-labs/multibot/releases/latest/download";
+const UPDATE_FEED_URL = "https://github.com/E4B-labs/multibot-desktop-releases/releases/latest/download";
 const UPDATE_ERROR_MESSAGE = "Update failed. Check your connection and try again.";
 
 let autoUpdater = null;
@@ -96,7 +96,7 @@ export function registerUpdaterIpc() {
   // No local-origin guard here (unlike screen/mic/speech in main.mjs): in C2
   // remote mode the window shows the remote host's page, so the guard just
   // swallowed the user's "Aktualizuj" click. Safe to drop — the update feed is
-  // pinned in the main process (public E4B-labs/multibot, sha512 verified
+  // pinned in the main process (public release archive, sha512 verified
   // against latest.yml), so the renderer can at most trigger the one
   // legitimate update; it never picks what gets installed.
   ipcMain.handle("update:download", () => {

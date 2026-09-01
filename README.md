@@ -38,7 +38,7 @@ transcripts remain on the operator's machine or chosen self-hosted server.
 ## Install the desktop app
 
 Download the newest installer from
-[MultiBot releases](https://github.com/E4B-labs/multibot/releases), then run
+[MultiBot Desktop Releases](https://github.com/E4B-labs/multibot-desktop-releases/releases), then run
 `MultiBot-Desktop-<version>-x64-setup.exe` on Windows.
 
 For macOS, download the DMG or ZIP asset matching the release. Unsigned local
@@ -49,8 +49,8 @@ builds may require the operating system's normal security confirmation.
 Requirements: Node.js 24+, Git, and pnpm 10+.
 
 ```sh
-git clone https://github.com/E4B-labs/multibot.git
-cd multibot
+git clone https://github.com/E4B-labs/multibot-desktop.git
+cd multibot-desktop
 corepack enable
 pnpm install --frozen-lockfile
 
@@ -92,7 +92,7 @@ events, command arguments, or diagnostics.
 Maintainers update the version, run the required checks, build the installer,
 and publish matching installer metadata and assets in GitHub Releases.
 Release artifacts are also mirrored in the
-[MultiBot Releases](https://github.com/E4B-labs/multibot-releases) archive.
+[MultiBot Desktop Releases](https://github.com/E4B-labs/multibot-desktop-releases) archive.
 
 ## Security
 
