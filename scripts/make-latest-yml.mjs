@@ -35,8 +35,8 @@ function makeFeed(file, url) {
 }
 
 const targets = [
-  { out: "latest.yml", file: `MultiBot-${version}-x64-setup.exe`, url: `MultiBot-${version}-x64-setup.exe` },
-  { out: "latest-mac.yml", file: `MultiBot-${version}-mac.zip`, url: `MultiBot-${version}-mac.zip` },
+  { out: "latest.yml", file: `MultiBot-Desktop-${version}-x64-setup.exe`, url: `MultiBot-Desktop-${version}-x64-setup.exe` },
+  { out: "latest-mac.yml", file: `MultiBot-Desktop-${version}-mac.zip`, url: `MultiBot-Desktop-${version}-mac.zip` },
 ];
 
 let wrote = 0;

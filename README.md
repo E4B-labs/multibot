@@ -1,48 +1,73 @@
-# MultiBot Desktop
+<h1 align="center">MultiBot</h1>
 
-MultiBot Desktop is a self-hosted workspace for running and coordinating AI
-bots. Each bot can have its own model, memory, tools, skills, schedule,
-permissions, and collaboration rules.
+<p align="center"><strong>Your private team of AI agents, in one workspace.</strong></p>
 
-The desktop application contains the React interface, Node.js harness, and
-optional Python engine. It can run locally or connect to a separately hosted
-MultiBot server.
+<p align="center">An open-source workspace for real AI agents — self-hosted, local-first, and built for private work.</p>
 
-## Features
+<p align="center">Every bot in the sidebar is a real agent — Claude or Codex running locally under the hood — with its own personality, its own model, its own cloud computer, and its own connected apps. Talk to them like contacts. Watch them work. Approve what matters.</p>
 
-- Multiple independent bots with per-bot profiles and memory
-- Team bots and private bots with access control
-- Agent-to-agent mail, rooms, delegation, and shared workspaces
-- Model and CLI providers, including OpenCode through ACP
-- MCP servers, connectors, browser tools, and computer-use sessions
-- Approval boundaries, autonomy controls, and permission-aware tools
-- Scheduled and webhook-triggered routines
-- Searchable chat history, sections, bot recovery, and responsive UI
-- Optional Python engine for extended tools and runtimes
-- Windows and macOS packaging through Electron
+<p align="center">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-20232A?logo=react&logoColor=61DAFB">
+  <img alt="Electron 43" src="https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white">
+  <img alt="Node.js harness" src="https://img.shields.io/badge/Node.js-harness-339933?logo=nodedotjs&logoColor=white">
+  <img alt="Python FastAPI engine" src="https://img.shields.io/badge/Python-FastAPI-009688?logo=fastapi&logoColor=white">
+  <img alt="Claude and Codex agents" src="https://img.shields.io/badge/Agents-Claude%20%C2%B7%20Codex-D97757">
+  <img alt="Release" src="https://img.shields.io/github/v/release/E4B-labs/multibot-desktop-releases?display_name=tag&label=release">
+  <img alt="Pull requests welcome" src="https://img.shields.io/badge/PRs-welcome-2EA44F">
+</p>
+
+<p align="center">
+  <a href="https://github.com/E4B-labs/multibot-desktop-releases/releases/latest/download/MultiBot-Desktop-0.3.7-x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/DOWNLOAD%20FOR%20WINDOWS-000000?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="https://github.com/E4B-labs/multibot-desktop-releases/releases/latest/download/MultiBot-Mobile-0.3.6.apk"><img alt="Download for Android" src="https://img.shields.io/badge/DOWNLOAD%20FOR%20ANDROID-000000?style=for-the-badge&logo=android&logoColor=white"></a>
+</p>
+
+<p align="center"><a href="https://github.com/E4B-labs/multibot-desktop-releases/releases/latest">latest release</a> · Windows: x64 installer · Android: APK · <a href="https://github.com/E4B-labs/multibot-desktop-releases/releases">all releases</a></p>
+
+<p align="center">
+  <img src="docs/screenshots/hero.png" alt="MultiBot workspace with multiple AI agents" width="960">
+</p>
+
+<p align="center"><strong>Private, secure automations for real businesses and real work.</strong></p>
+
+## What MultiBot does
+
+MultiBot turns AI models and command-line agents into a coordinated workspace:
+
+- Run several independent bots with separate profiles, models, memories, tools, skills, schedules, and permissions.
+- Use private bots for one user and team bots for shared work.
+- Let agents communicate through agent mail, rooms, delegation, and shared workspace memory.
+- Connect MCP servers, browser tools, computer-use sessions, connectors, and local runtimes.
+- Keep approval boundaries and autonomy controls visible while agents work.
+- Search chat history, organize bots into sections, recover hidden bots, and use the responsive interface on desktop or mobile.
+- Run routines from schedules or webhooks.
+- Use OpenCode through ACP, including OpenCode Go and free OpenCode Zen models.
 
 ## Architecture
 
 ```text
-React UI  ->  Node.js harness  ->  provider / CLI drivers
-                         |       ->  MCP and connectors
-                         |       ->  browser and computer tools
-                         |       ->  events, auth, rooms, routines
-                         `-----> Python engine (optional, loopback)
+React UI  ->  Electron shell / mobile client  ->  Node.js harness
+                                                    |-> provider and CLI drivers
+                                                    |-> MCP, connectors, browser, computer tools
+                                                    |-> auth, events, rooms, routines, agent mail
+                                                    `-> optional Python FastAPI engine
 ```
 
-The harness is the application boundary. The Python engine is intended to
-stay on loopback. Configuration, provider credentials, bot data, and chat
-transcripts remain on the operator's machine or chosen self-hosted server.
+The harness is the application boundary. The optional Python engine stays on
+loopback when used locally. MultiBot can also connect to a separately hosted,
+self-hosted workspace server.
 
-## Install the desktop app
+## Install
 
-Download the newest installer from
-[MultiBot Desktop Releases](https://github.com/E4B-labs/multibot-desktop-releases/releases), then run
-`MultiBot-Desktop-<version>-x64-setup.exe` on Windows.
+### Windows
 
-For macOS, download the DMG or ZIP asset matching the release. Unsigned local
-builds may require the operating system's normal security confirmation.
+Download the Windows installer from the button above and run
+`MultiBot-Desktop-<version>-x64-setup.exe`.
+
+### Android
+
+Download the APK from the button above, allow installation from the selected
+source when Android asks, and open MultiBot Mobile.
 
 ## Development
 
@@ -74,7 +99,7 @@ pnpm build
 pnpm build:server
 ```
 
-## Configuration
+## Configuration and security
 
 Start from the checked-in examples:
 
@@ -84,28 +109,26 @@ Start from the checked-in examples:
 
 Never commit `.env` files, API keys, access tokens, connector credentials,
 browser profiles, local databases, uploads, generated bundles, or transcripts.
-Secrets are write-only at the API boundary and must never appear in logs,
-events, command arguments, or diagnostics.
-
-## Release process
-
-Maintainers update the version, run the required checks, build the installer,
-and publish matching installer metadata and assets in GitHub Releases.
-Release artifacts are also mirrored in the
-[MultiBot Desktop Releases](https://github.com/E4B-labs/multibot-desktop-releases) archive.
-
-## Security
+Secrets are write-only at API boundaries and must never appear in logs, events,
+command arguments, or diagnostics.
 
 Read [`SECURITY.md`](SECURITY.md) before exposing a host to another device.
-MultiBot is self-hosted software; operators are responsible for network
+MultiBot is self-hosted software; operators remain responsible for network
 exposure, provider credentials, backups, and access policy.
+
+## Releases
+
+Desktop installers and mobile artifacts live in
+[MultiBot Desktop Releases](https://github.com/E4B-labs/multibot-desktop-releases).
+Maintainers update the version, run required checks, build artifacts, publish
+the updater metadata, and create a GitHub Release.
 
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Small focused pull requests and
 tests for behavior changes are preferred.
 
-## Contributors
+### Contributors
 
 - [SlafyGH](https://github.com/SlafyGH)
 
