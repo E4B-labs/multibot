@@ -1,0 +1,13 @@
+# multibot: only authenticated harness port is published. Engine has no host port.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.selfhost
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8799:8799"
+    volumes:
+      - multibot-data:/data
+volumes:
+  multibot-data:

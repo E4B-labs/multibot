@@ -1,0 +1,58 @@
+# multibot (H0/H2): the bot's own computer — a persistent Linux desktop.
+#
+# Base is trycua/cua-xfce pinned by digest: it already ships XFCE on DISPLAY=:1,
+# TigerVNC, noVNC (6901) and the cua computer-server (8000, screenshot/mouse/
+# keyboard over the whole desktop). What it does NOT ship is a Chromium-family
+# browser — it has Firefox, which speaks no CDP.
+#
+# CDP is not optional here: engine/server/computer.py drives the browser over it
+# and engine/server/teach.py records "Record a skill" demonstrations by injecting
+# JS through it. Swapping to Firefox would mean rewriting both. Adding Chrome to
+# the image keeps every existing browser code path working unchanged, so that is
+# what we do.
+#
+# Ubuntu 22.04's `chromium` package is a snap shim that cannot run in a
+# container, so we install Google's own Chrome .deb instead — same engine, same
+# CDP, and a real dpkg package.
+FROM trycua/cua-xfce@sha256:3bf8536d354d4212aa7a2ed6309f63b573f587da50abb42692fc37e230832d91
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends wget ca-certificates fonts-liberation xdotool socat curl \
+ && wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+ && apt-get install -y --no-install-recommends /tmp/chrome.deb \
+ && rm -f /tmp/chrome.deb \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The browser profile lives under the persistent /home/cua volume so cookies and
+# logins survive a container restart (gate H2).
+ENV CHROME_PROFILE=/home/cua/chrome-profile \
+    CDP_PORT=9222
+
+# Chrome 111+ pins the CDP listener to 127.0.0.1 and silently ignores
+# --remote-debugging-address, so docker's port forwarder (a separate netns)
+# cannot reach it. Rather than fight the browser, socat bridges 9223 -> 9222
+# inside the container. The host only ever publishes 9223 on 127.0.0.1, so this
+# widens nothing outside the container. Chrome accepts the proxied request
+# because the forwarded Host header is still an IP literal.
+COPY scripts/computer-chrome.sh /usr/local/bin/computer-chrome
+RUN chmod +x /usr/local/bin/computer-chrome \
+ && printf '%s\n' \
+    '[program:chrome]' \
+    'command=/usr/local/bin/computer-chrome' \
+    'autostart=true' \
+    'autorestart=true' \
+    'startsecs=3' \
+    'stdout_logfile=/var/log/chrome.log' \
+    'stderr_logfile=/var/log/chrome.err' \
+    '' \
+    '[program:cdp-bridge]' \
+    'command=/usr/bin/socat TCP-LISTEN:9223,fork,reuseaddr TCP:127.0.0.1:9222' \
+    'autostart=true' \
+    'autorestart=true' \
+    'startsecs=3' \
+    'stdout_logfile=/var/log/cdp-bridge.log' \
+    'stderr_logfile=/var/log/cdp-bridge.err' \
+    > /etc/supervisor/conf.d/chrome.conf
+
+EXPOSE 9223

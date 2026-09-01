@@ -1,0 +1,3 @@
+# multibot: skrypty shellowe zawsze LF — checkout na windows-latest robił CRLF
+# i wywalał test_termux_script (bash -n pada na \r).
+*.sh text eol=lf

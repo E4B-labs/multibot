@@ -1,0 +1,15 @@
+# Przykład transportu STDIO: serwer odpalany lokalnie przez `npx`, sekret przez
+# interpolację `${VAR}` Hermesa (secret scope profilu / `.env`), nie przez OAuth.
+# `transport` celowo nieustawiony — `plugins._info` wykrywa stdio po `command`.
+name: slack
+display_name: Slack
+description: Czytaj kanały i pisz wiadomości przez lokalny serwer MCP Slacka.
+command: npx
+args:
+  - -y
+  - "@modelcontextprotocol/server-slack"
+env:
+  SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN}
+tools_count: 8
+featured: false
+source: https://github.com/modelcontextprotocol/servers

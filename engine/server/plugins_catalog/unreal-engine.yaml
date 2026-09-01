@@ -1,0 +1,13 @@
+# URL potwierdzony: hermes-agent/optional-mcps/unreal-engine/manifest.yaml.
+#
+# Serwer siedzi WEWNĄTRZ edytora Unreala i słucha tylko na 127.0.0.1, bez
+# własnej autoryzacji — stąd BRAK klucza `auth`. Wpis pokazuje ścieżkę "zero OAuth":
+# po instalacji `status.connected` jest od razu `true` (patrz
+# `plugins._connected` — bez OAuth nie ma czego autoryzować).
+name: unreal-engine
+display_name: Unreal Engine
+description: Steruj edytorem Unreal Engine 5.8 przez jego lokalny serwer MCP (wymaga włączonej wtyczki).
+url: http://127.0.0.1:8000/mcp
+transport: http
+featured: false
+source: https://dev.epicgames.com/documentation/unreal-engine/unreal-mcp-in-unreal-editor
