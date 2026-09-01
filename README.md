@@ -105,6 +105,10 @@ exposure, provider credentials, backups, and access policy.
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Small focused pull requests and
 tests for behavior changes are preferred.
 
+## Contributors
+
+- [SlafyGH](https://github.com/SlafyGH)
+
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
