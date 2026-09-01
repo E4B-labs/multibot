@@ -1,7 +1,7 @@
 {
   "platform": "android",
-  "version": "0.3.5",
-  "versionCode": 18,
-  "apkUrl": "https://expo.dev/artifacts/eas/hPX117ezVxfA8yxA08ltfDniVGt--261ccSylJlvRzU.apk",
-  "notes": "Latest mobile build with hidden bot recovery, OpenCode model search, and automatic APK installer updates."
+  "version": "0.3.6",
+  "versionCode": 19,
+  "apkUrl": "https://expo.dev/artifacts/eas/jVNlZ959MVCBFiOYw9Mk4d05e0ufwxxgboLPn2FKAZw.apk",
+  "notes": "Latest mobile build with hidden bot recovery, OpenCode model search, routines from chat history, and automatic APK installer updates."
 }
