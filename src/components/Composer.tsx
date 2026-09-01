@@ -879,10 +879,12 @@ export function Composer({ bot }: { bot: Bot }) {
             margines wsunąłby 48px przerwy i partner nie stałby na równi. */}
         {peerChat && <PeerChatIndicator bot={bot} view={peerChat} />}
         <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5">
-        {/* The avatar floats above the composer without reserving a full-width strip. */}
-        <div className="pointer-events-none absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
-          <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={busyMotion?.state ?? normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={40} motion={busyMotion?.motion ?? "none"} motionKey={busyMotion ? 1 : 0} animated />
-        </div>
+        {/* Awatar pojawia się tylko na czas aktywnej tury bota. */}
+        {bot.busy && (
+          <div className="pointer-events-none absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
+            <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={busyMotion?.state ?? normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={40} motion={busyMotion?.motion ?? "none"} motionKey={busyMotion ? 1 : 0} animated />
+          </div>
+        )}
         <button
           type="button"
           data-attach-toggle
