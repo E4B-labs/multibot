@@ -268,8 +268,8 @@ def seeded(data_root):
         # Encje wyciąga sam store z treści (`add_fact`), więc fakty muszą nieść
         # nazwy własne — inaczej graf byłby bez węzłów encji.
         with MemoryStore(str(profile_dir(BOT) / "memory_store.db")) as store:
-        store.add_fact("Example User prefers Python over Java")
-        store.add_fact("Example User works with Example Collaborator on Python tooling")
+            store.add_fact("Example User prefers Python over Java")
+            store.add_fact("Example User works with Example Collaborator on Python tooling")
     finally:
         reset_hermes_home_override(token)
     return BOT
