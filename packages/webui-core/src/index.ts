@@ -28,10 +28,14 @@ export function normalizeHostUrl(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) throw new Error("Host URL is required");
 
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const hasScheme = /^https?:\/\//i.test(trimmed);
+  const candidate = hasScheme ? trimmed : `https://${trimmed}`;
   const parsed = new URL(candidate);
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error("Host URL must use http or https");
+  }
+  if (!hasScheme && parsed.hostname !== "localhost" && !parsed.hostname.includes(".") && !/^[\da-f:]+$/i.test(parsed.hostname)) {
+    throw new Error("Host URL is invalid");
   }
 
   const authorityStart = candidate.indexOf("://") + 3;

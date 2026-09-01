@@ -16,7 +16,7 @@
     "dev:desktop": "electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "lint": "git diff --check && tsc --noEmit --pretty false",
-    "typecheck": "tsc -b && tsc -p tsconfig.server.json",
+    "typecheck": "tsc -b && tsc -p packages/webui-core/tsconfig.json && tsc -p tsconfig.server.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview",

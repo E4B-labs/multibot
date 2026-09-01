@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
   normalizeHostUrl,
@@ -6,8 +6,8 @@ import {
   renameHost,
   resolveLastUsedHost,
   upsertHost,
-} from "./index";
-import type { HostRecord } from "./index";
+} from "@multibot/webui-core";
+import type { AuthMode, HostRecord, PlatformAdapter, StoredAuth } from "@multibot/webui-core";
 
 const firstHost: HostRecord = {
   id: "first",
@@ -34,8 +34,29 @@ describe("normalizeHostUrl", () => {
   it("rejects unsupported, malformed, and credential-bearing URLs", () => {
     expect(() => normalizeHostUrl("ftp://example.com")).toThrow();
     expect(() => normalizeHostUrl("not a host")).toThrow();
+    expect(() => normalizeHostUrl("not-a-url")).toThrow();
     expect(() => normalizeHostUrl("https://user:password@example.com")).toThrow();
     expect(() => normalizeHostUrl("https://user@example.com")).toThrow();
+  });
+});
+
+describe("shared contracts", () => {
+  it("exports auth and platform adapter shapes without runtime dependencies", () => {
+    expectTypeOf<AuthMode>().toEqualTypeOf<"v2" | "legacy">();
+    expectTypeOf<StoredAuth>().toMatchTypeOf<{
+      token: string;
+      mode: AuthMode;
+      userId?: string;
+    }>();
+    expectTypeOf<PlatformAdapter>().toMatchTypeOf<{
+      kind: "desktop" | "mobile" | "browser";
+      loadAuth: () => Promise<StoredAuth | null>;
+      saveAuth: (auth: StoredAuth) => Promise<void>;
+      clearAuth: () => Promise<void>;
+      openHostManager: () => Promise<void>;
+      switchHost: (hostId: string) => Promise<void>;
+      requestMicrophonePermission?: () => Promise<boolean>;
+    }>();
   });
 });
 
