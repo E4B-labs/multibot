@@ -1303,7 +1303,7 @@ export function Sidebar() {
         {collapsed ? (
           <button
             onClick={() => dispatch({ type: "toggleAppSettings" })}
-            className="flex w-full items-center justify-center rounded-xl py-2 text-ink-secondary hover:bg-raised/50 hover:text-ink"
+            className="inline-flex size-8 items-center justify-center rounded-md p-0 text-ink-secondary hover:bg-raised hover:text-ink"
             title={polish ? "Ustawienia aplikacji" : "App settings"}
           >
             <span className="relative inline-flex">
@@ -1321,7 +1321,7 @@ export function Sidebar() {
           </div>
           <button
             onClick={() => dispatch({ type: "toggleAppSettings" })}
-            className="rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+            className="inline-flex size-8 items-center justify-center rounded-md p-0 text-ink-secondary hover:bg-raised hover:text-ink"
             title={polish ? "Ustawienia aplikacji" : "App settings"}
           >
             <span className="relative inline-flex">
