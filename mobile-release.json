@@ -1,0 +1,7 @@
+{
+  "platform": "android",
+  "version": "0.3.2",
+  "versionCode": 16,
+  "apkUrl": "https://expo.dev/artifacts/eas/B0UPPa9tyyg0BCb71tLcmreuny_c_TpWAVSgAae681A.apk",
+  "notes": "APK installer update: automatic build detection and Android installer launch."
+}
