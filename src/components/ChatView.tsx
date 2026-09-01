@@ -218,6 +218,7 @@ function SessionSeparator({ at, polish }: { at: number; polish: boolean }) {
 }
 
 function EventPill({ message, polish }: { message: Message; polish: boolean }) {
+  const { dispatch } = useStore();
   if (!message.event) return null;
   const labels = polish
     ? { renamed: "Zmieniono nazwę na", "skill-created": "Utworzono umiejętność", "routine-created": "Utworzono rutynę", "goal-progress": "Cel" }
@@ -237,6 +238,8 @@ function EventPill({ message, polish }: { message: Message; polish: boolean }) {
       icon={message.event.type === "routine-created" ? <CalendarClock size={13} /> : message.event.type === "goal-progress" ? <Crosshair size={13} /> : undefined}
       label={labels[message.event.type]}
       value={message.event.value}
+      onClick={message.event.type === "routine-created" ? () => dispatch({ type: "toggleRoutines", open: true }) : undefined}
+      title={message.event.type === "routine-created" ? "Otwórz rutyny / Open routines" : undefined}
     />
   );
 }
