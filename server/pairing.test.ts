@@ -2,11 +2,21 @@
 // guess cap all hold. Each of those is a test here.
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { MAX_ATTEMPTS, PAIRING_TTL_MS, cancelPairing, claimPairing, pairingPending, startPairing } from "./pairing.ts";
+import { MAX_ATTEMPTS, PAIRING_TTL_MS, cancelPairing, claimPairing, pairingCredential, pairingPending, startPairing } from "./pairing.ts";
 
 beforeEach(() => cancelPairing());
 
 describe("pairing", () => {
+  it("advertises a v2 access token when modern identity pairing is available", () => {
+    expect(pairingCredential("legacy-token")).toEqual({ token: "legacy-token", authMode: "legacy" });
+    expect(pairingCredential("legacy-token", { accessToken: "v2-token", expiresAt: 123 })).toEqual({
+      token: "legacy-token",
+      authMode: "v2",
+      accessToken: "v2-token",
+      accessTokenExpiresAt: 123,
+    });
+  });
+
   it("issues a six-digit code and redeems it once", () => {
     const now = 1_000_000;
     const { code } = startPairing(now);

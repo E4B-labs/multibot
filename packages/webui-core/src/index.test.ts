@@ -33,6 +33,7 @@ describe("normalizeHostUrl", () => {
 
   it("rejects unsupported, malformed, and credential-bearing URLs", () => {
     expect(() => normalizeHostUrl("ftp://example.com")).toThrow();
+    expect(() => normalizeHostUrl("ftp.example://example.com")).toThrow();
     expect(() => normalizeHostUrl("not a host")).toThrow();
     expect(() => normalizeHostUrl("not-a-url")).toThrow();
     expect(() => normalizeHostUrl("https://user:password@example.com")).toThrow();

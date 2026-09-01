@@ -43,6 +43,22 @@ export function startPairing(now = Date.now()): { code: string; expiresAt: numbe
 
 export type ClaimResult = { ok: true } | { ok: false; reason: "expired" | "invalid" | "locked" };
 
+export function pairingCredential(
+  legacyToken: string,
+  modern?: { accessToken: string; expiresAt: number },
+): {
+  token: string;
+  authMode: "v2" | "legacy";
+  accessToken?: string;
+  accessTokenExpiresAt?: number;
+} {
+  return {
+    token: legacyToken,
+    authMode: modern ? "v2" : "legacy",
+    ...(modern ? { accessToken: modern.accessToken, accessTokenExpiresAt: modern.expiresAt } : {}),
+  };
+}
+
 /**
  * Redeem a code. Success consumes it, so a QR photographed over someone's
  * shoulder is worthless once the real phone has used it.

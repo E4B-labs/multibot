@@ -65,7 +65,7 @@ import {
   exec as computerExec,
 } from "./hosted-computer.ts";
 import * as computerControl from "./computer-control.ts";
-import { claimPairing, pairingPending, startPairing } from "./pairing.ts";
+import { claimPairing, pairingCredential, pairingPending, startPairing } from "./pairing.ts";
 import { pairingQrSvg } from "./qr.ts";
 import { filterSearchResults, searchText, type SearchResult } from "./search.ts";
 import { promptWithReply, resolveReplyTarget } from "./replies.ts";
@@ -3965,7 +3965,9 @@ const server = createServer(async (req, res) => {
     // ── multibot (C1): parowanie telefonu kodem z QR ───────────────────
     // `start` wymaga tokena (robi to zalogowany pulpit), `claim` NIE MOŻE —
     // telefon dopiero się przedstawia. Bezpieczeństwo krótkiego kodu stoi na
-    // wygasaniu, jednorazowości i limicie prób (server/pairing.ts).
+    // wygasaniu, jednorazowości i limicie prób (server/pairing.ts). Gdy host
+    // ma już konto v2, odpowiedź zawiera też access token dla WebView — cookie
+    // z natywnego fetch nie musi być współdzielone z jego jar'em.
     if (method === "POST" && path === "/api/pair/start") {
       if (actor?.role !== "owner") return json(res, 403, { error: "owner access required" });
       const { code, expiresAt } = startPairing();
@@ -3987,7 +3989,19 @@ const server = createServer(async (req, res) => {
       const sessionId = createDeviceSession("paired-device", String(body?.deviceName ?? body?.label ?? "phone"));
       res.setHeader("set-cookie", buildSessionCookie(sessionId, isSecureRequest(req)));
       res.setHeader("cache-control", "no-store");
-      return json(res, 200, { ok: true, token: cfg.auth!.token! });
+      const owner = identity.members().find((member) => member.role === "owner");
+      const modern = owner
+        ? identity.createSessionForActor({
+            userId: owner.userId,
+            username: owner.username,
+            displayName: owner.displayName,
+            role: owner.role,
+          }, "paired-device")
+        : undefined;
+      return json(res, 200, {
+        ok: true,
+        ...pairingCredential(cfg.auth!.token!, modern ? { accessToken: modern.accessToken, expiresAt: modern.expiresAt } : undefined),
+      });
     }
 
     // ── multibot (H4): sesja przeglądarki dla ekranu komputera ─────────

@@ -28,6 +28,10 @@ export function normalizeHostUrl(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) throw new Error("Host URL is required");
 
+  const explicitScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed);
+  if (explicitScheme && !/^https?:\/\//i.test(trimmed)) {
+    throw new Error("Host URL must use http or https");
+  }
   const hasScheme = /^https?:\/\//i.test(trimmed);
   const candidate = hasScheme ? trimmed : `https://${trimmed}`;
   const parsed = new URL(candidate);
