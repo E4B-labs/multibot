@@ -24,10 +24,6 @@
 
 <p align="center"><a href="https://github.com/E4B-labs/multibot-desktop-releases/releases/latest">latest release</a> · Windows: x64 installer · Android: APK · <a href="https://github.com/E4B-labs/multibot-desktop-releases/releases">all releases</a></p>
 
-<p align="center">
-  <img src="docs/screenshots/hero.png" alt="MultiBot workspace with multiple AI agents" width="960">
-</p>
-
 <p align="center"><strong>Private, secure automations for real businesses and real work.</strong></p>
 
 ## What MultiBot does
