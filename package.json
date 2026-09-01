@@ -24,9 +24,11 @@
     "build:speech": "swiftc -O electron/resources/speech-helper.swift -o electron/resources/speech-helper",
     "build:updater": "node scripts/bundle-updater.mjs",
     "package": "pnpm build && pnpm build:server && pnpm build:speech && pnpm build:updater && electron-builder --mac --publish never && node scripts/make-latest-yml.mjs",
+    "release:mac": "pnpm package && node scripts/publish-release.mjs",
     "provision:engine": "node scripts/provision-engine.mjs",
     "install:server:windows": "node scripts/install-server-windows.mjs",
-    "package:win": "pnpm build && pnpm build:server && pnpm build:updater && electron-builder --win --publish never && node scripts/make-latest-yml.mjs"
+    "package:win": "pnpm build && pnpm build:server && pnpm build:updater && electron-builder --win --publish never && node scripts/make-latest-yml.mjs",
+    "release:win": "pnpm package:win && node scripts/publish-release.mjs"
   },
   "dependencies": {
     "@trycua/cua-driver": "^0.19.3",

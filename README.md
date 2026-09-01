@@ -121,7 +121,16 @@ exposure, provider credentials, backups, and access policy.
 Desktop installers and mobile artifacts live in
 [MultiBot Desktop Releases](https://github.com/E4B-labs/multibot-desktop-releases).
 Maintainers update the version, run required checks, build artifacts, publish
-the updater metadata, and create a GitHub Release.
+the updater metadata, and create a GitHub Release there. Use the dedicated
+platform command so the release cannot be created in this source repository:
+
+```sh
+pnpm release:win
+pnpm release:mac
+```
+
+These commands create the `v<version>` tag and upload the generated installers
+and updater metadata to `E4B-labs/multibot-desktop-releases`.
 
 ## Contributing
 
