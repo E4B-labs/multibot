@@ -5,7 +5,7 @@
 // i write_file do końca życia procesu CLI.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,9 @@ afterEach(async () => {
 
 /** Broker-atrapa: odpowiada „allow" na każde pytanie, jak człowiek klikający Allow. */
 function broker(socketPath: string): Promise<Server> {
+  // macOS can leave the pathname of a closed Unix socket behind briefly.
+  // Remove that stale directory entry before rebinding the next turn.
+  try { unlinkSync(socketPath); } catch { /* no socket on the first bind */ }
   const s = createServer((conn: Socket) => {
     let buf = "";
     conn.on("data", (chunk) => {

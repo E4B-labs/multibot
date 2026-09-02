@@ -57,7 +57,14 @@ def client(monkeypatch, tmp_path):
         if not _ID_RE.match(bot_id):
             raise ValueError(f"invalid bot_id: {bot_id!r}")
 
-    def create_bot(bot_id, name, title="", description=""):
+    def create_bot(
+        bot_id,
+        name,
+        title="",
+        description="",
+        createdByBotId=None,
+        creationContext=None,
+    ):
         _validate(bot_id)
         if bot_id in db:
             # Ten sam wyjątek co Hermes na istniejącym profilu
@@ -69,6 +76,8 @@ def client(monkeypatch, tmp_path):
             "title": title,
             "description": description,
             "created_at": "2026-01-01T00:00:00+00:00",
+            "createdByBotId": createdByBotId,
+            "creationContext": creationContext,
         }
         return db[bot_id]
 
