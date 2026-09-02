@@ -752,6 +752,9 @@ def chat(bot_id: str, message: str, model: str | None = None) -> dict:
     return {"reply": done.get("reply", ""), "session_id": done.get("session_id") or session_id(bot_id)}
 
 
+_HISTORY_PAGE_SIZE = 500
+
+
 def messages(bot_id: str) -> list[dict]:
     """Historia wątku bota ze `hermes_state.db` profilu.
 
@@ -760,29 +763,45 @@ def messages(bot_id: str) -> list[dict]:
     (`api_server.py:7212-7214`); handler `_handle_session_messages`
     (`api_server.py:3551-3608`) oddaje `{"data": [...]}`, a pola wiadomości to
     `role` / `content` / `timestamp` (`_message_response`, `api_server.py:3302`).
-    Bez parametrów dostajemy ostatnie 500 wiadomości w kolejności
-    chronologicznej (`hermes_state.py:8393` — `latest` + "still returned in
-    chronological order").
+    Hermes ogranicza jedną odpowiedź do 500 wiadomości. Czytamy więc kolejne
+    strony od najstarszej do najnowszej (`order=oldest` + `offset`), aż serwer
+    zwróci krótszą stronę. Dzięki temu `conversation_history` przekazywane do
+    nowej tury zawiera całą zapisaną rozmowę, a nie tylko jej końcówkę.
 
     Świadomie BEZ `ensure_running()`: to odczyt do odmalowania wątku, więc brak
     sesji (404), brak gatewaya i każda inna wtopa = pusta lista, nigdy 500 ani
     kilkudziesięciosekundowy start Hermesa w GET-cie.
     """
     sid = session_id(bot_id)
+    url = f"{GATEWAY_URL}/p/{bot_id}/api/sessions/{sid}/messages"
+    history: list[dict] = []
+    offset = 0
     try:
-        r = httpx.get(
-            f"{GATEWAY_URL}/p/{bot_id}/api/sessions/{sid}/messages",
-            headers=_auth(),
-            timeout=10.0,
-        )
-        if r.status_code != 200:
-            return []
-        data = r.json()["data"]
+        while True:
+            r = httpx.get(
+                url,
+                params={
+                    "limit": _HISTORY_PAGE_SIZE,
+                    "offset": offset,
+                    "order": "oldest",
+                },
+                headers=_auth(),
+                timeout=10.0,
+            )
+            if r.status_code != 200:
+                return []
+            data = r.json()["data"]
+            if not isinstance(data, list):
+                return []
+            history.extend(data)
+            if len(data) < _HISTORY_PAGE_SIZE:
+                break
+            offset += len(data)
     except (httpx.HTTPError, ValueError, KeyError, TypeError):
         return []
     return [
         {"role": m["role"], "content": m["content"], "ts": m.get("timestamp") or ""}
-        for m in data
+        for m in history
         # Tool-calle i prompt systemowy do czatu nie trafiają; `content` bywa
         # `None` przy wiadomości z samym `tool_calls`.
         if m.get("role") in ("user", "assistant")
