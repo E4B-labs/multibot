@@ -233,13 +233,6 @@ _MEMORY_PLUGIN_CFG = {
     }
 }
 
-# Chromium leży poza C: — env musi popłynąć do procesu gatewaya, bo to tam
-# provider odpala Playwrighta. Fallback tylko na Windows (zakaz zapisu na C:);
-# gdzie indziej `None` = nie ustawiamy nic i playwright bierze swoją domyślną
-# lokalizację (na linuksie ścieżkę z `D:` skleiłoby względnie do repo).
-_PW_BROWSERS_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or (
-    r"D:\tmp\pw-browsers" if sys.platform == "win32" else None
-)
 
 # ponytail: jeden globalny proces gatewaya na cały serwer, bez nadzoru i bez
 # restartów po crashu — ensure_running() podniesie go dopiero przy następnym
@@ -501,8 +494,6 @@ def ensure_running(timeout: float = 90.0) -> None:
         "HERMES_HOME": str(data_dir()),
         "API_SERVER_KEY": api_key(),
     }
-    if _PW_BROWSERS_PATH:
-        env["PLAYWRIGHT_BROWSERS_PATH"] = _PW_BROWSERS_PATH
     # `hermes gateway run` = foreground (hermes_cli/subcommands/gateway.py:46-49);
     # przez `-m hermes_cli.main`, bo tam `hermes_bootstrap` importuje się pierwszy
     # (hermes_cli/main.py:46-60) — tego wymaga HERMES-FACTS §1.
