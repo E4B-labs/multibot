@@ -11,6 +11,8 @@ from pathlib import Path
 import yaml
 from dotenv import dotenv_values
 
+from server.bots import data_dir
+
 # Verified in the hermes clone: plugins/model-providers/{openrouter,anthropic}/__init__.py
 # `env_vars`; `custom` declares none and uses OPENAI_BASE_URL + OPENAI_API_KEY, and plain
 # "openai" is not a registered provider (aliased to custom) — agent/auxiliary_client.py:6257,
@@ -27,9 +29,10 @@ _REPO_ENV = Path(__file__).resolve().parent.parent / ".env"
 
 
 def _profile_dir(bot_id: str) -> Path:
-    """Same convention as server.bots.profile_dir (not imported: modules stay independent)."""
-    root = Path(os.environ.get("SLAFY_DATA_DIR", r"G:\Projects\slafy-bot-data"))
-    return root / "profiles" / bot_id
+    """Same convention as server.bots.profile_dir. Only the data root is shared —
+    `bots.profile_dir`'s id validation stays out: callers here already hold an
+    existing bot."""
+    return data_dir() / "profiles" / bot_id
 
 
 def _load_yaml(path: Path) -> dict:

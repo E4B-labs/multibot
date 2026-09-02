@@ -20,7 +20,14 @@ from hermes_cli import profiles as hermes_profiles
 # lowercase'uje zamiast odrzucić — a bot_id wchodzi z HTTP i trafia do ścieżki.
 _BOT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
-_DEFAULT_DATA_DIR = r"G:\Projects\slafy-bot-data"
+# Domyślka tylko dla samodzielnego uruchomienia silnika (`uvicorn server.app:app`
+# z ręki). Każda ścieżka startowa harnessu podaje `SLAFY_DATA_DIR` jawnie:
+# server/engine/supervisor.ts:141, scripts/dev-engine.mjs:26-29, electron/main.mjs:227,
+# skrypty instalacyjne, Dockerfile'e. `~/.openmausbot/engine-data` = to samo, co
+# ustawiają scripts/install-linux.sh:70 i scripts/install-termux.sh:73, więc
+# standalone i instalacja widzą ten sam katalog. Bez literałów z jednej maszyny —
+# repo jest rozwijane na Windows, Linuksie i macOS.
+_DEFAULT_DATA_DIR = Path.home() / ".openmausbot" / "engine-data"
 
 # Tryb pracy bota (faza F4): `approval` = narzędzia z kategorii ryzykownych czekają
 # na zgodę człowieka, `autonomous` = lecą bez pytania. BRAK klucza w `bot.json`

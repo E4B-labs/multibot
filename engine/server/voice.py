@@ -74,9 +74,9 @@ def _voice_dir() -> Path:
 # (starlette/formparsers.py:230), więc nagranie dłuższe niż ~minuta wylądowałoby
 # w `tempfile.gettempdir()` = %TEMP% = C: — sekcja "Uruchomienie" w README nie
 # ustawia TEMP (robi to tylko dev setup i `loop.ps1`). Przestawiamy tempy CAŁEGO
-# procesu na katalog danych, raz przy imporcie (wzorzec `_PW_BROWSERS_PATH`
-# z gateway.py). Łapie to przy okazji tempy Hermesa — `mkdtemp()` w
-# `_prepare_audio_for_transcription` (transcription_tools.py:1374) — co jest
+# procesu na katalog danych, raz przy imporcie. Łapie to przy okazji tempy
+# Hermesa — `mkdtemp()` w `_prepare_audio_for_transcription`
+# (transcription_tools.py:1374) — co jest
 # efektem pożądanym. Osobny `tmp/`, nie `voice/`: nie chcemy cudzych plików
 # tymczasowych w katalogu, który sprzątamy po nazwie.
 tempfile.tempdir = str(data_dir() / "tmp")
