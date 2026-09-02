@@ -41,8 +41,8 @@ Copy-Item .env.example .env   # uzupełnij OPENROUTER_API_KEY
 .venv\Scripts\python.exe -m uvicorn server.app:app --port 8700  # Windows
 ```
 
-Dane botów (profile Hermesa) żyją poza repo, w katalogu wskazanym przez
-`SLAFY_DATA_DIR` (a `HERMES_HOME` wskazuje katalog domowy Hermesa).
+Dane botów (profile Hermesa) żyją poza repo, w `SLAFY_DATA_DIR` (domyślnie
+`~/.openmausbot/engine-data`), a `HERMES_HOME` wskazuje katalog domowy Hermesa.
 
 ## Stary telefon (Termux)
 
