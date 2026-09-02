@@ -118,10 +118,10 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
           if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? `Setup failed (${response.status})`);
           // serwer od tej chwili ISTNIEJE, nawet jeśli rejestracja profilu za
           // moment padnie — bez tego stopka proponowałaby drugi setup, a ten
-          // odpowiada już tylko 409.
-          setStatus((prev) => ({ ...prev, server: { name: serverName, serverId: "", ...prev?.server, configured: true } }));
+          // odpowiada już tylko 409. Nazwa idzie z formularza: użytkownik
+          // właśnie ją nadał, a `status` pamięta jeszcze domyślną.
+          setStatus((prev) => ({ ...prev, server: { serverId: "", ...prev?.server, name: serverName, configured: true } }));
         }
-        setMode("register");
         response = await authFetch("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, displayName, serverPassword, deviceName: navigator.userAgent.slice(0, 80) }) });
       } else if (mode === "register") {
         response = await authFetch("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, displayName, serverPassword, deviceName: navigator.userAgent.slice(0, 80) }) });
