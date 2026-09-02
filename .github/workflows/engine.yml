@@ -1,11 +1,16 @@
 # multibot: pytest silnika (engine/). Workflow ich harnessa (ci.yml) nietknięty.
 name: engine
+# Bez filtru `paths:` celowo: wymagany check, który nie startuje, zostaje na
+# zawsze w stanie "Expected" i blokuje merge PR-a nietykającego engine/.
+# Repo jest publiczne, więc minuty Actions są darmowe — uruchamiamy zawsze.
 on:
   push:
     branches: [main]
-    paths: ["engine/**", ".github/workflows/engine.yml"]
   pull_request:
-    paths: ["engine/**", ".github/workflows/engine.yml"]
+
+concurrency:
+  group: engine-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   pytest:
