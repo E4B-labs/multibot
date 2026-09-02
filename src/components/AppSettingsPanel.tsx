@@ -253,7 +253,10 @@ function HostConnectionSettings() {
     setBusy(true);
     setError(null);
     try {
-      await window.ogb?.useLocalHost?.();
+      await bridge.remove(active.id);
+      await authFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+      clearAuthToken();
+      window.location.reload();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setBusy(false);
@@ -268,7 +271,11 @@ function HostConnectionSettings() {
     setError(null);
     try {
       await bridge.remove(id);
-      if (connection?.activeId === id) await window.ogb?.useLocalHost?.();
+      if (connection?.activeId === id) {
+        await authFetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+        clearAuthToken();
+        window.location.reload();
+      }
       else {
         refresh();
         setBusy(false);

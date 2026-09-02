@@ -37,9 +37,15 @@ import { authEventName, authFetch, clearAuthToken, getAuthToken, setAuthToken, s
 import { useLanguage } from "@/lib/language";
 import { unreadConversationCount } from "@/lib/unread";
 
+function connectToHost(url: string) {
+  const save = window.ogb?.addRemoteHost;
+  if (!save) return window.location.assign(url);
+  void save(url).catch(() => window.location.assign(url));
+}
+
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const polish = useLanguage() === "pl";
-  type Mode = "login" | "register" | "host" | "recover" | "legacy";
+  type Mode = "login" | "register" | "host" | "connect" | "recover" | "legacy";
   type Status = { server?: { configured: boolean; name: string; serverId: string }; session?: boolean };
   const [status, setStatus] = useState<Status | null>(null);
   const [mode, setMode] = useState<Mode>("login");
@@ -50,6 +56,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [displayName, setDisplayName] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
   const [token, setToken] = useState("");
+  const [remoteAddress, setRemoteAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -78,6 +85,11 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         const response = await authFetch("/api/instances");
         if (!response.ok) throw new Error(response.status === 401 ? (polish ? "Nieprawidłowy token dostępu" : "Invalid access token") : polish ? "Serwer niedostępny" : "Server unavailable");
         onLogin();
+        return;
+      }
+      if (mode === "connect") {
+        if (!remoteAddress.trim()) return;
+        connectToHost(remoteAddress.trim());
         return;
       }
       let response: Response;
@@ -120,10 +132,11 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         <button type="button" onClick={backToOnboarding} className="mb-4 text-left text-[12px] text-ink-secondary hover:text-ink">
           ← {polish ? "Wstecz" : "Back"}
         </button>
-        <h1 className="text-[18px] font-semibold">{configured ? (polish ? "Zaloguj się do serwera" : "Sign in to server") : polish ? "Utwórz serwer" : "Create server"}</h1>
-        <p className="mt-1 text-[13px] text-ink-secondary">{status?.server?.name ?? (polish ? "Bezpieczny wspólny workspace" : "Secure shared workspace")}</p>
+        <h1 className="text-[18px] font-semibold">{mode === "connect" ? polish ? "Dołącz do serwera" : "Join existing server" : configured ? (polish ? "Zaloguj się do serwera" : "Sign in to server") : polish ? "Utwórz serwer" : "Create server"}</h1>
+        <p className="mt-1 text-[13px] text-ink-secondary">{mode === "connect" ? polish ? "Wpisz adres hosta, do którego chcesz wrócić." : "Enter the address of the host you want to rejoin." : status?.server?.name ?? (polish ? "Bezpieczny wspólny workspace" : "Secure shared workspace")}</p>
         {mode === "host" && <input value={serverName} onChange={(event) => setServerName(event.target.value)} placeholder={polish ? "Nazwa serwera" : "Server name"} aria-label="Server name" className={field} autoFocus />}
-        {mode !== "legacy" && <>
+        {mode === "connect" && <input value={remoteAddress} onChange={(event) => setRemoteAddress(event.target.value)} placeholder="https://server.example" aria-label={polish ? "Adres serwera" : "Server address"} autoComplete="url" className={field} autoFocus />}
+        {mode !== "legacy" && mode !== "connect" && <>
           {(mode === "register" || mode === "host") && <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder={polish ? "Nazwa profilu" : "Display name"} aria-label="Display name" className={field} />}
           <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" aria-label="Username" autoComplete="username" className={field} />
           <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "recover" ? polish ? "Nowe hasło profilu" : "New profile password" : polish ? "Hasło profilu" : "Profile password"} aria-label="Profile password" autoComplete={mode === "login" ? "current-password" : "new-password"} className={field} />
@@ -132,12 +145,13 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         </>}
         {mode === "legacy" && <input autoFocus type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={polish ? "Stary token migracyjny" : "Legacy migration token"} aria-label="Legacy migration token" autoComplete="current-password" className={field} />}
         <button type="submit" disabled={busy} className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[13px] font-medium text-white disabled:opacity-50">
-          {busy ? (polish ? "Praca…" : "Working…") : mode === "host" ? polish ? "Utwórz serwer i profil" : "Create server and profile" : mode === "register" ? polish ? "Dołącz i utwórz profil" : "Join and create profile" : mode === "recover" ? polish ? "Odzyskaj konto" : "Recover account" : mode === "legacy" ? polish ? "Użyj tokenu migracyjnego" : "Use migration token" : polish ? "Zaloguj się" : "Sign in"}
+          {busy ? (polish ? "Praca…" : "Working…") : mode === "connect" ? polish ? "Połącz z serwerem" : "Connect to server" : mode === "host" ? polish ? "Utwórz serwer i profil" : "Create server and profile" : mode === "register" ? polish ? "Dołącz i utwórz profil" : "Join and create profile" : mode === "recover" ? polish ? "Odzyskaj konto" : "Recover account" : mode === "legacy" ? polish ? "Użyj tokenu migracyjnego" : "Use migration token" : polish ? "Zaloguj się" : "Sign in"}
         </button>
         <div className="mt-4 flex flex-wrap gap-2 text-[12px] text-ink-secondary">
           {configured && <button type="button" onClick={() => setMode(mode === "login" ? "register" : "login")} className="hover:text-ink">{mode === "login" ? polish ? "Utwórz profil" : "Create profile" : polish ? "Mam już profil" : "I have an account"}</button>}
           {configured && <button type="button" onClick={() => setMode("recover")} className="hover:text-ink">{polish ? "Odzyskaj" : "Recover"}</button>}
-          {!configured && <button type="button" onClick={() => setMode("register")} className="hover:text-ink">{polish ? "Dołącz do istniejącego" : "Join existing server"}</button>}
+          {!configured && mode !== "connect" && <button type="button" onClick={() => setMode("connect")} className="hover:text-ink">{polish ? "Dołącz do istniejącego" : "Join existing server"}</button>}
+          {!configured && mode === "connect" && <button type="button" onClick={() => setMode("host")} className="hover:text-ink">{polish ? "Utwórz serwer" : "Create server"}</button>}
           <button type="button" onClick={() => setMode(mode === "legacy" ? (configured ? "login" : "host") : "legacy")} className="ml-auto hover:text-ink">{mode === "legacy" ? polish ? "Nowe logowanie" : "New sign-in" : polish ? "Migracja starego tokenu" : "Legacy migration"}</button>
         </div>
         {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
