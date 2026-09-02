@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { startFakeEngine, type FakeEngine } from "../testing/fake-engine.ts";
 import { CURSOR_COLORS, computerMcpSpawn, configureEngineComputer, engineComputer, harnessBaseUrl } from "./computer-mcp.ts";
-import { engineBaseUrl, engineServerArgs, venvPython } from "./supervisor.ts";
+import { engineBaseUrl, engineServerArgs, runtimePython, venvPython } from "./supervisor.ts";
 
 const SERVER_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ROOT = join(SERVER_DIR, "..");
@@ -48,6 +48,36 @@ describe("computerMcpSpawn", () => {
 
   it("gives no computer when the engine venv is missing", async () => {
     expect(await engineComputer("t-1", join(tmpdir(), "nie-ma-takiego-silnika"))).toBeNull();
+  });
+
+  // Regresja: instalacja z instalatora NIE ma `engine/.venv` (electron-builder.yml
+  // wysyła `engine/server` bez venvu, Pythona dociąga scripts/provision-engine.mjs
+  // do userData). Spawn MCP komputera brał wyłącznie venv repo, więc `engineComputer`
+  // po cichu zwracał `null`: bot miał `hand_over_computer` z serwera agents i ani
+  // jednego narzędzia komputera — dokładnie "nie mam narzędzia do klikania".
+  it("uses the provisioned runtime python when the install has no repo venv", async () => {
+    const root = mkdtempSync(join(tmpdir(), "mb-engine-runtime-"));
+    const engineDirWithoutVenv = join(root, "engine");
+    mkdirSync(engineDirWithoutVenv, { recursive: true });
+    const runtimeBin = process.platform === "win32"
+      ? join(root, "python")
+      : join(root, "python", "bin");
+    mkdirSync(runtimeBin, { recursive: true });
+    const python = runtimePython(root)!;
+    writeFileSync(python, "");
+    const engine = await startFakeEngine();
+    process.env.OMB_ENGINE_RUNTIME = root;
+    process.env.ENGINE_URL = engine.url;
+    try {
+      expect(computerMcpSpawn("t-runtime", engineDirWithoutVenv).command).toBe(python);
+      // …i to musi wystarczyć, żeby tura dostała komputer, a nie cichego `null`.
+      expect(await engineComputer("t-runtime", engineDirWithoutVenv)).not.toBeNull();
+    } finally {
+      delete process.env.OMB_ENGINE_RUNTIME;
+      delete process.env.ENGINE_URL;
+      await engine.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("gives no computer when the engine will not come up", async () => {

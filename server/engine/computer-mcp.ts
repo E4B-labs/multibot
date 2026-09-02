@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { engineBotIdFor } from "../drivers/slafy.ts";
-import { engineBaseUrl, ensureEngine, venvPython } from "./supervisor.ts";
+import { engineBaseUrl, enginePython, ensureEngine, venvPython } from "./supervisor.ts";
 
 /** repo root: server/engine/ → server/ → repo */
 const ENGINE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "engine");
@@ -135,7 +135,14 @@ export async function attachExternalBrowser(threadId: string, cdpPort: number, c
  * stoi (to robi `engineComputer`). Wydzielone, żeby dało się je sprawdzić bez sieci. */
 export function computerMcpSpawn(threadId: string, engineDir = ENGINE_DIR): McpSpawn {
   return {
-    command: venvPython(engineDir),
+    // Ten sam interpreter, którym silnik jest podnoszony (`supervisor.ts`):
+    // venv repo w drzewie dev, a w spakowanej apce runtime dociągnięty do
+    // userData (`OMB_ENGINE_RUNTIME`). Sam `venvPython()` znaczył "komputer
+    // tylko na maszynie deweloperskiej": instalacja z instalatora nie ma
+    // `engine/.venv` (electron-builder.yml: „bez .venv"), więc `engineComputer`
+    // po cichu zwracał `null` i bot dostawał `hand_over_computer` z serwera
+    // agents, ale ani jednego narzędzia komputera.
+    command: enginePython(engineDir) ?? venvPython(engineDir),
     args: [
       "-m", "server.computer_mcp",
       "--bot", engineBotIdFor(threadId),
