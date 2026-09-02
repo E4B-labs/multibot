@@ -127,6 +127,10 @@ function cliSpawn(cli: string, args: string[]): ResolvedSpawn {
   const resolved = resolveCliSpawn(cli, args);
   // Windows nie ma ulimitu ani problemu — tam zostaje wywołanie jak dotąd.
   if (process.platform === "win32") return resolved;
+  // Keep an explicitly missing path visible to Node so the child emits its
+  // `error` event. Wrapping it in /bin/sh would turn ENOENT into exit 127 and
+  // incorrectly report `exit_before_result` instead of `spawn_error`.
+  if (/[\\/]/.test(resolved.command) && !existsSync(resolved.command)) return resolved;
   return {
     ...resolved,
     command: "/bin/sh",

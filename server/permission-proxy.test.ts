@@ -28,22 +28,43 @@ afterEach(async () => {
 
 /** Broker-atrapa: odpowiada „allow" na każde pytanie, jak człowiek klikający Allow. */
 function broker(socketPath: string): Promise<Server> {
-  // macOS can leave the pathname of a closed Unix socket behind briefly.
-  // Remove that stale directory entry before rebinding the next turn.
-  try { unlinkSync(socketPath); } catch { /* no socket on the first bind */ }
-  const s = createServer((conn: Socket) => {
-    let buf = "";
-    conn.on("data", (chunk) => {
-      buf += chunk;
-      let nl;
-      while ((nl = buf.indexOf("\n")) !== -1) {
-        const ask = JSON.parse(buf.slice(0, nl));
-        buf = buf.slice(nl + 1);
-        conn.write(JSON.stringify({ t: "answer", id: ask.id, behavior: "allow" }) + "\n");
-      }
-    });
+  // macOS can leave the pathname of a closed Unix socket behind briefly, or
+  // have the proxy's failed reconnect overlap the next bind. Retry only these
+  // transient bind failures so the test still exercises the same stable path.
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const listen = () => {
+      try { unlinkSync(socketPath); } catch { /* no socket on the first bind */ }
+      const s = createServer((conn: Socket) => {
+        let buf = "";
+        conn.on("data", (chunk) => {
+          buf += chunk;
+          let nl;
+          while ((nl = buf.indexOf("\n")) !== -1) {
+            const ask = JSON.parse(buf.slice(0, nl));
+            buf = buf.slice(nl + 1);
+            conn.write(JSON.stringify({ t: "answer", id: ask.id, behavior: "allow" }) + "\n");
+          }
+        });
+      });
+      const retry = (error: NodeJS.ErrnoException) => {
+        s.removeListener("error", retry);
+        s.close(() => {
+          if ((error.code === "EACCES" || error.code === "EADDRINUSE") && attempts++ < 20) {
+            setTimeout(listen, 25);
+          } else {
+            reject(error);
+          }
+        });
+      };
+      s.once("error", retry);
+      s.listen(socketPath, () => {
+        s.removeListener("error", retry);
+        resolve(s);
+      });
+    };
+    listen();
   });
-  return new Promise((resolve) => s.listen(socketPath, () => resolve(s)));
 }
 
 /** Jedno `tools/call` do proxy; zwraca tekst wyniku. */
