@@ -69,8 +69,8 @@ export function runtimePython(runtimeDir = process.env.OMB_ENGINE_RUNTIME): stri
 
 /** Interpreter, którym da się odpalić silnik, albo `null`. Venv repo idzie
  * pierwszy: gdy ktoś odpala apkę z drzewa dev, jego venv wygrywa z runtimem. */
-export function enginePython(): string | null {
-  const venv = venvPython();
+export function enginePython(engineDir = ENGINE_DIR): string | null {
+  const venv = venvPython(engineDir);
   if (existsSync(venv)) return venv;
   const runtime = runtimePython();
   return runtime && existsSync(runtime) ? runtime : null;
