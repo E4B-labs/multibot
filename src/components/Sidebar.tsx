@@ -19,7 +19,7 @@ import {
   Plus,
   Search,
   Settings,
-  Puzzle,
+  Plug,
   Trash2,
   Users,
 } from "lucide-react";
@@ -1294,8 +1294,10 @@ export function Sidebar() {
             collapsed ? "justify-center px-0" : "",
           )}
         >
-          <Puzzle size={20} className="text-ink-secondary" />
-            {!collapsed && <span className="text-[14px] text-ink">{polish ? "Wtyczki" : "Plugins"}</span>}
+          <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-white/10 bg-[#151515] text-ink-secondary">
+            <Plug size={18} />
+          </span>
+            {!collapsed && <span className="text-[14px] font-semibold text-ink">{polish ? "Wtyczki" : "Plugins"}</span>}
         </button>
         {/* multibot: w szynie nazwa użytkownika znika, a ustawienia aplikacji
             zostają — awatar profilu bez nazwy nic nie wnosi, a koło zębate
