@@ -5,7 +5,7 @@ wątek na PARĘ), więc żyje osobno zamiast puchnąć tamten moduł. Stan trzym
 `$SLAFY_DATA_DIR/groups.json` (stdlib json, klucz = id grupy) — jeden plik, bo
 grup jest garść, nie tysiące.
 
-`run()` to prosty router: wiadomość leci po kolei do każdego bota (`gateway.chat`),
+`run()` to prosty router: wiadomość leci równolegle do każdego bota (`gateway.chat`),
 a `owner` to bot najlepiej dopasowany OPISEM do wiadomości
 (`interbot.route_by_description`). Bez swarmu i bez wielokrokowego handoffu —
 jedna decyzja routingu wystarczy (ceiling opisany przy `run`).
@@ -15,6 +15,7 @@ from __future__ import annotations  # bez tego `def list` niżej wywala adnotacj
 
 import json
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 
 from server import bots, gateway, interbot
 
@@ -109,15 +110,17 @@ def run(group_id: str, message: str) -> dict:
     """Roześlij `message` do każdego bota pokoju i wskaż `owner` po opisie.
 
     Zwraca `{"turns": [{"bot_id", "reply"}, ...], "owner": bot_id}`. Nieznany
-    pokój → KeyError (→ 404). Tury sekwencyjne, w kolejności pokoju.
+    pokój → KeyError (→ 404). Wyniki zachowują kolejność pokoju, wywołania lecą równolegle.
     """
     group = get(group_id)
     if group is None:
         raise KeyError(f"no such group: {group_id}")
     bot_ids = group["bot_ids"]
-    # ponytail: tury sekwencyjne, jeden `gateway.chat` na bota; zrównoleglić
-    # (wątki / asyncio.gather po stronie app), gdyby latencja pokoju zaczęła boleć.
-    turns = [{"bot_id": bid, "reply": gateway.chat(bid, message)["reply"]} for bid in bot_ids]
+    task_result = run_tasks(
+        group_id,
+        [{"bot_id": bid, "message": message} for bid in bot_ids],
+    )
+    turns = [{"bot_id": task["bot_id"], "reply": task["reply"]} for task in task_result["tasks"]]
     # ponytail: JEDNA decyzja routingu, bez wielohopowego handoffu. Dopasowany
     # bot spoza pokoju cofa nas do pierwszego, nie do najlepszego-w-pokoju
     # (route_by_description patrzy na cały fleet) — wystarczy na bramkę; upgrade,
@@ -126,3 +129,45 @@ def run(group_id: str, message: str) -> dict:
     if owner not in bot_ids:  # None albo dopasowanie spoza pokoju
         owner = bot_ids[0]
     return {"turns": turns, "owner": owner}
+
+
+def run_tasks(group_id: str, tasks: list[dict[str, str]]) -> dict:
+    """Run one task per selected group bot at the same time.
+
+    `tasks` may contain fewer entries than the group roster. The returned order
+    matches the submitted assignments, while the calls themselves overlap.
+    """
+    group = get(group_id)
+    if group is None:
+        raise KeyError(f"no such group: {group_id}")
+    if not tasks:
+        raise ValueError("at least one task is required")
+
+    members = set(group["bot_ids"])
+    assignments: list[tuple[str, str]] = []
+    assigned: set[str] = set()
+    for item in tasks:
+        bot_id = item.get("bot_id", "")
+        message = item.get("message", "").strip()
+        if bot_id not in members:
+            raise ValueError(f"bot is not a member of group: {bot_id}")
+        if bot_id in assigned:
+            raise ValueError(f"bot already has a task: {bot_id}")
+        if not message:
+            raise ValueError("task message is required")
+        assigned.add(bot_id)
+        assignments.append((bot_id, message))
+
+    # ponytail: one thread per assigned bot; no artificial queue/limit, so
+    # independent assignments start together. Add a bounded executor only if
+    # untrusted fleets ever become large enough to exhaust OS threads.
+    with ThreadPoolExecutor(max_workers=len(assignments), thread_name_prefix="multibot-task") as pool:
+        futures = [pool.submit(gateway.chat, bot_id, message) for bot_id, message in assignments]
+        results = [future.result() for future in futures]
+
+    return {
+        "tasks": [
+            {"bot_id": bot_id, "message": message, "reply": result["reply"]}
+            for (bot_id, message), result in zip(assignments, results)
+        ]
+    }

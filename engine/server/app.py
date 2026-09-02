@@ -163,6 +163,15 @@ class GroupRename(BaseModel):
     name: str
 
 
+class GroupTask(BaseModel):
+    bot_id: str
+    message: str
+
+
+class GroupTasksIn(BaseModel):
+    tasks: list[GroupTask]
+
+
 class PluginIn(BaseModel):
     name: str
     # F7: własny serwer MCP użytkownika — spec zamiast wpisu z katalogu.
@@ -861,6 +870,16 @@ async def group_chat(group_id: str, body: ChatIn) -> dict:
             {"type": "group", "group_id": group_id, "bot_id": turn["bot_id"], "msg": turn["reply"]}
         )
     return result
+
+
+@app.post("/api/groups/{group_id}/tasks")
+async def group_tasks(group_id: str, body: GroupTasksIn) -> dict:
+    """Run individually assigned group tasks concurrently."""
+    return await asyncio.to_thread(
+        groups.run_tasks,
+        group_id,
+        [task.model_dump() for task in body.tasks],
+    )
 
 
 def _catalog() -> dict[str, dict]:

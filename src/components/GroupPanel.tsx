@@ -1,16 +1,12 @@
 // multibot: F9-FE — pokój grupowy jako pełny panel rozmowy, taki sam slot jak
 // zwykły agent. UI gada wyłącznie z przelotką harnessu
 // (`server/engine/proxy.ts`: `/api/engine/<rest>` → `/api/<rest>` silnika):
-//   POST /api/engine/groups/<gid>/chat {message} → {turns: [{bot_id, reply}],
-//     owner} (engine/server/app.py + groups.py; tury sekwencyjne, render po
-//     powrocie requestu — event WS `group` celowo nieużywany).
+//   POST /api/engine/groups/<gid>/tasks {tasks: [{bot_id, message}]} →
+//     {tasks: [{bot_id, message, reply}]} (engine/server/app.py + groups.py).
 //
-// ŹRÓDŁO HISTORII (decyzja): wypowiedź grupowa idzie zwykłym `gateway.chat`
-// BEZ żadnego markera grupy (groups.py `run`), więc w GET /api/bots/<id>/messages
-// nie da się odróżnić tury pokoju od tury 1:1 tego samego bota — "filtr po
-// prefiksie" nie istnieje. Uczciwym źródłem są odpowiedzi POST /chat z tej
-// sesji apki; pełne odpowiedzi i tak lądują w czacie każdego bota pokoju przez
-// attach-sync (D4), co panel mówi wprost w pustym stanie.
+// ŹRÓDŁO HISTORII (decyzja): zadania idą zwykłym `gateway.chat` bez markera
+// grupy, więc odpowiedzi bota zapisują się także w jego czacie 1:1. Panel
+// trzyma wspólny zapis zadań i odpowiedzi w tej sesji aplikacji.
 // ponytail: transkrypt w module-level Map (życie = sesja apki, przeżywa
 // zamknięcie/otwarcie panelu); upgrade = transkrypt grupy po stronie silnika,
 // gdy pokój ma pamiętać po restarcie apki.
@@ -37,18 +33,18 @@ async function api(path: string, init?: RequestInit): Promise<any> {
   return body;
 }
 
-/** Mirror of engine `groups.run()` (engine/server/groups.py). */
-interface GroupChatOut {
-  turns: Array<{ bot_id: string; reply: string }>;
-  owner: string;
-  messages?: Entry[];
-}
-
 /** `from`: "you" albo id bota silnika (`mb-<threadId>`). */
 interface Entry {
   from: "you" | string;
   text: string;
   at: number;
+}
+
+export function buildGroupTasks(botIds: string[], values: Record<string, string>) {
+  return botIds.flatMap((bot_id) => {
+    const message = (values[bot_id] ?? "").trim();
+    return message ? [{ bot_id, message }] : [];
+  });
 }
 
 const transcripts = new Map<string, Entry[]>();
@@ -57,7 +53,7 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [entries, setEntries] = useState<Entry[]>(() => group.messages ?? transcripts.get(group.id) ?? []);
-  const [text, setText] = useState("");
+  const [tasks, setTasks] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,12 +76,16 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
     const byThread = state.bots.find((b) => b.threadId === threadId);
     return byThread ? botDisplayName(byThread, polish ? "pl" : "en") : engineBotId;
   };
-  const members = group.bot_ids
+  const memberRows = group.bot_ids
     .map((engineBotId) => {
       const threadId = engineBotId.startsWith("mb-") ? engineBotId.slice(3) : engineBotId;
-      return state.bots.find((b) => b.threadId === threadId || b.id === engineBotId);
+      return {
+        engineBotId,
+        bot: state.bots.find((b) => b.threadId === threadId || b.id === engineBotId),
+      };
     })
-    .filter((bot): bot is (typeof state.bots)[number] => Boolean(bot));
+    .filter((row): row is typeof row & { bot: (typeof state.bots)[number] } => Boolean(row.bot));
+  const members = memberRows.map((row) => row.bot);
 
   const push = (added: Entry[]) =>
     setEntries((cur) => {
@@ -94,20 +94,20 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
       return next;
     });
 
-  const send = () => {
-    const message = text.trim();
-    if (!message || busy) return;
+  const runTasks = () => {
+    const assignments = buildGroupTasks(group.bot_ids, tasks);
+    if (!assignments.length || busy) return;
     setBusy(true);
     setError(null);
-    push([{ from: "you", text: message, at: Date.now() }]);
-    setText("");
-    api(`/api/groups/${group.id}/chat`, {
+    const at = Date.now();
+    push(assignments.map((task) => ({ from: "you", text: `${nameOf(task.bot_id)}: ${task.message}`, at })));
+    setTasks({});
+    api(`/api/groups/${group.id}/tasks`, {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ tasks: assignments }),
     })
-      .then((out: GroupChatOut) => out.messages
-        ? setEntries(out.messages)
-        : push(out.turns.map((t) => ({ from: t.bot_id, text: t.reply, at: Date.now() }))))
+      .then((out: { tasks: Array<{ bot_id: string; reply: string }> }) =>
+        push(out.tasks.map((task) => ({ from: task.bot_id, text: task.reply, at: Date.now() }))))
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false));
   };
@@ -157,8 +157,8 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
             <div className="text-[13px] font-medium text-ink">{polish ? "Brak wiadomości w tej sesji" : "No messages this session"}</div>
             <span className="text-[12px]">
               {polish
-                ? "Wiadomość trafia do każdego bota w pokoju. Historia zostaje w tym pokoju."
-                : "A message sent here goes to every bot in the room. The full history stays here."}
+                ? "Wpisz osobne zadanie przy każdym bocie. Puste pola zostaną pominięte."
+                : "Enter one task per bot. Empty fields are skipped."}
             </span>
           </div>
         ) : (
@@ -206,27 +206,40 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
         )}
       </div>
 
-      {/* Composer — jedna linia; odpowiedzi renderują się po powrocie POST-a */}
+      {/* Jedno zadanie na bota; wszystkie niepuste pola lecą równolegle. */}
       <div className="border-t border-hairline/40 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <input
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-            placeholder={polish ? "Napisz do pokoju" : "Message the room"}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
-          />
-          <button
-            onClick={send}
-            disabled={busy || !text.trim()}
-            className={cn(
-              "rounded-lg bg-raised p-2 text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50",
-            )}
-            title={polish ? "Wyślij do pokoju" : "Send to the room"}
-          >
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-          </button>
+        <div className="mb-2 flex items-center justify-between text-[12px] text-ink-secondary">
+          <span>{polish ? "Zadania botów" : "Bot tasks"}</span>
+          <span>{buildGroupTasks(group.bot_ids, tasks).length}/{memberRows.length}</span>
         </div>
+        <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
+          {memberRows.map(({ engineBotId, bot }) => (
+            <div key={engineBotId} className="flex items-start gap-2">
+              <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={stateForBot(bot)} size={24} animated={false} />
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 text-[11px] font-medium text-ink-secondary">{botDisplayName(bot, polish ? "pl" : "en")}</div>
+                <textarea
+                  className="min-h-12 w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+                  placeholder={polish ? "Zadanie dla tego bota" : "Task for this bot"}
+                  value={tasks[engineBotId] ?? ""}
+                  onChange={(e) => setTasks((current) => ({ ...current, [engineBotId]: e.target.value }))}
+                  disabled={busy}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={runTasks}
+          disabled={busy || buildGroupTasks(group.bot_ids, tasks).length === 0}
+          className={cn(
+            "mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50",
+          )}
+          title={polish ? "Uruchom zadania równolegle" : "Run tasks in parallel"}
+        >
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+          {polish ? "Uruchom zadania" : "Run tasks"}
+        </button>
       </div>
     </main>
   );

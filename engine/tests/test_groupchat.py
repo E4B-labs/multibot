@@ -9,6 +9,7 @@ delegate zapisały.
 
 import json
 import os
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -89,7 +90,7 @@ def test_api_group_rename_is_200_404_422(monkeypatch, tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# run: tury po kolei + owner
+# run: równoległe tury + owner
 # --------------------------------------------------------------------------- #
 def test_run_one_turn_per_bot_in_room_order(monkeypatch, tmp_path):
     monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
@@ -137,6 +138,58 @@ def test_run_missing_group_raises_keyerror(monkeypatch, tmp_path):
     monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
     with pytest.raises(KeyError):
         groups.run("nie-ma", "hej")
+
+
+def test_run_tasks_starts_only_assigned_bots_in_parallel(monkeypatch, tmp_path):
+    monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
+    fleet = [{"id": bid} for bid in ("a", "b", "c", "d", "e")]
+    monkeypatch.setattr(bots, "get_bot", lambda bid: next((b for b in fleet if b["id"] == bid), None))
+
+    ready = threading.Barrier(3)
+    calls = []
+
+    def fake_chat(bot_id, message):
+        calls.append((bot_id, message))
+        ready.wait(timeout=1)
+        return {"reply": f"{bot_id}:{message}", "session_id": "s"}
+
+    monkeypatch.setattr(gateway, "chat", fake_chat)
+    group = groups.create("room", [b["id"] for b in fleet])
+
+    out = groups.run_tasks(group["id"], [
+        {"bot_id": "a", "message": "task A"},
+        {"bot_id": "b", "message": "task B"},
+        {"bot_id": "c", "message": "task C"},
+    ])
+
+    assert sorted(calls) == [("a", "task A"), ("b", "task B"), ("c", "task C")]
+    assert out == {
+        "tasks": [
+            {"bot_id": "a", "message": "task A", "reply": "a:task A"},
+            {"bot_id": "b", "message": "task B", "reply": "b:task B"},
+            {"bot_id": "c", "message": "task C", "reply": "c:task C"},
+        ]
+    }
+
+
+def test_api_group_tasks_accepts_partial_assignments(monkeypatch, tmp_path):
+    monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
+    fleet = {bid: {"id": bid, "name": bid} for bid in ("a", "b", "c")}
+    monkeypatch.setattr(app_module.bots, "get_bot", lambda bid: fleet.get(bid))
+    monkeypatch.setattr(gateway, "chat", lambda bid, msg: {"reply": f"{bid}:{msg}", "session_id": "s"})
+
+    with TestClient(app_module.app) as client:
+        group = client.post("/api/groups", json={"name": "room", "bot_ids": list(fleet)}).json()
+        response = client.post(
+            f"/api/groups/{group['id']}/tasks",
+            json={"tasks": [{"bot_id": "a", "message": "one"}, {"bot_id": "c", "message": "three"}]},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["tasks"] == [
+        {"bot_id": "a", "message": "one", "reply": "a:one"},
+        {"bot_id": "c", "message": "three", "reply": "c:three"},
+    ]
 
 
 # --------------------------------------------------------------------------- #
