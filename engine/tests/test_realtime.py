@@ -92,6 +92,7 @@ def test_disconnected_client_does_not_break_broadcast(client, monkeypatch):
 def test_messages_maps_gateway_history(client, monkeypatch):
     def fake_get(url, **kwargs):
         assert url.endswith("/p/ala/api/sessions/slafy-ala/messages")
+        assert kwargs["params"] == {"limit": 500, "offset": 0, "order": "oldest"}
         return _fake_response(
             payload={
                 "data": [
@@ -108,6 +109,36 @@ def test_messages_maps_gateway_history(client, monkeypatch):
     assert client.get("/api/bots/ala/messages").json() == [
         {"role": "user", "content": "czesc", "ts": "t1"},
         {"role": "assistant", "content": "siema", "ts": "t3"},
+    ]
+
+
+def test_messages_loads_history_past_gateway_page_limit(client, monkeypatch):
+    pages = [
+        [
+            {"role": "user", "content": f"wiadomosc-{i}", "timestamp": str(i)}
+            for i in range(500)
+        ],
+        [
+            {"role": "assistant", "content": f"wiadomosc-{i}", "timestamp": str(i)}
+            for i in range(500, 503)
+        ],
+    ]
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs["params"])
+        page = pages[len(calls) - 1]
+        return _fake_response(payload={"data": page})
+
+    monkeypatch.setattr(gateway.httpx, "get", fake_get)
+    result = client.get("/api/bots/ala/messages").json()
+
+    assert len(result) == 503
+    assert result[0] == {"role": "user", "content": "wiadomosc-0", "ts": "0"}
+    assert result[-1] == {"role": "assistant", "content": "wiadomosc-502", "ts": "502"}
+    assert calls == [
+        {"limit": 500, "offset": 0, "order": "oldest"},
+        {"limit": 500, "offset": 500, "order": "oldest"},
     ]
 
 

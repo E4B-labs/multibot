@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -9,7 +10,11 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 
 describe("durable group store", () => {
   it("persists roster and transcript", () => {
-    const root = (process.env.TMP || process.env.TEMP || "D:\\tmp").toUpperCase().startsWith("D:\\") ? (process.env.TMP || process.env.TEMP || "D:\\tmp") : "D:\\tmp";
+    const configuredTemp = process.env.TMP || process.env.TEMP;
+    const root = process.platform === "win32" && configuredTemp?.toUpperCase().startsWith("D:\\")
+      ? configuredTemp
+      : tmpdir();
+    mkdirSync(root, { recursive: true });
     const dir = mkdtempSync(join(root, "multibot-group-"));
     dirs.push(dir);
     const file = join(dir, "groups.json");

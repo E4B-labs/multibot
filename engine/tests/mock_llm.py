@@ -103,10 +103,13 @@ async def completions(request: Request, profile: str = ""):
 
 @app.get("/api/sessions/{session_id}/messages")
 @app.get("/p/{profile}/api/sessions/{session_id}/messages")
-async def session_messages(session_id: str, profile: str = ""):
+async def session_messages(session_id: str, request: Request, profile: str = ""):
     """Kształt `{"data": [...]}` z polami `role`/`content`/`timestamp`
     (`api_server.py:3302`, `:3551-3608`)."""
-    return {"data": history.get(session_id, [])}
+    data = history.get(session_id, [])
+    limit = int(request.query_params.get("limit", len(data)))
+    offset = int(request.query_params.get("offset", 0))
+    return {"data": data[offset : offset + limit]}
 
 
 @app.post("/v1/runs")

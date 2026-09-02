@@ -66,7 +66,7 @@ def test_file_delivery_block_reaches_old_profiles(tmp_path, monkeypatch):
 
 
 def test_v1_computer_block_replaced_not_duplicated(tmp_path, monkeypatch):
-    """Profil z blokiem komputera V1 dostaje V2 ZAMIAST V1 — bez drugiego bloku
+    """Profil z blokiem komputera V1 dostaje V3 ZAMIAST V1 — bez drugiego bloku
     (sekcja A2: „rozszerz istniejący blok, nie dokładaj drugiego")."""
     monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -93,20 +93,22 @@ earlier.
 
     bots.ensure_multibot_identity("v1bot")
     soul = (profile / "SOUL.md").read_text(encoding="utf-8")
-    assert "MULTIBOT_COMPUTER_IDENTITY_V2" in soul
+    assert "MULTIBOT_COMPUTER_IDENTITY_V3" in soul
     assert "MULTIBOT_COMPUTER_IDENTITY_V1" not in soul
+    assert "MULTIBOT_COMPUTER_IDENTITY_V2" not in soul
     assert soul.count("## MultiBot computer") == 1  # bez duplikacji
     assert "Wlasna osobowosc." in soul  # cudzy SOUL zostaje
-    # rozszerzenie V2 jest: terminal/pliki = jedna maszyna + reguła wytrwałości
+    # rozszerzenie V3 jest: terminal/pliki = jedna maszyna + reguła wytrwałości
     assert "same machine as the" in soul
     assert "Keep trying until you succeed" in soul
 
 
-def test_new_bot_writes_v2_identity(tmp_path, monkeypatch):
+def test_new_bot_writes_v3_identity(tmp_path, monkeypatch):
     monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     bots.create_bot("nowy", name="Nowy")
     soul = (bots.profile_dir("nowy") / "SOUL.md").read_text(encoding="utf-8")
-    assert "MULTIBOT_COMPUTER_IDENTITY_V2" in soul
+    assert "MULTIBOT_COMPUTER_IDENTITY_V3" in soul
     assert "MULTIBOT_COMPUTER_IDENTITY_V1" not in soul
+    assert "MULTIBOT_COMPUTER_IDENTITY_V2" not in soul
     assert soul.count("## MultiBot computer") == 1
