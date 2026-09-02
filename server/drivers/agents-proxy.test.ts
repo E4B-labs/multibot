@@ -142,7 +142,7 @@ describe("agents-proxy MCP surface", () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(expect.arrayContaining(["list_bots", "ask_bot", "send_bot_mail", "read_bot_mail", "remember", "create_skill", "create_routine", "create_agent", "list_groups", "delete_group", "read_file", "run_command"]));
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(expect.arrayContaining(["list_bots", "ask_bot", "send_bot_mail", "read_bot_mail", "remember", "create_skill", "create_routine", "list_routines", "update_routine", "delete_routine", "create_agent", "list_groups", "delete_group", "read_file", "run_command"]));
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -175,6 +175,28 @@ describe("agents-proxy MCP surface", () => {
       prompt: "hello there!",
       schedule: "35 1 * * *",
     });
+  });
+
+  it("routes routine edits and deletion through the local MultiBot action API", async () => {
+    await callTool("update_routine", {
+      id: "routine-1",
+      name: "Renamed routine",
+      prompt: "updated prompt",
+      schedule: "every 1h",
+      enabled: false,
+    });
+    expect(lastActionBody).toMatchObject({
+      fromBotId: "bot-asker",
+      action: "routines.update",
+      id: "routine-1",
+      name: "Renamed routine",
+      prompt: "updated prompt",
+      schedule: "every 1h",
+      enabled: false,
+    });
+
+    await callTool("delete_routine", { id: "routine-1" });
+    expect(lastActionBody).toMatchObject({ fromBotId: "bot-asker", action: "routines.delete", id: "routine-1" });
   });
 
   // multibot (F9): delegacja po opisie — bez tego pola adresata da się wybrać

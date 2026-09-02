@@ -177,6 +177,8 @@ export function botSystemPrompt(
     toolsText,
     "Use MultiBot workspace tools and APIs for memory, skills, routines, agents, groups, computer, files and terminal. Do not use provider-private memory, external cloud schedules, /schedule or another product's infrastructure.",
     agents &&
+      "For routine changes, use `list_routines` first, then `update_routine` with the routine id and only the fields to change; use `delete_routine` with the routine id to remove it.",
+    agents &&
       "Memory — `recall` before answering anything that predates this conversation, then `remember` facts that stay true tomorrow. This bot's memory is private to this bot. Use `recall_team` and `remember_for_team` only for decisions and facts every bot/member should share. `read_memory` and `read_team_memory` return durable MultiBot notes; never write provider-private memory files.",
     agents &&
       "Skills — when the user shows or describes a procedure you will repeat, call `create_skill` with a task-shaped name (`weekly client report`, not `skill 1`) and the steps as instructions; `list_skills` shows what you already have.",
