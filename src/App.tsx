@@ -37,9 +37,40 @@ import { authEventName, authFetch, clearAuthToken, getAuthToken, setAuthToken, s
 import { useLanguage } from "@/lib/language";
 import { unreadConversationCount } from "@/lib/unread";
 
+export type LoginMode = "login" | "register" | "host" | "recover" | "legacy";
+
+/** Nagłówek ekranu logowania idzie z trybu, nie ze stanu serwera. Kiedy szedł
+ * ze `configured`, ekran „dołącz do istniejącego" dalej miał na sobie „Utwórz
+ * serwer" — użytkownik nie widział, że w ogóle przełączył formularz. */
+export function loginTitle(mode: LoginMode, polish: boolean): string {
+  if (mode === "host") return polish ? "Utwórz serwer" : "Create server";
+  if (mode === "register") return polish ? "Dołącz do istniejącego serwera" : "Join existing server";
+  if (mode === "recover") return polish ? "Odzyskaj konto" : "Recover account";
+  if (mode === "legacy") return polish ? "Migracja starego tokenu" : "Legacy migration";
+  return polish ? "Zaloguj się do serwera" : "Sign in to server";
+}
+
+/** Przełącznik trybu w stopce — też z trybu, nie ze stanu serwera. Wcześniej
+ * warunkiem było samo `!configured`, więc po kliknięciu „Dołącz do
+ * istniejącego" ten sam napis zostawał na ekranie i nie prowadził nigdzie. */
+export function loginSwitch(
+  mode: LoginMode,
+  configured: boolean,
+  polish: boolean,
+): { next: LoginMode; label: string } | null {
+  if (mode === "legacy") return null;
+  if (!configured)
+    return mode === "host"
+      ? { next: "register", label: polish ? "Dołącz do istniejącego serwera" : "Join existing server" }
+      : { next: "host", label: polish ? "Utwórz serwer" : "Create server" };
+  return mode === "login"
+    ? { next: "register", label: polish ? "Utwórz profil" : "Create profile" }
+    : { next: "login", label: polish ? "Mam już profil" : "I have an account" };
+}
+
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const polish = useLanguage() === "pl";
-  type Mode = "login" | "register" | "host" | "recover" | "legacy";
+  type Mode = LoginMode;
   type Status = { server?: { configured: boolean; name: string; serverId: string }; session?: boolean };
   const [status, setStatus] = useState<Status | null>(null);
   const [mode, setMode] = useState<Mode>("login");
@@ -85,6 +116,10 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         if (!configured) {
           response = await authFetch("/api/setup/server", { method: "POST", body: JSON.stringify({ name: serverName, serverPassword }) });
           if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? `Setup failed (${response.status})`);
+          // serwer od tej chwili ISTNIEJE, nawet jeśli rejestracja profilu za
+          // moment padnie — bez tego stopka proponowałaby drugi setup, a ten
+          // odpowiada już tylko 409.
+          setStatus((prev) => ({ ...prev, server: { name: serverName, serverId: "", ...prev?.server, configured: true } }));
         }
         setMode("register");
         response = await authFetch("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, displayName, serverPassword, deviceName: navigator.userAgent.slice(0, 80) }) });
@@ -109,18 +144,18 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   };
   const configured = status?.server?.configured ?? false;
   const field = "mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[14px] text-ink outline-none focus:border-hairline";
-  const backToOnboarding = () => {
-    const useLocalHost = window.ogb?.useLocalHost;
-    if (useLocalHost) void useLocalHost();
-    else window.history.back();
-  };
+  // „Wstecz" ma sens wyłącznie w powłoce desktopowej, gdzie wraca do wyboru
+  // hosta. W karcie przeglądarki nie ma dokąd wracać (ekran logowania jest
+  // pierwszym wpisem historii), więc `history.back()` był po prostu niczym.
+  const backToHostPicker = window.ogb?.useLocalHost;
+  const switchLink = loginSwitch(mode, configured, polish);
   return (
     <main className="multibot-login flex h-full min-h-screen items-center justify-center bg-app px-5 text-ink">
       <form onSubmit={(event) => { event.preventDefault(); void submit(); }} className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-xl">
-        <button type="button" onClick={backToOnboarding} className="mb-4 text-left text-[12px] text-ink-secondary hover:text-ink">
+        {backToHostPicker && <button type="button" onClick={() => void backToHostPicker()} className="mb-4 text-left text-[12px] text-ink-secondary hover:text-ink">
           ← {polish ? "Wstecz" : "Back"}
-        </button>
-        <h1 className="text-[18px] font-semibold">{configured ? (polish ? "Zaloguj się do serwera" : "Sign in to server") : polish ? "Utwórz serwer" : "Create server"}</h1>
+        </button>}
+        <h1 className="text-[18px] font-semibold">{loginTitle(mode, polish)}</h1>
         <p className="mt-1 text-[13px] text-ink-secondary">{status?.server?.name ?? (polish ? "Bezpieczny wspólny workspace" : "Secure shared workspace")}</p>
         {mode === "host" && <input value={serverName} onChange={(event) => setServerName(event.target.value)} placeholder={polish ? "Nazwa serwera" : "Server name"} aria-label="Server name" className={field} autoFocus />}
         {mode !== "legacy" && <>
@@ -129,16 +164,20 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
           <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={mode === "recover" ? polish ? "Nowe hasło profilu" : "New profile password" : polish ? "Hasło profilu" : "Profile password"} aria-label="Profile password" autoComplete={mode === "login" ? "current-password" : "new-password"} className={field} />
           {(mode === "host" || mode === "register") && <input type="password" value={serverPassword} onChange={(event) => setServerPassword(event.target.value)} placeholder={polish ? "Hasło serwera" : "Server password"} aria-label="Server password" autoComplete="off" className={field} />}
           {mode === "recover" && <input value={recoveryCode} onChange={(event) => setRecoveryCode(event.target.value)} placeholder={polish ? "Jednorazowy recovery code" : "One-time recovery code"} aria-label="Recovery code" autoComplete="one-time-code" className={field} />}
+          {/* rejestracja na serwerze bez właściciela kończy się 409 „server setup
+              required" (server/identity.ts) — nie ma tu żadnego adresu obcego
+              hosta, wszystko idzie na to samo pochodzenie. */}
+          {mode === "register" && !configured && <p className="mt-2 text-[12px] text-ink-secondary">{polish ? "Ten serwer nie ma jeszcze właściciela — najpierw trzeba go utworzyć. Do cudzego serwera dołączasz, otwierając jego adres." : "This server has no owner yet — it has to be created first. You join someone else's server by opening its address."}</p>}
         </>}
         {mode === "legacy" && <input autoFocus type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={polish ? "Stary token migracyjny" : "Legacy migration token"} aria-label="Legacy migration token" autoComplete="current-password" className={field} />}
+        {mode === "legacy" && <p className="mt-2 text-[12px] text-ink-secondary">{polish ? "Token `auth.token` z config.json starego serwera (katalog ~/.openmausbot). Serwer przyjmuje go wyłącznie z tego komputera." : "The auth.token value from the old server's config.json (~/.openmausbot). The server accepts it only from this machine."}</p>}
         <button type="submit" disabled={busy} className="mt-3 w-full rounded-lg bg-accent py-2.5 text-[13px] font-medium text-white disabled:opacity-50">
           {busy ? (polish ? "Praca…" : "Working…") : mode === "host" ? polish ? "Utwórz serwer i profil" : "Create server and profile" : mode === "register" ? polish ? "Dołącz i utwórz profil" : "Join and create profile" : mode === "recover" ? polish ? "Odzyskaj konto" : "Recover account" : mode === "legacy" ? polish ? "Użyj tokenu migracyjnego" : "Use migration token" : polish ? "Zaloguj się" : "Sign in"}
         </button>
         <div className="mt-4 flex flex-wrap gap-2 text-[12px] text-ink-secondary">
-          {configured && <button type="button" onClick={() => setMode(mode === "login" ? "register" : "login")} className="hover:text-ink">{mode === "login" ? polish ? "Utwórz profil" : "Create profile" : polish ? "Mam już profil" : "I have an account"}</button>}
-          {configured && <button type="button" onClick={() => setMode("recover")} className="hover:text-ink">{polish ? "Odzyskaj" : "Recover"}</button>}
-          {!configured && <button type="button" onClick={() => setMode("register")} className="hover:text-ink">{polish ? "Dołącz do istniejącego" : "Join existing server"}</button>}
-          <button type="button" onClick={() => setMode(mode === "legacy" ? (configured ? "login" : "host") : "legacy")} className="ml-auto hover:text-ink">{mode === "legacy" ? polish ? "Nowe logowanie" : "New sign-in" : polish ? "Migracja starego tokenu" : "Legacy migration"}</button>
+          {switchLink && <button type="button" onClick={() => setMode(switchLink.next)} className="hover:text-ink">{switchLink.label}</button>}
+          {configured && mode !== "recover" && <button type="button" onClick={() => setMode("recover")} className="hover:text-ink">{polish ? "Odzyskaj" : "Recover"}</button>}
+          <button type="button" onClick={() => setMode(mode === "legacy" ? (configured ? "login" : "host") : "legacy")} className="ml-auto hover:text-ink">{mode === "legacy" ? polish ? "Nowe logowanie" : "New sign-in" : polish ? "Masz stary token dostępu? Migracja" : "Have an old access token? Legacy migration"}</button>
         </div>
         {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
       </form>
