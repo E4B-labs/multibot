@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { DEFAULT_INSTANCE_CONFIGS } from "../config.ts";
 import { startFakeEngine, type FakeEngine } from "../testing/fake-engine.ts";
 import { CURSOR_COLORS, computerMcpSpawn, configureEngineComputer, engineComputer, harnessBaseUrl } from "./computer-mcp.ts";
 import { engineBaseUrl, engineServerArgs, runtimePython, venvPython } from "./supervisor.ts";
@@ -124,8 +125,11 @@ describe("computerMcpSpawn", () => {
   });
 });
 
+// Nic tu nie potrzebuje venvu silnika: ENGINE_URL wskazuje fake'a, a komputer
+// jest jawnie wyłączony — dlatego te dwa testy chodzą wszędzie, także w CI.
+// Wcześniejsza bramka `skipIf(!hasVenv)` znaczyła "sprawdzane tylko na maszynie
+// deweloperskiej z venvem", czyli w praktyce nigdzie.
 describe("computer on a claude-style driver (live harness)", () => {
-  const hasVenv = existsSync(venvPython(ENGINE_DIR));
   const PORT = 18800 + Math.floor(Math.random() * 10_000);
   const BASE = `http://127.0.0.1:${PORT}`;
   const TOKEN = "computer-test-access-token";
@@ -145,7 +149,6 @@ describe("computer on a claude-style driver (live harness)", () => {
   };
 
   beforeAll(async () => {
-    if (!hasVenv) return;
     chmodSync(FAKE_CLI, 0o755);
     engine = await startFakeEngine();
     home = mkdtempSync(join(tmpdir(), "omb-f5-test-"));
@@ -155,15 +158,20 @@ describe("computer on a claude-style driver (live harness)", () => {
       join(home, ".openmausbot", "config.json"),
       JSON.stringify({
         auth: { token: TOKEN },
+        // multibot (G1): configured instances are an OVERLAY over the built-in
+        // fleet, so naming a few of them by hand is not enough — the list goes
+        // stale with every new built-in CLI (kimi, qwen, opencode…). Any built-in
+        // left enabled whose CLI happens to be installed on the machine running
+        // the suite reports `available`, beats the fake Claude in
+        // `defaultSelection` (the fake is a .ts file, so `--version` fails on
+        // Windows and it counts as `unavailable`) and takes the turn — the fake
+        // CLI never runs and this test times out. Derive the off-switches from
+        // the fleet itself, then bring back only the fake Claude.
         instances: {
-          local: { driver: "slafy", enabled: false },
+          ...Object.fromEntries(
+            Object.entries(DEFAULT_INSTANCE_CONFIGS).map(([id, instance]) => [id, { ...instance, enabled: false }]),
+          ),
           claude: { driver: "claudeAgent", config: { cli: FAKE_CLI, permissionMode: "acceptEdits" } },
-          // multibot (G1): configured instances are overlays. Keep only the
-          // fake Claude live so default selection stays deterministic.
-          grok: { driver: "grokAgent", enabled: false },
-          gemini: { driver: "geminiAgent", enabled: false },
-          codex: { driver: "codex", enabled: false },
-          computer: { driver: "boxAgent", enabled: false },
         },
       }),
     );
@@ -226,7 +234,7 @@ describe("computer on a claude-style driver (live harness)", () => {
   // (MULTIBOT_COMPUTER=off), żeby suite nie tworzył prawdziwych kontenerów.
   // Montaż MCP przy DZIAŁAJĄCYM kontenerze weryfikuje spike H0 na realnym
   // obrazie; tutaj pilnujemy zachowania przy jego braku.
-  it.skipIf(!hasVenv)("bez komputera tura leci dalej, tylko bez narzędzi komputera", async () => {
+  it("bez komputera tura leci dalej, tylko bez narzędzi komputera", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
 
     const sent = await api("POST", `/api/bots/${bot.id}/messages`, { text: "zrób zrzut" });
@@ -246,7 +254,7 @@ ${stderr}`);
 
   // Profil bota w silniku trzyma pamięć, skille i rutyny, więc musi powstać
   // niezależnie od tego, czy komputer wstał.
-  it.skipIf(!hasVenv)("zakłada bota po stronie silnika nawet bez komputera", async () => {
+  it("zakłada bota po stronie silnika nawet bez komputera", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "cześć" })).status).toBe(202);
     const deadline = Date.now() + 20_000;
