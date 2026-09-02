@@ -3,9 +3,14 @@
 > Czytane automatycznie przez agenty (Claude Code, OpenCode i inne).
 > Przeczytaj CAŁOŚĆ, zanim dotkniesz kodu, gita albo czegokolwiek, co wydaje.
 
-To repo (`E4B-labs/multibot`, gałąź `main`, **publiczne**) trzyma serwer,
+To repo (`E4B-labs/multibot-desktop`, gałąź `main`, **publiczne**) trzyma serwer,
 interfejs webowy i aplikację desktopową (Electron). Aplikacja mobilna mieszka
-w osobnym, prywatnym repo `E4B-labs/multibot2` i ma własny `AGENTS.md`.
+w osobnym repo `E4B-labs/multibot-mobile` i ma własny `AGENTS.md`.
+
+> **Desktop release:** tagi i assety wydań desktopowych publikujemy w repo
+> [`E4B-labs/multibot-desktop-releases`](https://github.com/E4B-labs/multibot-desktop-releases/tags).
+> Następny numer wersji sprawdzaj właśnie tam; nie publikuj release’ów desktopa
+> w repo źródłowym.
 
 **Zanim zaczniesz — przeczytaj też prywatną instrukcję**, która nie może leżeć
 na publicznym remote (adresy, telefon, infrastruktura):
@@ -25,8 +30,8 @@ sekcji 2 (baza i numeracja) — reszta uzupełnia się wzajemnie.
 | Kanał | Co to | Skąd użytkownik to bierze |
 |---|---|---|
 | **serwer na telefonie** | `dist` + `dist-server` wgrane tarem, restart usługi | przeglądarka pod adresem hosta |
-| **desktop** | paczka Electrona, GitHub Releases `E4B-labs/multibot` | auto-update w aplikacji |
-| **aplikacja mobilna** | bundle z repo `multibot2`, `eas update --branch production` | aktualizacja w aplikacji |
+| **desktop** | paczka Electrona, GitHub Releases `E4B-labs/multibot-desktop-releases` | auto-update w aplikacji |
+| **aplikacja mobilna** | bundle z repo `multibot-mobile`, `eas update --branch production` | aktualizacja w aplikacji |
 
 **Te trzy kanały nie muszą stać na tym samym kodzie i często nie stoją.**
 22.08.2026 desktop świadomie wyprzedza telefon o cały zestaw zmian
@@ -37,7 +42,7 @@ telefonie" bywa więc stanem zamierzonym, nie awarią.
 
 ```
 git log --oneline -5                                   # co jest w repo
-gh release list --repo E4B-labs/multibot --limit 5     # co ma desktop
+gh release list --repo E4B-labs/multibot-desktop-releases --limit 5 # co ma desktop
 git show <tag>:package.json | grep version             # co siedzi w tym wydaniu
 ```
 Telefon i aplikacja mobilna: komendy w prywatnym `CLAUDE.md` (adres hosta
@@ -114,7 +119,7 @@ Push na GitHub to **nie** jest wydanie. Dopóki zmiana nie pójdzie kanałem,
 u użytkownika nic się nie zmienia.
 
 - **desktop**: bump `version` w `package.json`, `pnpm package:win`,
-  `gh release create vX.Y.Z <exe> latest.yml <blockmap> --repo E4B-labs/multibot`.
+  `gh release create vX.Y.Z <exe> latest.yml <blockmap> --repo E4B-labs/multibot-desktop-releases`.
   Bez `latest.yml` auto-update nie widzi wydania. Po budowaniu przywróć
   `electron/vendor/electron-updater.cjs` (`git checkout --`).
 - **telefon** i **aplikacja mobilna**: procedura w prywatnym `CLAUDE.md`.

@@ -7,8 +7,8 @@ colleague's branch.
 ## First clone
 
 ```sh
-git clone https://github.com/E4B-labs/multibot.git
-cd multibot
+git clone https://github.com/E4B-labs/multibot-desktop.git
+cd multibot-desktop
 corepack enable
 pnpm install --frozen-lockfile
 ```

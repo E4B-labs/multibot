@@ -4,7 +4,7 @@
 
 **Wersja opisywana:** `0.2.1` + protokół tożsamości v2
 
-**Repozytorium:** `E4B-labs/multibot`
+**Repozytorium:** `E4B-labs/multibot-desktop`
 
 **Licencja produktu:** MIT
 

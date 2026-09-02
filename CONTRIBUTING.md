@@ -24,7 +24,7 @@ and logged in. macOS is the primary platform; the harness server itself is porta
 test suite runs on macOS, Linux, and Windows.
 
 ```sh
-git clone https://github.com/E4B-labs/multibot.git && cd multibot
+git clone https://github.com/E4B-labs/multibot-desktop.git && cd multibot-desktop
 pnpm install
 
 pnpm dev:server    # harness server → 127.0.0.1:8799

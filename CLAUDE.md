@@ -2,7 +2,7 @@
 
 MultiBot — self-hostowany workspace floty agentów AI. To repo (publiczne)
 trzyma serwer (harness Node), interfejs webowy/PWA i aplikację desktopową
-Electron. Aplikacja mobilna to osobne repo `multibot2` (lokalny klon obok
+Electron. Aplikacja mobilna to osobne repo `multibot-mobile` (lokalny klon obok
 tego repo, własny `CLAUDE.md`) — zmian pod telefon nie robi się tutaj.
 
 ## Zanim zaczniesz
@@ -11,7 +11,10 @@ Reguły pracy nad tym repo leżą w **`AGENTS.md`** — przeczytaj go w całośc
 Najważniejsze:
 
 - **Baza to najwyższe wydanie, nie ostatni commit** — przed robotą
-  `gh release list --repo E4B-labs/multibot --limit 5`.
+  `gh release list --repo E4B-labs/multibot-desktop-releases --limit 5`.
+- **Desktop release’y** publikuj w repo
+  [`E4B-labs/multibot-desktop-releases`](https://github.com/E4B-labs/multibot-desktop-releases/tags),
+  nie w repo źródłowym.
 - **Numer wersji zawsze rośnie**, a cofnięcie wyglądu też jest zmianą
   w przód, wydawaną pod nowym numerem.
 - **Push na GitHub to nie wydanie** — są trzy kanały i mogą stać na różnym
@@ -33,7 +36,7 @@ git show historia-prywatna:CLAUDE.md
 | `server/` | Harness Node (~120 plików TS): surowy `node:http` bez frameworka, cała obsługa HTTP w `server/index.ts`. Auth Bearer (+ opcjonalny Firebase Google). Drivery dostawców w `drivers/` (claude, codex, grok, agenty ACP, `slafy` = wbudowany silnik). Goals, rooms, routines, approvals, memory, skills, komputer bota. |
 | `engine/` | Silnik Python (FastAPI, loopback :8700): cienka warstwa nad hermes-agentem (SHA `17688f9`, instalacja editable — build odrzuca wheel). Bot = profil Hermesa + komputer. Computer use na Playwright, memory, skills, routines, grupy, TTS. |
 | `electron/` | Powłoka desktopowa: proces główny `main.mjs`, preload, IPC przez `window.ogb`, auto-update na vendored `vendor/electron-updater.cjs` (po budowaniu `git checkout --`). |
-| `scripts/` | Instalatory linux/termux/windows, `provision-engine.mjs`, `sync-webui.mjs` (port do multibot2 — NIGDY bez 3-way), skrypty komputera bota, tunel. |
+| `scripts/` | Instalatory linux/termux/windows, `provision-engine.mjs`, `sync-webui.mjs` (port do multibot-mobile — NIGDY bez 3-way), skrypty komputera bota, tunel. |
 | `docs/` | FEATURES, COMPARISON, REMOTE-ACCESS, GOOGLE-WORKSPACE, TEAM-WORKFLOW. |
 
 Kluczowe pliki: `server/index.ts` (endpointy HTTP), `server/contracts.ts`

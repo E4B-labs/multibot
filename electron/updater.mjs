@@ -96,7 +96,7 @@ export function registerUpdaterIpc() {
   // No local-origin guard here (unlike screen/mic/speech in main.mjs): in C2
   // remote mode the window shows the remote host's page, so the guard just
   // swallowed the user's "Aktualizuj" click. Safe to drop — the update feed is
-  // pinned in the main process (public E4B-labs/multibot, sha512 verified
+  // pinned in the main process (public E4B-labs/multibot-desktop, sha512 verified
   // against latest.yml), so the renderer can at most trigger the one
   // legitimate update; it never picks what gets installed.
   ipcMain.handle("update:download", () => {

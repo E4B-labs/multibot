@@ -51,7 +51,7 @@ async function respond(handler: Handler, request: any) {
   return response;
 }
 
-// `multibot2/webui` nie serwuje własnego `sw.js` — po porcie plik ma milczeć,
+// `multibot-mobile/webui` nie serwuje własnego `sw.js` — po porcie plik ma milczeć,
 // nie wywalać cudzej suity.
 const SW = new URL("../../public/sw.js", import.meta.url);
 

@@ -43,8 +43,8 @@ machine.
 Requirements: Node.js 24+, Git, and pnpm 10+.
 
 ```sh
-git clone https://github.com/E4B-labs/multibot.git
-cd multibot
+git clone https://github.com/E4B-labs/multibot-desktop.git
+cd multibot-desktop
 corepack enable
 pnpm install --frozen-lockfile
 pnpm dev:server

@@ -103,7 +103,7 @@ Instalatory:
 
 ## Aktualizacje
 
-Aktualizacja aplikacji desktopowej korzysta z publicznych artefaktów release repo `E4B-labs/multibot`: `latest.yml`, instalator i blockmap. Feed nie może zawierać `releases.atom`, znaków nowej linii ani komunikatu błędu GitHub.
+Aktualizacja aplikacji desktopowej korzysta z publicznych artefaktów release repo `E4B-labs/multibot-desktop-releases`: `latest.yml`, instalator i blockmap. Feed nie może zawierać `releases.atom`, znaków nowej linii ani komunikatu błędu GitHub.
 
 Przed wydaniem:
 

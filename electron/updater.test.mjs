@@ -55,7 +55,7 @@ test("pierwsze sprawdzenie rusza od razu przy starcie, nie po 15 s", async () =>
   assert.equal(fake.checks, 1);
   assert.deepEqual(fake.feed, {
     provider: "generic",
-    url: "https://github.com/E4B-labs/multibot/releases/latest/download",
+    url: "https://github.com/E4B-labs/multibot-desktop/releases/latest/download",
   });
 });
 

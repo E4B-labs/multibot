@@ -1,6 +1,6 @@
 // multibot: pięć akcji bota pod jednym przyciskiem „⋮" na końcu nagłówka
 // czatu — tuż na lewo od kontrolek okna, z pigułką modelu obok. Odwzorowanie
-// aplikacji mobilnej (multibot2 webui/src/components/ChatView.tsx): ta sama
+// aplikacji mobilnej (multibot-mobile/webui/src/components/ChatView.tsx): ta sama
 // kolejność pozycji i te same etykiety.
 //
 // Kolor kropek mówi wyłącznie o tym, czy menu jest rozwinięte: niebieskie gdy
