@@ -1880,6 +1880,11 @@ opts?: {
           if (instance.driverKind !== "slafy") {
             const mcp = await engineComputer(bot.threadId);
             if (mcp) integrations.localComputer = mcp;
+            // Cichy `null` był powodem, dla którego "bot jakoś nie umie w
+            // komputer" nie zostawiał w logu ŻADNEGO śladu: bot dostawał
+            // `hand_over_computer` z serwera agents i ani jednego narzędzia
+            // komputera, a log milczał.
+            else console.warn(`[multibot] no computer MCP for ${bot.id}: no engine python or engine unavailable`);
           }
         }
       } catch (e) {

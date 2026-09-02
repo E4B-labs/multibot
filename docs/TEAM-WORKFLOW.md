@@ -1,74 +1,25 @@
 # MultiBot team workflow
 
-Use one GitHub repository, short-lived branches, and pull requests. Keep
-`main` releasable. Do not share a working directory or force-push over a
-colleague's branch.
+This document has been folded into the engineering protocol so there is one
+source of truth instead of several partly-contradicting ones.
 
-## First clone
+| You were looking for | Now in |
+|---|---|
+| First clone, daily loop, branch lifecycle | [`engineering/WORKFLOW.md`](engineering/WORKFLOW.md) |
+| Branch naming, base branch, rebase, cleanup | [`engineering/BRANCHING.md`](engineering/BRANCHING.md) |
+| Ownership matrix (who owns which area) | [`engineering/CODE_OWNERSHIP.md`](engineering/CODE_OWNERSHIP.md) |
+| Required checks and the PR contract | [`engineering/PR_POLICY.md`](engineering/PR_POLICY.md) |
+| Architecture, ports, storage, collision hotspots | [`engineering/ARCHITECTURE.md`](engineering/ARCHITECTURE.md) |
+| Release channels and version numbering | [`engineering/RELEASE.md`](engineering/RELEASE.md) |
 
-```sh
-git clone https://github.com/E4B-labs/multibot-desktop.git
-cd multibot-desktop
-corepack enable
-pnpm install --frozen-lockfile
-```
+The canonical, tool-neutral protocol every contributor and AI agent follows is
+[`AGENTS.md`](../AGENTS.md) in the repository root. Read it first.
 
-## Daily loop
+Two things that changed and are worth calling out:
 
-```sh
-git switch main
-git pull --ff-only origin main
-git switch -c feat/<name>-<short-topic>
-# edit + test
-git status
-git add <files>
-git commit -m "feat: <short Polish description>"
-git push -u origin HEAD
-gh pr create --base main --fill
-```
-
-After merge, delete the branch and refresh before starting next task:
-
-```sh
-git switch main
-git pull --ff-only origin main
-git branch -d feat/<name>-<short-topic>
-```
-
-## Parallel ownership
-
-Prefer one owner per area during a task:
-
-| Area | Primary paths | Safe parallel partner |
-|---|---|---|
-| Frontend | `src/`, `public/` | `server/`, `engine/` |
-| Harness | `server/` | `src/`, `engine/` |
-| Engine | `engine/` | `src/`, most `server/` |
-| Mobile shell | `clients/mobile/` | every other area |
-| Install/docs | `scripts/`, `docs/`, root Markdown | any code area |
-
-When two branches must touch one file, agree on order first. Rebase before
-opening the PR; resolve conflicts locally, then rerun tests.
-
-## Required checks
-
-```sh
-pnpm typecheck
-pnpm test
-pnpm build
-node scripts/selfhost-check.mjs
-```
-
-Engine changes also run the full pytest suite. Use `D:\tmp` for temporary
-artifacts on Windows and never put API keys, tokens, `.env` files, or generated
-user data in the repository.
-
-## PR contract
-
-- Explain user-visible behavior and test evidence.
-- Keep `server/contracts.ts` stable unless the change explicitly updates the
-  driver SPI.
-- Additive upstream edits carry a `// multibot:` marker.
-- No generated `dist-server/` churn, secrets, or force-pushes to `main`.
-- A reviewer checks security impact, cross-platform behavior, and migration
-  compatibility before merge.
+- The gate commands are now exactly what CI runs — `pnpm lint`,
+  `pnpm typecheck`, `pnpm test`, `pnpm exec vite build` — and nothing else.
+  The old list mentioned `node scripts/selfhost-check.mjs`, which CI has never
+  run.
+- The `clients/mobile/` row is gone: that directory does not exist in this
+  repository. The mobile app lives in `E4B-labs/multibot-mobile`.

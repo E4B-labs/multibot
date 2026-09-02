@@ -167,9 +167,11 @@ export function registerUpdaterIpc() {
 export function buildInstallScript({ installerPath, exePath, installDir }) {
   // NSIS: /D= musi byc OSTATNIM parametrem; sciezka ze spacjami w cudzyslowach.
   const dArg = installDir.includes(" ") ? `/D="${installDir}"` : `/D=${installDir}`;
+  const imageName = path.win32.basename(exePath);
+  const imageArg = imageName.includes(" ") ? `"${imageName}"` : imageName;
   return [
     "@echo off",
-    "taskkill /f /im MultiBot.exe >nul 2>&1",
+    `taskkill /f /im ${imageArg} >nul 2>&1`,
     "ping -n 3 127.0.0.1 >nul",
     `start "" /wait "${installerPath}" /S --updated ${dArg}`,
     `start "" "${exePath}"`,

@@ -1,164 +1,125 @@
-# MultiBot — instrukcja dla agentów AI
+# MultiBot — protokół inżynierski
 
-> Czytane automatycznie przez agenty (Claude Code, OpenCode i inne).
-> Przeczytaj CAŁOŚĆ, zanim dotkniesz kodu, gita albo czegokolwiek, co wydaje.
+Kanoniczna, niezależna od narzędzia instrukcja dla **każdego**, kto pisze w tym
+repo: człowieka i agenta AI (Claude Code, Codex, OpenCode, Cline, agenty
+MultiBota, cokolwiek przyjdzie po nich). Jeden protokół, wiele klientów — nie ma
+osobnych reguł dla poszczególnych narzędzi.
 
-To repo (`E4B-labs/multibot-desktop`, gałąź `main`, **publiczne**) trzyma serwer,
-interfejs webowy i aplikację desktopową (Electron). Aplikacja mobilna mieszka
-w osobnym repo `E4B-labs/multibot-mobile` i ma własny `AGENTS.md`.
+Repo: `E4B-labs/multibot-desktop` (publiczne, gałąź domyślna `main`). Aplikacja
+mobilna ma osobne repo `E4B-labs/multibot-mobile`. Prywatne notatki wdrożeniowe
+właściciela żyją poza remote; podstawowy przepływ pracy ich nie wymaga.
 
-> **Desktop release:** tagi i assety wydań desktopowych publikujemy w repo
-> [`E4B-labs/multibot-desktop-releases`](https://github.com/E4B-labs/multibot-desktop-releases/tags).
-> Następny numer wersji sprawdzaj właśnie tam; nie publikuj release’ów desktopa
-> w repo źródłowym.
+Ten plik jest krótki celowo. Szczegóły: [`docs/engineering/`](docs/engineering/).
 
-**Zanim zaczniesz — przeczytaj też prywatną instrukcję**, która nie może leżeć
-na publicznym remote (adresy, telefon, infrastruktura):
+## 1. Protokół startowy — zanim dotkniesz kodu
 
-```
-git show historia-prywatna:CLAUDE.md
-```
+1. Ustal katalog główny (`git rev-parse --show-toplevel`) — nigdy nie zakładaj ścieżki.
+2. Przeczytaj ten plik w całości, potem dokumentację dotyczącą zadania (§7).
+3. `git status` — drzewo czyste albo świadomie brudne.
+4. **Sprawdź gałąź; nie może być `main`.** Jesteś na `main` i masz coś zmienić →
+   STOP, załóż gałąź zadaniową i worktree (§3). Sprawdź też, że ten worktree
+   należy do tego zadania — jeden worktree, jedno zadanie.
+5. `git fetch origin` — baza to aktualny `origin/main`.
+6. Zrozum zakres; jeśli jest niejasny, dopytaj przed edycją.
+7. Przeczytaj kod, który zmieniasz, zanim go zmienisz. Wypisz moduły, które
+   zmiana dotknie (`src/`, `server/`, `engine/`, `electron/`), i testy, które ją udowodnią.
+8. Kolizje: `gh pr list --repo E4B-labs/multibot-desktop` i `git branch -r`. Jeśli
+   ktoś już rusza te pliki — dogadaj się, nie duplikuj pracy.
 
-Tam są: sposób pracy z subagentami, adres i procedura wdrożenia na telefon,
-macierz kanałów, pułapki infrastruktury. Ten plik jest nadrzędny tylko w
-sekcji 2 (baza i numeracja) — reszta uzupełnia się wzajemnie.
+## 2. `main` jest święty
 
----
-
-## 1. Trzy kanały. Mogą się różnić. Sprawdź każdy.
-
-| Kanał | Co to | Skąd użytkownik to bierze |
-|---|---|---|
-| **serwer na telefonie** | `dist` + `dist-server` wgrane tarem, restart usługi | przeglądarka pod adresem hosta |
-| **desktop** | paczka Electrona, GitHub Releases `E4B-labs/multibot-desktop-releases` | auto-update w aplikacji |
-| **aplikacja mobilna** | bundle z repo `multibot-mobile`, `eas update --branch production` | aktualizacja w aplikacji |
-
-**Te trzy kanały nie muszą stać na tym samym kodzie i często nie stoją.**
-22.08.2026 desktop świadomie wyprzedza telefon o cały zestaw zmian
-interfejsu — użytkownik tak poprosił. „U mnie wygląda inaczej niż na
-telefonie" bywa więc stanem zamierzonym, nie awarią.
-
-**Nigdy nie zakładaj, co jest wydane. Zmierz to:**
+Nikt — człowiek ani agent — nie pushuje na `main`. Każda zmiana idzie drogą:
 
 ```
-git log --oneline -5                                   # co jest w repo
-gh release list --repo E4B-labs/multibot-desktop-releases --limit 5 # co ma desktop
-git show <tag>:package.json | grep version             # co siedzi w tym wydaniu
+ZADANIE → GAŁĄŹ → WORKTREE → COMMITY → PUSH → PR → CI
+        → multibot/review → multibot/merge-gate → main
 ```
-Telefon i aplikacja mobilna: komendy w prywatnym `CLAUDE.md` (adres hosta
-i `eas update:list`).
 
----
+Autor nigdy nie akceptuje własnej pracy. Recenzent nie mergeuje. Strażnik bramki
+nie przepisuje kodu funkcji. Szczegóły: [`PR_POLICY.md`](docs/engineering/PR_POLICY.md).
 
-## 2. Baza i numeracja — reguła, przez którą to się psuło dwa razy
+## 3. Gałęzie, worktree, własność
 
-**Twoja zmiana idzie NA WIERZCH stanu wydanego, nigdy obok niego.**
+Nazwa gałęzi: **`<developer>/<type>/<task>`** — `developer` = `kacper` |
+`bartek` | `mieszko`; `type` = `feat` | `fix` | `refactor` | `chore` | `docs` |
+`test` | `perf`. Przykłady: `kacper/feat/billing-dashboard`,
+`bartek/fix/refresh-token`. Nie zakładamy stałych gałęzi osobowych. Baza zawsze
+`origin/main`. Po merge'u gałąź kasujemy.
 
-1. **Baza to najwyższe wydanie, nie ostatni commit, który widzisz.** Zanim
-   zaczniesz, sprawdź `gh release list`. Jeśli `main` jest niżej niż ostatnie
-   wydanie, zatrzymaj się i zapytaj — ktoś wydawał z gałęzi bocznej.
-2. **Numer wersji rośnie. Zawsze.** Jest 0.1.40, robisz zmianę — jest 0.1.41.
-   Nigdy nie wydajesz ponownie numeru, który już istnieje, i nigdy nie
-   zjeżdżasz w dół: aktualizator desktopu schodzi wyłącznie w górę, więc
-   wydanie ze starszym numerem po prostu nie dojdzie do nikogo i nikt tego
-   nie zgłosi.
-3. **Cofnięcie wyglądu to też zmiana w przód.** Chcesz wrócić do stanu
-   sprzed trzech wydań: przywracasz drzewo z tamtego commitu, ale wydajesz
-   je pod NOWYM, wyższym numerem, z commitem `revert:` opisującym, co i
-   dlaczego wyleciało. Nie „nadpisujesz wersji" i nie ruszasz starych tagów.
-   Procedura:
-   ```
-   git checkout <dobry-commit> -- .
-   git diff --name-only --diff-filter=A <dobry-commit> HEAD | xargs git rm -f
-   git diff --quiet <dobry-commit> -- . && echo "drzewo identyczne"
-   ```
-   Ostatnia linia to dowód, że przywróciłeś dokładnie tamten stan, a nie
-   „mniej więcej".
-4. **Nie kasujesz cudzej pracy przy okazji.** Zanim wycofasz cokolwiek,
-   `git log --oneline <baza>..HEAD` i wypisz w raporcie, co dokładnie
-   wypada. Jeśli w wycofywanym zakresie są rzeczy niezwiązane z prośbą —
-   zapytaj, zamiast wycinać wszystko hurtem.
-5. **Wydania i grupy zostają.** Stare wydania GitHuba i grupy EAS to jedyna
-   droga powrotu (`eas update:republish --group <id>` cofa aplikację mobilną
-   w kilkanaście sekund, bez budowania). Nie kasujesz ich.
+**Jedno zadanie = jedna gałąź = jeden worktree = jeden PR.**
 
-### Co poszło źle dwa razy — żeby nie było trzeciego
-
-- Agent „naprawił" objaw bez dowodu z konsoli, a jego „diagnostyczne
-  wycofanie" przywróciło plik z commitu, który sporną zmianę zawierał. Objaw
-  nie zniknął, poszły trzy niepotrzebne wydania.
-- Agent wydał zmiany interfejsu, użytkownik poprosił o powrót, kolejny agent
-  cofnął je „na oko" i przy okazji zabrał funkcje, o które nikt nie prosił.
-  Stąd punkt 3 z dowodem `git diff --quiet` i punkt 4 z wypisaniem zakresu.
-
-**Reguła nadrzędna: dowód, nie przekonanie.** Zadanie jest zrobione, gdy
-wkleisz wyjście bramki i identyfikator wydania. „Powinno działać" się nie
-liczy. Przy diagnozie: najpierw złap błąd z konsoli albo z logu, dopiero
-potem edytuj kod.
-
----
-
-## 3. Bramki przed commitem
-
+```sh
+git fetch origin
+git worktree add <dowolna-lokalna-ścieżka> -b kacper/feat/moja-zmiana origin/main
 ```
-npx tsc -b                     # musi być czysto
-npx vitest run                 # cała suita
-npx vite build                 # interfejs
-npx tsc -p tsconfig.server.build.json   # serwer
+
+Ścieżka jest lokalna i prywatna dla twojej maszyny — nigdy nie trafia do plików
+repo. Kilku agentów na jednej maszynie pracuje w **osobnych** worktree; dwa
+agenty piszące w jednym katalogu to gwarantowana kolizja. Jeśli nad jednym
+zadaniem pracuje kilku agentów, dokładnie jeden ma prawo zapisu; reszta bada,
+recenzuje i proponuje łatki. Szczegóły:
+[`BRANCHING.md`](docs/engineering/BRANCHING.md),
+[`AI_AGENT_PROTOCOL.md`](docs/engineering/AI_AGENT_PROTOCOL.md).
+
+## 4. Commity
+
+Konwencjonalne, małe, spójne: `feat(auth): add refresh token rotation`.
+Zakazane: `update`, `changes`, `fix stuff`, `wip`, `final`, `final2`. Nie łącz
+niepowiązanych zmian w jednym commicie. Nie commituj świadomie zepsutego kodu.
+
+## 5. Bramki — dokładnie to, co sprawdza CI
+
+```sh
+corepack enable
+pnpm install --frozen-lockfile
+pnpm lint            # git diff --check && tsc --noEmit
+pnpm typecheck       # tsc -b && tsc -p tsconfig.server.json
+pnpm test            # vitest run
+pnpm exec vite build # produkcyjny build UI
 ```
-Nietrywialna logika zostawia jeden uruchamialny test obok istniejących —
-bez nowych frameworków i bez nowych zależności. Test, który nie pada na
-starym kodzie, niczego nie pilnuje: sprawdź, że pada, zanim uznasz go za
-dowód.
 
----
+Zmiana w `engine/` dokłada pytest (venv wg [`engine/README.md`](engine/README.md)):
 
-## 4. Wydanie
+```sh
+cd engine && .venv/bin/python -m pytest -q          # Linux/macOS
+cd engine && .venv/Scripts/python.exe -m pytest -q  # Windows
+```
 
-Push na GitHub to **nie** jest wydanie. Dopóki zmiana nie pójdzie kanałem,
-u użytkownika nic się nie zmienia.
+Nietrywialna logika zostawia jeden uruchamialny test obok istniejących — bez
+nowych frameworków i bez nowych zależności. Test, który nie pada na starym
+kodzie, niczego nie pilnuje. **Dowód, nie przekonanie:** zadanie jest zrobione,
+gdy wkleisz wyjście bramki z liczbami. „Powinno działać" się nie liczy.
 
-- **desktop**: bump `version` w `package.json`, `pnpm package:win`,
-  `gh release create vX.Y.Z <exe> latest.yml <blockmap> --repo E4B-labs/multibot-desktop-releases`.
-  Bez `latest.yml` auto-update nie widzi wydania. Po budowaniu przywróć
-  `electron/vendor/electron-updater.cjs` (`git checkout --`).
-- **telefon** i **aplikacja mobilna**: procedura w prywatnym `CLAUDE.md`.
-- Wydajesz **tylko ten kanał, którego zmiana dotyczy**. Zmiana w
-  `electron/` nie jedzie na telefon; zmiana w `src/` jedzie tam, gdzie
-  użytkownik poprosił, i tylko tam.
+## 6. Zakazy
 
----
-
-## 5. Zakazy
-
-1. **Nie piszesz na dysk C:** — jest chronicznie pełny i psuje instalacje
-   ciszej niż jakikolwiek błąd. `$env:TEMP='D:\tmp'`,
-   `ELECTRON_BUILDER_CACHE` na `D:`.
-2. **Nie `git add -A`.** W drzewie bywają cudze niezacommitowane zmiany.
-   Pliki dodajesz po nazwie. Nigdy `--force`.
-3. **Sekrety nigdzie**: ani w repo, ani w logu, ani w raporcie, ani w
-   pamięci Brain (tam idą tylko nazwy sekretów). To repo jest publiczne —
-   adresy hostów i tokeny zostają w prywatnej gałęzi i w środowisku.
-4. **Nie zmieniasz `server/contracts.ts`** ani kształtu zapisanych danych
-   bez decyzji właściciela.
+1. **Pliki tymczasowe i cache idą tam, gdzie wskazuje właściciel maszyny**
+   (`TEMP`/`TMP`, `ELECTRON_BUILDER_CACHE`), nigdy na sztywno w kodzie. Na
+   maszynach Kacpra dysk `C:` jest zajęty — nie zapisujesz tam nic.
+2. **Nie `git add -A`.** W drzewie bywają cudze niezacommitowane zmiany. Pliki
+   dodajesz po nazwie. Nigdy `--force`, nigdy `push --force` na `main`.
+3. **Sekrety nigdzie**: ani w repo, ani w logu, ani w raporcie, ani w pamięci
+   Brain (tam idą wyłącznie nazwy sekretów). To repo jest publiczne.
+4. **Nie zmieniasz `server/contracts.ts`** ani kształtu zapisanych danych bez
+   decyzji właściciela.
 5. **Nie dokładasz zależności npm** dla czegoś, co robi kilka linii.
+6. Żaden plik repo nie zależy od nazwy użytkownika, litery dysku, katalogu
+   domowego ani lokalnego adresu IP.
 
----
+## 7. Dokumentacja inżynierska
 
-## 6. Pamięć zespołu
+| Plik | O czym |
+|---|---|
+| [`ARCHITECTURE.md`](docs/engineering/ARCHITECTURE.md) | procesy, porty, dane, auth, drivery, punkty kolizji |
+| [`WORKFLOW.md`](docs/engineering/WORKFLOW.md) | pełny cykl zadania od fetch do merge'a |
+| [`BRANCHING.md`](docs/engineering/BRANCHING.md) | nazewnictwo, baza, rebase, gałęzie do sprzątnięcia |
+| [`AI_AGENT_PROTOCOL.md`](docs/engineering/AI_AGENT_PROTOCOL.md) | agenty równoległe, adaptery narzędzi, pamięć Brain |
+| [`PR_POLICY.md`](docs/engineering/PR_POLICY.md) | co musi być w PR, role recenzenta i bramki |
+| [`CODE_OWNERSHIP.md`](docs/engineering/CODE_OWNERSHIP.md) | kto trzyma który obszar |
+| [`RELEASE.md`](docs/engineering/RELEASE.md) | kanały, numeracja wersji, wydanie desktopu |
+| [`REPO_STATE.md`](docs/engineering/REPO_STATE.md) | stan repo, dług, ryzyka, plan migracji |
+| [`GITHUB_SETTINGS.md`](docs/engineering/GITHUB_SETTINGS.md) | docelowa ochrona `main` i komendy do jej włączenia |
 
-Wszystko, co warto pamiętać jutro — decyzja z powodem, pułapka, przepis na
-wydanie, aktualny stan kanałów — idzie do **TaskTree Brain** przez serwer MCP
-TaskTree (`brain_add`), w tej samej turze, w której to ustalisz. Przed pracą
-nad znanym tematem: `brain_entity("MultiBot")`. Pliki lokalne to tylko
-podręczny cache.
+## 8. Raport po zadaniu
 
----
-
-## 7. Raport po zadaniu
-
-1. co zmienione — pliki i po co,
-2. dowód bramek — wklejone wyjście z liczbami,
-3. co wydane i gdzie — kanał plus identyfikator (hash, wersja, grupa EAS),
-4. czego **nie** zrobiłeś i dlaczego,
-5. co wymaga właściciela (decyzja, token, klik).
+Co zmienione (pliki i po co) · dowód bramek z liczbami · link do PR · czego
+**nie** zrobiłeś i dlaczego · co wymaga właściciela (decyzja, token, klik).
