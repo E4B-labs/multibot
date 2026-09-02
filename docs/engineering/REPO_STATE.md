@@ -71,7 +71,8 @@ napisu. Guard pilnuje teraz etykiety, która istnieje (`Zadanie dla tego bota`).
 
 | | Obecnie | Docelowo |
 |---|---|---|
-| klasyczna ochrona `main` | jest: `enforce_admins`, blokada force-push i kasowania, wymagane 1 zatwierdzenie, wymagane rozwiązanie wątków | zastąpiona rulesetem |
+| klasyczna ochrona `main` | jest: `enforce_admins`, blokada force-push i kasowania, wymagane rozwiązanie wątków | zastąpiona rulesetem |
+| wymagana recenzja | zapisana (`required_approving_review_count: 1`), ale **nieegzekwowana** — zasób nadrzędny pokazuje `null`, a PR ma stan `UNSTABLE`, nie `BLOCKED` | realny wymóg w rulesecie, po rozstrzygnięciu kto recenzuje |
 | wymagane checki | **brak** (endpoint 404) | 3 legi `lint + typecheck + test (…)`, potem `multibot/review` i `multibot/merge-gate` |
 | rulesety | `[]` | ruleset dla `main` |
 | `delete_branch_on_merge` | `false` | `true` |

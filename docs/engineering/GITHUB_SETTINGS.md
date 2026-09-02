@@ -231,16 +231,34 @@ odsłonięty.
 ### Jeden człowiek a wymóg jednego zatwierdzenia
 
 W repozytorium jest dokładnie jeden współpracownik, `E4B-labs`, z rolą
-administratora. Przy `required_approving_review_count: 1` i włączonym
-`require_last_push_approval` właściciel **nie scali własnego PR-a**, bo GitHub
-nie pozwala zatwierdzić własnych zmian. Obejście awaryjne stałoby się wtedy
-zwykłą, codzienną drogą, a to najgorszy możliwy skutek tej konfiguracji.
-Wyjścia, do wyboru: dodać drugiego człowieka lub drugie konto jako recenzenta,
-wpiąć aplikację, która zatwierdza PR-y (recenzent MultiBota z uprawnieniem do
-recenzji), albo świadomie ustawić `required_approving_review_count: 0` i
-opierać bramkę na wymaganych statusach. Wartość 1 zostaje w pliku zgodnie z
-przyjętym założeniem, ale przed włączeniem zestawu trzeba wybrać jedną z tych
-dróg.
+administratora. Przy `required_approving_review_count: 1` właściciel **nie
+scali własnego PR-a**, bo GitHub nie pozwala zatwierdzić własnych zmian.
+Obejście awaryjne stałoby się wtedy zwykłą, codzienną drogą, a to najgorszy
+możliwy skutek tej konfiguracji.
+
+Uwaga do stanu dzisiejszego: klasyczna ochrona jest w tej sprawie
+niespójna i **wymóg recenzji faktycznie nie działa**. Zmierzone 02.09.2026:
+
+```
+GET …/branches/main/protection            → required_pull_request_reviews: null
+GET …/branches/main/protection/required_pull_request_reviews
+                                          → required_approving_review_count: 1
+gh pr view 15 --json mergeStateStatus,reviewDecision
+                                          → UNSTABLE, reviewDecision pusty
+```
+
+Gdyby recenzja była wymuszana, stan PR-a brzmiałby `BLOCKED`, a nie
+`UNSTABLE`. Podendpoint trzyma osierocony zapis, którego nadrzędny zasób już
+nie pokazuje i którego GitHub nie egzekwuje. To jest dokładnie ten rodzaj
+dwóch prawd, który usuwamy przechodząc na zestaw reguł — po włączeniu zestawu
+wymóg stanie się realny i wtedy problem jednego człowieka zacznie boleć.
+
+Wyjścia, do wyboru przed włączeniem zestawu: dodać drugiego człowieka lub
+drugie konto jako recenzenta, wpiąć aplikację, która zatwierdza PR-y
+(recenzent MultiBota z uprawnieniem do recenzji), albo świadomie ustawić
+`required_approving_review_count: 0` i opierać bramkę na wymaganych statusach.
+Wartość 1 zostaje w pliku, ale bez wybrania jednej z tych dróg zestawu nie
+należy włączać.
 
 ---
 
