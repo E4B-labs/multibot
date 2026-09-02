@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/E4B-labs/multibot-desktop-releases/releases/latest/download/MultiBot-Desktop-0.3.13-x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/DOWNLOAD%20FOR%20WINDOWS-000000?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="https://github.com/E4B-labs/multibot-desktop-releases/releases/latest/download/MultiBot-Desktop-0.3.14-x64-setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/DOWNLOAD%20FOR%20WINDOWS-000000?style=for-the-badge&logo=windows&logoColor=white"></a>
   <a href="https://github.com/E4B-labs/multibot-desktop-releases/releases/latest/download/MultiBot-Mobile-0.3.6.apk"><img alt="Download for Android" src="https://img.shields.io/badge/DOWNLOAD%20FOR%20ANDROID-000000?style=for-the-badge&logo=android&logoColor=white"></a>
 </p>
 
