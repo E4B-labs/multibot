@@ -1,8 +1,8 @@
 // Provider brand marks, keyed by driver kind. Dark-theme fills.
 import { Monitor } from "lucide-react";
 import { cn } from "@/lib/cn";
-// multibot (A6): official logos for Gemini/Kimi/Qwen — PNG z
-// C:\Users\kacpe\Desktop\loga (przeskalowane do 128px, src/assets/providers).
+// multibot (A6): official logos for Gemini/Kimi/Qwen — PNG przeskalowane
+// do 128px, zacommitowane w src/assets/providers.
 import geminiLogo from "@/assets/providers/gemini.png";
 import kimiLogo from "@/assets/providers/kimi.png";
 import qwenLogo from "@/assets/providers/qwen.png";
