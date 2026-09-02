@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
 import { addRemoteHost, getActiveId, listRemoteHosts, removeHost, resolveLoadTarget, setActiveHost } from "./hosts.mjs";
+import { shouldStartLocalHarness } from "./host-resolve.mjs";
 import { isLocalSender } from "./local-origin.mjs";
 import { activateExistingWindow } from "./single-instance.mjs";
 import { startRemoteUiServer } from "./remote-ui.mjs";
@@ -290,6 +291,21 @@ async function startServerPackaged() {
   return false;
 }
 
+// multibot: lokalny harness wstaje LENIWIE. Przy starcie z aktywnym hostem
+// zdalnym nie forkujemy go wcale (patrz shouldStartLocalHarness), więc trzeba
+// go podnieść w chwili, gdy użytkownik faktycznie przełączy się na „to
+// urządzenie". Jedno miejsce dla wszystkich dróg do trybu lokalnego —
+// loadActiveTarget() jest wąskim gardłem obu handlerów `hosts:*`.
+// Nieudany start nie zapala flagi: kolejne przełączenie ma prawo spróbować
+// jeszcze raz zamiast pokazywać ERROR_PAGE do końca sesji.
+let localHarnessStarted = false;
+async function ensureLocalHarness() {
+  if (!app.isPackaged || localHarnessStarted) return serverReady;
+  serverReady = await startServerPackaged();
+  localHarnessStarted = serverReady;
+  return serverReady;
+}
+
 function provisionEngineRuntime() {
   if (fs.existsSync(path.join(ENGINE_RUNTIME, ".provisioned"))) return Promise.resolve();
   const script = path.join(process.resourcesPath, "provision-engine.mjs");
@@ -351,6 +367,18 @@ async function remoteUiOriginFor(remoteUrl) {
   return remoteUi?.url ?? null;
 }
 
+/** Tryb zapisanego celu, odporny na wywrotkę. `resolveLoadTarget()` odszyfrowuje
+ * token przez safeStorage i potrafi rzucić (przeniesiony profil, brak pęku
+ * kluczy); na starcie kosztowałoby to całe okno, więc taka awaria degraduje do
+ * dotychczasowego zachowania, czyli trybu lokalnego. */
+function startupTargetMode() {
+  try {
+    return resolveLoadTarget().mode;
+  } catch {
+    return "local";
+  }
+}
+
 /** Decides what `win` should load: a saved remote host, or the existing
  * local flow (packaged server / dev vite), completely unchanged when no
  * remote host is active. */
@@ -369,6 +397,9 @@ async function loadActiveTarget(win) {
   // Wracamy na lokalny harness — port zdalnego originu nie ma po co wisieć.
   await closeRemoteUi();
   if (app.isPackaged) {
+    // Start z aktywnym hostem zdalnym pomija harness — dopiero tutaj, gdy
+    // celem naprawdę jest tryb lokalny, wolno go podnieść.
+    await ensureLocalHarness();
     // Fragment never reaches HTTP. Renderer stores it, then erases URL before
     // first paint, so fresh packaged installs do not deadlock on login.
     win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}/` : ERROR_PAGE);
@@ -581,6 +612,12 @@ ipcMain.handle("speech:stop", () => stopSpeech());
 ipcMain.handle("hosts:list", () => ({ activeId: getActiveId(), hosts: listRemoteHosts() }));
 ipcMain.handle("hosts:add-remote", (_event, host) => addRemoteHost(host ?? {}));
 ipcMain.handle("hosts:remove", (_event, id) => removeHost(id));
+// multibot: „← Wstecz" z ekranu logowania. Otwiera wyłącznie natywny wybór
+// hosta — NIE przestawia activeId. Wcześniej ten przycisk wołał
+// `hosts:use-local`, więc powrót z hosta zdalnego cicho przełączał komputer na
+// lokalny harness; host zmienia się teraz dopiero, gdy użytkownik jawnie
+// kliknie „Use" przy „This device".
+ipcMain.handle("hosts:open-picker", () => openHostPicker());
 ipcMain.handle("hosts:use-local", async () => {
   setActiveHost("local");
   if (mainWindow) await loadActiveTarget(mainWindow);
@@ -675,7 +712,12 @@ app.whenReady().then(async () => {
   startCua().catch((e) => console.error("[cua] start failed:", e));
   // multibot (G3): provisioning starts only after the onboarding 24/7 choice;
   // the authenticated harness endpoint runs the same bundled script.
-  if (app.isPackaged) serverReady = await startServerPackaged();
+  //
+  // multibot: gdy aktywny jest host zdalny, harness NIE wstaje — ten komputer
+  // jest wtedy wyłącznie klientem telefonu, a fork serwera zakładałby mu
+  // ~/.openmausbot i witał ekranem „server setup required". Tryb lokalny
+  // zachowuje dotychczasową kolejność (serwer gotowy przed oknem).
+  if (shouldStartLocalHarness({ isPackaged: app.isPackaged, mode: startupTargetMode() })) await ensureLocalHarness();
   const win = createWindow();
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
   // the user's click, installs on "Restart to update"

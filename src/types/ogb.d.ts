@@ -29,6 +29,8 @@ declare global {
       addRemoteHost?(url: string): Promise<void>;
       /** Returns to local host, restoring local onboarding when it is pending. */
       useLocalHost?(): Promise<void>;
+      /** Opens the native host picker WITHOUT changing the active host. */
+      showHostPicker?(): Promise<void>;
       /** Unread-conversation count for the taskbar badge. Fire-and-forget;
        * absent in plain browsers, so callers must feature-detect. */
       setUnreadCount?(count: number): void;

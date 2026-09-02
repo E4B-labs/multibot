@@ -38,6 +38,9 @@ contextBridge.exposeInMainWorld("ogb", {
   addRemoteHost: (url) =>
     ipcRenderer.invoke("hosts:add-remote", { url }).then((host) => ipcRenderer.invoke("hosts:use-host", host.id)),
   useLocalHost: () => ipcRenderer.invoke("hosts:use-local"),
+  /** Otwiera natywny wybór hosta bez zmiany aktywnego hosta — „← Wstecz" na
+   * ekranie logowania. Zmiana następuje dopiero po jawnym wyborze w tym oknie. */
+  showHostPicker: () => ipcRenderer.invoke("hosts:open-picker"),
 
   /** Unread-conversation count for the taskbar badge (Windows overlay icon,
    * macOS/Linux dock badge). Fire-and-forget; dormant in plain browsers. */
