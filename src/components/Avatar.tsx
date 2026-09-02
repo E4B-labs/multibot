@@ -71,6 +71,9 @@ const MOTION_FACE: Partial<
 
 /** How long a one-shot motion holds its state before the bot's own returns. */
 const MOTION_FACE_MS = 1400;
+/** Delay before the thinking indicator replaces the full mascot. */
+export const THINKING_DOTS_DELAY_MS = 1000;
+const THINKING_DOTS_FADE_MS = 180;
 
 /** Channel-wise mix of a hex color toward another, t in 0..1. */
 function mix(hex: string, toward: string, t: number): string {
@@ -95,6 +98,44 @@ const gradientFor = (color: MausColor): [string, string, string] => {
   const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };
+
+function ThinkingDots({
+  color,
+  size,
+  reduceMotion,
+}: {
+  color: MausColor;
+  size: number;
+  reduceMotion: boolean;
+}) {
+  const [highlight, base, shadow] = gradientFor(color);
+  const dotSize = Math.max(4, size * 0.18);
+  const gap = Math.max(3, size * 0.11);
+
+  return (
+    <span
+      aria-label="Thinking"
+      className="pointer-events-none absolute inset-0 flex items-center justify-center"
+      data-animation="thinking-dots"
+    >
+      <span className="flex items-center" style={{ gap }}>
+        {[highlight, base, shadow].map((dotColor, index) => (
+          <span
+            key={dotColor}
+            className={reduceMotion ? "rounded-full" : "rounded-full animate-pulse"}
+            style={{
+              width: dotSize,
+              height: dotSize,
+              backgroundColor: dotColor,
+              animationDuration: "1150ms",
+              animationDelay: `${index * 120}ms`,
+            }}
+          />
+        ))}
+      </span>
+    </span>
+  );
+}
 
 export type MausAvatarHandle = CursorAvatarHandle;
 
@@ -164,18 +205,35 @@ function MausAvatarComponent(
     setExpression: (index: number) => inner.current?.setExpression(index),
   }));
 
+  const thinkingDots = motion === "thinking-dots" && animated;
+  const [thinkingDotsVisible, setThinkingDotsVisible] = useState(false);
+
+  useEffect(() => {
+    setThinkingDotsVisible(false);
+    if (!thinkingDots) return;
+    const timer = setTimeout(() => setThinkingDotsVisible(true), THINKING_DOTS_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [thinkingDots, motionKey]);
+
   // A one-shot motion borrows the state for a moment, then hands it back.
   const [motionState, setMotionState] = useState<MausState | null>(null);
   useEffect(() => {
-    if (motion === "none" || !animated) return;
+    if (motion === "none" || !animated) {
+      setMotionState(null);
+      return;
+    }
     const beat = MOTION_FACE[motion];
     if (!beat) return;
     if (beat.blink) inner.current?.blink();
     if (beat.spin) inner.current?.spin(beat.spin);
     if (!beat.state) return;
     setMotionState(beat.state);
+    if (motion === "thinking-dots") return;
     const timer = setTimeout(() => setMotionState(null), MOTION_FACE_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      setMotionState(null);
+    };
   }, [motion, motionKey, animated]);
 
   // Pointer-follow gaze, composed with any gaze the caller pins.
@@ -202,21 +260,15 @@ function MausAvatarComponent(
           width={size}
           height={size}
           className="size-full rounded-full object-cover border border-hairline/30"
-          style={{ width: size, height: size }}
+          style={{ width: size, height: size, opacity: thinkingDotsVisible ? 0 : 1, transition: `opacity ${THINKING_DOTS_FADE_MS}ms ease` }}
           draggable={false}
         />
-        {motion === "thinking-dots" && animated && (
+        {thinkingDots && (
           <span
-            aria-label="Thinking"
-            className="pointer-events-none absolute -bottom-0.5 -right-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/70 px-1.5 py-1"
+            className="absolute inset-0 rounded-full bg-black/10"
+            style={{ opacity: thinkingDotsVisible ? 1 : 0, transition: `opacity ${THINKING_DOTS_FADE_MS}ms ease` }}
           >
-            {[0, 1, 2].map((dot) => (
-              <span
-                key={dot}
-                className={`size-1.5 rounded-full bg-white/90 ${reduceMotion ? "" : "animate-pulse"}`}
-                style={{ animationDelay: `${dot * 120}ms` }}
-              />
-            ))}
+            <ThinkingDots color={color} size={size} reduceMotion={reduceMotion} />
           </span>
         )}
       </span>
@@ -229,35 +281,39 @@ function MausAvatarComponent(
       onPointerMove={trackPointer && animated ? onPointerMove : undefined}
       onPointerLeave={trackPointer && animated ? onPointerLeave : undefined}
     >
-      <CursorAvatar
-        ref={inner}
-        state={motionState ?? state}
-        expression={expression}
-        size={size}
-        shape={shape === "cursor" ? GRADIENT_SHAPE : mascotShape(shape)}
-        gradient={gradientFor(color)}
-        title={label ?? null}
-        lookAround={forward ? 0 : 1}
-        gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
-        turn={turn}
-        spring={spring}
-        eyeScale={eyeScale}
-        showMouth={showMouth}
-        mouthStroke={mouthStroke}
-        paused={!animated}
-      />
-      {motion === "thinking-dots" && animated && (
+      <span
+        className="relative inline-flex shrink-0"
+        style={{
+          width: size,
+          height: size,
+          opacity: thinkingDotsVisible ? 0 : 1,
+          transition: `opacity ${THINKING_DOTS_FADE_MS}ms ease`,
+        }}
+      >
+        <CursorAvatar
+          ref={inner}
+          state={motionState ?? state}
+          expression={expression}
+          size={size}
+          shape={shape === "cursor" ? GRADIENT_SHAPE : mascotShape(shape)}
+          gradient={gradientFor(color)}
+          title={label ?? null}
+          lookAround={forward ? 0 : 1}
+          gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
+          turn={turn}
+          spring={spring}
+          eyeScale={eyeScale}
+          showMouth={showMouth}
+          mouthStroke={mouthStroke}
+          paused={!animated}
+        />
+      </span>
+      {thinkingDots && (
         <span
-          aria-label="Thinking"
-          className="pointer-events-none absolute -bottom-0.5 -right-1 flex items-center gap-0.5 rounded-full border border-white/20 bg-black/70 px-1.5 py-1"
+          className="absolute inset-0"
+          style={{ opacity: thinkingDotsVisible ? 1 : 0, transition: `opacity ${THINKING_DOTS_FADE_MS}ms ease` }}
         >
-          {[0, 1, 2].map((dot) => (
-            <span
-              key={dot}
-              className={`size-1.5 rounded-full bg-white/90 ${reduceMotion ? "" : "animate-pulse"}`}
-              style={{ animationDelay: `${dot * 120}ms` }}
-            />
-          ))}
+          <ThinkingDots color={color} size={size} reduceMotion={reduceMotion} />
         </span>
       )}
     </span>

@@ -27,7 +27,7 @@ const electronApi =
     ? electronNs.default
     : electronNs;
 const { app, ipcMain } = electronApi;
-const UPDATE_FEED_URL = "https://github.com/E4B-labs/multibot/releases/latest/download";
+const UPDATE_FEED_URL = "https://github.com/E4B-labs/multibot-desktop/releases/latest/download";
 const UPDATE_ERROR_MESSAGE = "Update failed. Check your connection and try again.";
 
 let autoUpdater = null;

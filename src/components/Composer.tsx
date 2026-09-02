@@ -5,7 +5,7 @@ import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
 import { MausAvatar } from "./Avatar";
-import { busyMascotMotion, normalizeState, stateForBot } from "@/lib/mascot";
+import { normalizeState } from "@/lib/mascot";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { parseSchedule, type PresetOrUnknown } from "@/lib/routineSchedule";
@@ -252,7 +252,6 @@ export function Composer({ bot }: { bot: Bot }) {
   // multibot: aktywna rozmowa bot-bot dla oglądanego bota (awatar partnera +
   // dymki ze szlaczkami nad composereem); null gdy bot nikogo nie „gadaje"
   const peerChat = usePeerChat(bot.id);
-  const busyMotion = bot.busy ? busyMascotMotion(bot.id) : null;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const filesRef = useRef<HTMLInputElement>(null);
   const previewUrls = useRef(new Set<string>());
@@ -882,7 +881,7 @@ export function Composer({ bot }: { bot: Bot }) {
         {/* Awatar pojawia się tylko na czas aktywnej tury bota. */}
         {bot.busy && (
           <div className="pointer-events-none absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
-            <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={busyMotion?.state ?? normalizeState(bot.mascotExpression) ?? stateForBot(bot)} size={40} motion={busyMotion?.motion ?? "none"} motionKey={busyMotion ? 1 : 0} animated />
+            <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state="thinking" size={40} motion="thinking-dots" motionKey={1} animated />
           </div>
         )}
         <button

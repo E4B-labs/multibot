@@ -5,7 +5,7 @@ artifactName: MultiBot-${version}-${arch}.${ext}
 
 publish:
   - provider: generic
-    url: https://github.com/E4B-labs/multibot/releases/latest/download
+    url: https://github.com/E4B-labs/multibot-desktop/releases/latest/download
 
 directories:
   buildResources: build
