@@ -18,7 +18,7 @@ zakładaliśmy proces". Aktualizuje się go świadomie, przy większych zmianach
 | Wersja | `package.json` 0.3.16 |
 | Runtime | Node >= 24, pnpm 10.33.0, Python 3.12 |
 | Śledzonych plików | 459 |
-| Testy | 109 vitest, 39 pytest |
+| Testy | vitest: 104 pliki / 624 testy (zmierzone `pnpm test`), pytest: 39 |
 
 Właściciel repo to **konto użytkownika** `E4B-labs`, nie organizacja
 (`orgs/E4B-labs` zwraca 404). Jedyny kolaborator z uprawnieniami: `E4B-labs`
@@ -133,7 +133,7 @@ podstawowy przepływ pracy ich nie wymaga.
   — poza zakresem zmiany porządkowej.
 - **Zmienne środowiskowe bez dokumentacji**: około 20 nazw czytanych przez kod
   nie miało żadnego przykładu. Najważniejsze zostały dopisane jako komentarze do
-  `.env.example` i `engine/.env.example` (same nazwy, bez wartości). Pełna lista
+  `.env.example` (same nazwy, bez wartości). Pełna lista
   pozostałych — w kodzie; docelowo warto dokończyć.
 - **Brak bazy i migracji.** Dane to pliki JSON. Nie ma bramki migracyjnej do
   uruchomienia, ale zmiana kształtu danych psuje istniejące instalacje bez

@@ -150,7 +150,11 @@ zanim ktokolwiek zacznie — zasady w [BRANCHING.md](BRANCHING.md).
 
 ## 8. Testy
 
-109 testów vitest (`pnpm test` → `vitest run`) i 39 testów pytest w `engine/`.
+Zmierzone `pnpm test` (`vitest run`): **104 pliki testowe** (103 passed,
+1 skipped) i **624 testy** (617 passed, 7 skipped). Do tego 39 testów pytest
+w `engine/`. Liczba 109 z wcześniejszego audytu brała się z policzenia plików
+`*.test.*` w drzewie — pięć z nich to martwe testy Electrona pod `node:test`,
+których vitest w ogóle nie wciąga (niżej).
 Suita vitest chodzi bez równoległości plików (`fileParallelism: false`), bo
 odpala udawane CLI providerów i prawdziwy serwer harnessu.
 
