@@ -20,15 +20,16 @@ describe("skala prawego panelu i czatu", () => {
     for (const width of widths) expect(width).toBeLessThanOrEqual(340);
   });
 
-  it("awatar otwiera zakładki Bot, Generuj i Prześlij", () => {
+  it("awatar otwiera zakładki Bot i Prześlij bez generatora", () => {
     expect(panel).toContain("setAppearanceMode");
     expect(panel).toContain("aria-expanded={appearanceMode !== \"closed\"}");
-    expect(panel).toContain('type AppearanceMode = "closed" | "bot" | "generate" | "photo"');
+    expect(panel).toContain('type AppearanceMode = "closed" | "bot" | "photo"');
     expect(panel).toContain("MASCOT_SHAPES.map");
     expect(panel).toContain("MAUS_COLOR_NAMES.map");
-    expect(panel).toContain('setAppearanceMode("generate")');
     expect(panel).toContain("Prześlij");
-    expect(panel).toContain("Generuj");
+    expect(panel).not.toContain("Generate");
+    expect(panel).not.toContain("Generuj");
+    expect(panel).toContain('animated={false} trackPointer={false} showFace={false}');
     expect(panel).not.toContain("Photo will be cropped to a circle like Facebook/GrokBot");
     expect(panel).not.toContain("Zdjęcie zostanie przycięte do koła jak na Facebooku/GrokBot");
   });

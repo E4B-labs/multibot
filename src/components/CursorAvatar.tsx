@@ -1318,6 +1318,8 @@ export interface CursorAvatarProps {
   flip?: boolean
   spring?: number
   eyeScale?: number
+  /** Render the eyes and mouth. False is useful for clean shape previews. */
+  showFace?: boolean
   showMouth?: boolean
   mouthStroke?: number
   /** How strongly the body itself moves. 0 holds it perfectly still, 1 is full motion. */
@@ -1356,6 +1358,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       flip = false,
       spring = 7,
       eyeScale = 1,
+      showFace = true,
       showMouth = true,
       mouthStroke = MOUTH_STROKE,
       motion,
@@ -1752,16 +1755,20 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           )}
           <g clipPath={`url(#${uid}-clip)`}>
             <g transform={anchorTransform(anchorNow)}>
-              <path ref={eye0} fill={eyeColor} />
-              <path ref={eye1} fill={eyeColor} />
-              {showMouth && (
-                <path
-                  ref={mouth}
-                  fill="none"
-                  stroke={eyeColor}
-                  strokeWidth={mouthStroke}
-                  strokeLinecap="round"
-                />
+              {showFace && (
+                <>
+                  <path ref={eye0} fill={eyeColor} />
+                  <path ref={eye1} fill={eyeColor} />
+                  {showMouth && (
+                    <path
+                      ref={mouth}
+                      fill="none"
+                      stroke={eyeColor}
+                      strokeWidth={mouthStroke}
+                      strokeLinecap="round"
+                    />
+                  )}
+                </>
               )}
             </g>
           </g>

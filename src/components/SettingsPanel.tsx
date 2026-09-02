@@ -134,14 +134,14 @@ function BotSharing({ bot }: { bot: Bot }) {
   );
 }
 
-type AppearanceMode = "closed" | "bot" | "generate" | "photo";
+type AppearanceMode = "closed" | "bot" | "photo";
 
 export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [query, setQuery] = useState("");
   // Kliknięcie awatara otwiera panel wyglądu; wybór konkretnego trybu odbywa
-  // się w zakładkach Bot / Generuj / Prześlij.
+  // się w zakładkach Bot / Prześlij.
   const [appearanceMode, setAppearanceMode] = useState<AppearanceMode>("closed");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -288,13 +288,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAppearanceMode("generate")}
-                    className={cn("rounded-lg px-2.5 py-1 text-[13px] font-medium", appearanceMode === "generate" ? "bg-accent text-white" : "bg-raised text-ink-secondary hover:text-ink")}
-                  >
-                    {polish ? "Generuj" : "Generate"}
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setAppearanceMode("photo")}
                     className={cn("flex items-center gap-1 rounded-lg px-2.5 py-1 text-[13px] font-medium", appearanceMode === "photo" ? "bg-accent text-white" : "bg-raised text-ink-secondary hover:text-ink")}
                   >
@@ -335,7 +328,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                         title={shape}
                         aria-label={`${polish ? "Użyj kształtu ikony" : "Use"} ${shape}`}
                       >
-                        <MausAvatar color={bot.color} shape={shape} avatarUrl={null} state={activeState} size={32} motion={mascotMotion?.kind ?? "none"} motionKey={mascotMotion?.nonce ?? 0} />
+                        <MausAvatar color={bot.color} shape={shape} avatarUrl={null} state={activeState} size={32} animated={false} trackPointer={false} showFace={false} />
                       </button>
                     ))}
                   </div>
@@ -359,10 +352,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
                       />
                     ))}
                   </div>
-                </div>
-              ) : appearanceMode === "generate" ? (
-                <div className="flex min-h-[120px] items-center justify-center p-4 text-center text-[13px] text-ink-secondary">
-                  {polish ? "Generowanie awatara jest obecnie niedostępne." : "Avatar generation is currently unavailable."}
                 </div>
               ) : (
                 <div className="p-3">
