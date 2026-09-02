@@ -144,7 +144,7 @@ test("taskkill leci BEZ /t — inaczej ubija sam siebie", async () => {
   const { buildInstallScript } = await freshModule();
   const script = buildInstallScript({
     installerPath: "C:\Users\k\AppData\Local\multibot-updater\installer.exe",
-    exePath: "C:\Users\k\AppData\Local\Programs\MultiBot\MultiBot.exe",
+    exePath: "C:\\Users\\k\\AppData\\Local\\Programs\\MultiBot\\MultiBot.exe",
     installDir: "C:\Users\k\AppData\Local\Programs\MultiBot",
   });
   const kill = script.split("\r\n").find((l) => l.startsWith("taskkill"));
@@ -154,6 +154,16 @@ test("taskkill leci BEZ /t — inaczej ubija sam siebie", async () => {
   assert.match(kill, /\/im MultiBot\.exe/);
 });
 
+test("taskkill używa rzeczywistej nazwy spakowanego EXE", async () => {
+  const { buildInstallScript } = await freshModule();
+  const script = buildInstallScript({
+    installerPath: "C:\\cache\\installer.exe",
+    exePath: "C:\\Users\\k\\AppData\\Local\\Programs\\MultiBot Desktop\\MultiBot Desktop.exe",
+    installDir: "C:\\Users\\k\\AppData\\Local\\Programs\\MultiBot Desktop",
+  });
+  const kill = script.split("\r\n").find((l) => l.startsWith("taskkill"));
+  assert.match(kill, /\/im "MultiBot Desktop\.exe"/);
+});
 test("ścieżki są cytowane, a /D= zostaje na końcu wiersza", async () => {
   const { buildInstallScript } = await freshModule();
   const script = buildInstallScript({
