@@ -24,3 +24,6 @@ __pycache__/
 .DS_Store
 
 electron/resources/speech-helper
+
+# hermes-agent klonowany przez install-linux.sh / Dockerfile.selfhost
+engine/hermes-agent/

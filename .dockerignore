@@ -8,3 +8,6 @@ engine-data
 __pycache__
 *.pyc
 *.local
+
+# multibot: sekrety nigdy nie wchodzą do obrazu (Dockerfile.selfhost robi COPY . .)
+.env*
