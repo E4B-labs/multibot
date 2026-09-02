@@ -1,0 +1,27 @@
+# Automatyczne żądania przeglądu. Zasady: docs/engineering/CODE_OWNERSHIP.md
+#
+# UWAGA: login, który nie jest kolaboratorem repo (albo w ogóle nie istnieje),
+# GitHub CICHO IGNORUJE — reguła wygląda na działającą i nie robi nic.
+# Dlatego jest tu wyłącznie potwierdzony właściciel repo.
+#
+# `clewkord` NIE jest loginem GitHuba (GET /users/clewkord → 404) — to adres
+# e-mail autora commitów. Konto właściciela to @E4B-labs.
+
+# Kontrakty danych i SPI driverów — zmiana wymaga decyzji właściciela.
+/server/contracts.ts        @E4B-labs
+
+# Bramki, szablony i konfiguracja repo.
+/.github/                   @E4B-labs
+
+# Protokół inżynierski.
+/docs/engineering/          @E4B-labs
+/AGENTS.md                  @E4B-labs
+
+# --- Do uzupełnienia przez właściciela ---------------------------------------
+# Loginy GitHub Bartka i Mieszka nie są potwierdzone i żaden z nich nie jest
+# dziś kolaboratorem tego repo (jedyny kolaborator: E4B-labs, admin).
+# Po potwierdzeniu loginu i dodaniu osoby jako kolaboratora — odkomentować
+# i podmienić placeholdery:
+#
+# /engine/                  @<login-bartka>
+# /src/                     @<login-mieszka>

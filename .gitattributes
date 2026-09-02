@@ -1,3 +1,8 @@
+# Normalizacja końców linii: git trzyma w indeksie LF, checkout robi to, co
+# pasuje do systemu. Bez tego windowsowy `core.autocrlf` produkuje diffy
+# obejmujące cały plik przy zerowej zmianie treści.
+* text=auto
+
 # multibot: skrypty shellowe zawsze LF — checkout na windows-latest robił CRLF
 # i wywalał test_termux_script (bash -n pada na \r).
 *.sh text eol=lf

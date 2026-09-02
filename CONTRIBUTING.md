@@ -2,8 +2,9 @@
 
 Thanks for wanting to help — community PRs have already shipped in this repo, and more are welcome.
 This file tells you how to get a working dev setup, what the codebase expects from a change, and what
-makes a PR easy to merge. Read it once before opening anything; it's short on purpose. For two-person
-parallel work, use [`docs/TEAM-WORKFLOW.md`](docs/TEAM-WORKFLOW.md).
+makes a PR easy to merge. Read it once before opening anything; it's short on purpose. The canonical, tool-neutral
+engineering protocol every contributor and AI agent follows is [`AGENTS.md`](AGENTS.md); the
+supporting documentation lives in [`docs/engineering/`](docs/engineering/).
 
 ## Ground rules
 
@@ -12,7 +13,8 @@ parallel work, use [`docs/TEAM-WORKFLOW.md`](docs/TEAM-WORKFLOW.md).
 - **Match the altitude.** This codebase is deliberately small and direct — plain Node, no frameworks
   on the server, one store, one event bus. Don't introduce a dependency where thirty lines of code
   will do. New runtime dependencies need a reason in the PR description.
-- **Keep it green.** `pnpm typecheck && pnpm test` must pass. Server changes need tests (see below).
+- **Keep it green.** `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm exec vite build` must pass —
+  those four are exactly what CI runs. Server changes need tests (see below).
 - **UI changes need screenshots.** Before/after images in the PR body; video for anything animated.
   Match the existing palette and tone in [`src/styles.css`](src/styles.css).
 
@@ -25,16 +27,21 @@ test suite runs on macOS, Linux, and Windows.
 
 ```sh
 git clone https://github.com/E4B-labs/multibot-desktop.git && cd multibot-desktop
-pnpm install
+corepack enable && pnpm install --frozen-lockfile
 
 pnpm dev:server    # harness server → 127.0.0.1:8799
 pnpm dev           # app → http://127.0.0.1:5199
 pnpm dev:desktop   # Electron shell (macOS)
 
-pnpm typecheck     # app + server
-pnpm test          # vitest suite (server unit + driver contract + API smoke)
-pnpm test:watch    # same, in watch mode
+pnpm lint            # whitespace check + tsc --noEmit
+pnpm typecheck       # app + server
+pnpm test            # vitest suite (server unit + driver contract + API smoke)
+pnpm test:watch      # same, in watch mode
+pnpm exec vite build # production UI build
 ```
+
+Engine (`engine/`) changes also run the pytest suite — setup in
+[`engine/README.md`](engine/README.md).
 
 ## Repo map
 
@@ -109,7 +116,12 @@ responses or events, no baking them into argv where another local process could 
 
 ## Before you open the PR
 
-- [ ] `pnpm typecheck` and `pnpm test` pass
+Branch from an up-to-date `origin/main` and name it `<developer>/<type>/<task>`
+(see [`docs/engineering/BRANCHING.md`](docs/engineering/BRANCHING.md)). Fill in
+the PR template; the full contract is in
+[`docs/engineering/PR_POLICY.md`](docs/engineering/PR_POLICY.md).
+
+- [ ] `pnpm lint`, `pnpm typecheck`, `pnpm test` and `pnpm exec vite build` pass
 - [ ] New server behavior has a test; driver changes keep the contract tests green
 - [ ] No `dist-server/` churn, no lockfile churn beyond your actual dependency change
 - [ ] macOS-only code is platform-gated; nothing breaks the packaged app

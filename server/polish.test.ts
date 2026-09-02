@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const required = {
   "CmdK.tsx": ["Wszystko", "Wiadomości", "Agenci", "Grupy", "Pliki", "Linki", "Rutyny", "Akcje"],
   "AppSettingsPanel.tsx": ["Ustawienia aplikacji", "Zasoby urządzenia", "Narzędzia CLI"],
-  "GroupPanel.tsx": ["Brak wiadomości w tej sesji", "Napisz do pokoju"],
+  "GroupPanel.tsx": ["Brak wiadomości w tej sesji", "Zadanie dla tego bota"],
   "SkillsPanel.tsx": ["Umiejętności", "Nowa umiejętność"],
   "Sidebar.tsx": ["Pracuje…"],
 } as const;
