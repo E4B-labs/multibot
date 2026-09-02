@@ -157,6 +157,7 @@ export type MausAvatarProps = {
   gaze?: { x?: number; y?: number };
   spring?: number;
   eyeScale?: number;
+  showFace?: boolean;
   showMouth?: boolean;
   mouthStroke?: number;
   /**
@@ -190,6 +191,7 @@ function MausAvatarComponent(
     gaze,
     spring,
     eyeScale,
+    showFace = true,
     showMouth,
     mouthStroke,
     forward = true,
@@ -303,6 +305,7 @@ function MausAvatarComponent(
           turn={turn}
           spring={spring}
           eyeScale={eyeScale}
+          showFace={showFace}
           showMouth={showMouth}
           mouthStroke={mouthStroke}
           paused={!animated}
