@@ -18,7 +18,7 @@ zakładaliśmy proces". Aktualizuje się go świadomie, przy większych zmianach
 | Wersja | `package.json` 0.3.16 |
 | Runtime | Node >= 24, pnpm 10.33.0, Python 3.12 |
 | Śledzonych plików | 459 |
-| Testy | vitest: 104 pliki / 624 testy (zmierzone `pnpm test`), pytest: 39 |
+| Testy | vitest: 104 pliki / 624 testy; pytest: 39 plików / 311 testów (obie liczby zmierzone, nie policzone z drzewa) |
 
 Właściciel repo to **konto użytkownika** `E4B-labs`, nie organizacja
 (`orgs/E4B-labs` zwraca 404). Jedyny kolaborator z uprawnieniami: `E4B-labs`
