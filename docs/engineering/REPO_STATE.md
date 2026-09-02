@@ -53,7 +53,7 @@ niezależnych testów psutych i naprawianych po kolei:
 |---|---|---|
 | `server/polish.test.ts` | `expected … to contain 'Napisz do pokoju'` na wszystkich trzech systemach | **naprawione w tym PR** |
 | `server/group-store.test.ts` | `ENOENT: mkdtemp 'D:\tmp/multibot-group-XXXXXX'` — ścieżka jednej maszyny zaszyta w teście, pada na Linuksie i macOS | naprawione wcześniej |
-| `server/permission-proxy.test.ts` | timeout 30 s na Linuksie i Windowsie, `EACCES` na gnieździe unixowym na macOS | dziś pomijany |
+| `server/permission-proxy.test.ts` | timeout 30 s na Linuksie i Windowsie, `EACCES` na gnieździe unixowym na macOS | naprawione wcześniej; w CI tego PR-a przechodzi na Ubuntu i macOS (2 testy), a na Windowsie jest świadomie pomijany |
 | `server/drivers/claude.test.ts` | `spawn_error` nie pasuje do oczekiwanego kształtu | naprawione wcześniej |
 | `server/turn-tools.test.ts` | listy narzędzi rozjechane (31 vs 33) | naprawione wcześniej |
 
