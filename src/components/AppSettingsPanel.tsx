@@ -224,6 +224,91 @@ export function AccessTokenSettings() {
   );
 }
 
+type HostConnectionState = {
+  activeId: string;
+  hosts: Array<{ id: string; name: string; url: string; createdAt: number }>;
+};
+
+function HostConnectionSettings() {
+  const polish = useLanguage() === "pl";
+  const [connection, setConnection] = useState<HostConnectionState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const bridge = window.ogb?.hosts;
+
+  const refresh = () => {
+    if (!bridge) return;
+    void bridge.list().then(setConnection).catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+  };
+
+  useEffect(() => {
+    refresh();
+  }, [bridge]);
+
+  if (!bridge) return null;
+
+  const active = connection?.hosts.find((host) => host.id === connection.activeId);
+  const leaveHost = async () => {
+    if (!active || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await window.ogb?.useLocalHost?.();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      setBusy(false);
+    }
+  };
+
+  const removeHost = async (id: string) => {
+    if (busy) return;
+    const confirmed = window.confirm(polish ? "Usunąć zapis tego hosta z aplikacji?" : "Remove this saved host from the app?");
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await bridge.remove(id);
+      if (connection?.activeId === id) await window.ogb?.useLocalHost?.();
+      else {
+        refresh();
+        setBusy(false);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl bg-card p-4">
+      <div className="text-[15px] font-medium text-ink">{polish ? "Serwer i host" : "Server & host"}</div>
+      <div className="mt-0.5 text-[13px] text-ink-secondary">
+        {active ? `${polish ? "Połączono z" : "Connected to"} ${active.name}` : polish ? "Połączono z tym komputerem." : "Connected to this computer."}
+      </div>
+      {active && <div className="mt-1 truncate text-[12px] text-ink-secondary">{active.url}</div>}
+      {active && (
+        <button type="button" onClick={() => void leaveHost()} disabled={busy} className="mt-3 rounded-lg border border-danger/40 px-3 py-2 text-[13px] text-danger hover:bg-danger/10 disabled:opacity-50">
+          {busy ? polish ? "Rozłączanie…" : "Disconnecting…" : polish ? "Opuść hosta" : "Leave host"}
+        </button>
+      )}
+      {connection && connection.hosts.length > 0 && (
+        <div className="mt-4 space-y-2 border-t border-hairline/40 pt-3">
+          <div className="text-[12px] font-medium text-ink-secondary">{polish ? "Zapisane hosty" : "Saved hosts"}</div>
+          {connection.hosts.map((host) => (
+            <div key={host.id} className="flex items-center gap-2 text-[12px] text-ink-secondary">
+              <span className="min-w-0 flex-1 truncate">{host.name}</span>
+              <button type="button" onClick={() => void removeHost(host.id)} disabled={busy} className="shrink-0 text-danger hover:underline disabled:opacity-50">
+                {polish ? "Usuń" : "Remove"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
 export function WorkspaceAccessSettings() {
   const polish = useLanguage() === "pl";
   const [workspace, setWorkspace] = useState<{
@@ -1084,6 +1169,9 @@ export function AppSettingsPanel() {
 
           {tab === "other" && (
             <>
+              <HostConnectionSettings />
+              <WorkspaceAccessSettings />
+              <AccessTokenSettings />
               {/* multibot: G1 — custom model catalog lives at app level, never per bot. */}
               <CustomModels />
               {/* multibot: G1 — CLI allowlist UI; provisioning actions land in G3. */}
