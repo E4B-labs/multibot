@@ -24,7 +24,7 @@ $env:HERMES_HOME="G:\Projects\slafy-bot-data"
 .venv\Scripts\python.exe -m uvicorn server.app:app --port 8700
 ```
 
-Dane botów (profile Hermesa) żyją w `SLAFY_DATA_DIR` (domyślnie `G:\Projects\slafy-bot-data`), poza repo.
+Dane botów (profile Hermesa) żyją w `SLAFY_DATA_DIR` (domyślnie `~/.openmausbot/engine-data`), poza repo.
 
 ## Stary telefon (Termux)
 

@@ -1,7 +1,7 @@
 import os, tempfile, pathlib
 os.environ.setdefault("SLAFY_DATA_DIR", r"D:\tmp\slafy-test-data")
 
-from server import bots
+from server import bots, providers
 
 
 def test_create_list_get_delete(tmp_path, monkeypatch):
@@ -112,3 +112,15 @@ def test_new_bot_writes_v3_identity(tmp_path, monkeypatch):
     assert "MULTIBOT_COMPUTER_IDENTITY_V1" not in soul
     assert "MULTIBOT_COMPUTER_IDENTITY_V2" not in soul
     assert soul.count("## MultiBot computer") == 1
+
+
+def test_data_dir_default_is_portable(tmp_path, monkeypatch):
+    """Domyślny katalog danych nie może być przywiązany do jednej maszyny —
+    repo chodzi na Windows/Linux/macOS, a literalna ścieżka z dysku G istnieje u jednej
+    osoby. Bez env musi wypaść pod `Path.home()`; z env wygrywa env."""
+    monkeypatch.delenv("SLAFY_DATA_DIR", raising=False)
+    default = bots.data_dir()
+    assert default.is_relative_to(pathlib.Path.home()), default
+    assert providers._profile_dir("ala") == default / "profiles" / "ala"
+    monkeypatch.setenv("SLAFY_DATA_DIR", str(tmp_path))
+    assert bots.data_dir() == tmp_path
