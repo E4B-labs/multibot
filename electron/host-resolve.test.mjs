@@ -1,40 +1,63 @@
-// Self-check for host-resolve.mjs. Zero dependencies:
-// `node electron/host-resolve.test.mjs`.
-import assert from "node:assert/strict";
-import { test } from "node:test";
+// Testy host-resolve.mjs. Pod vitest (`pnpm test`) — wcześniej leżały pod
+// node:test i nie uruchamiał ich nikt (docs/engineering/REPO_STATE.md §6).
+import { describe, expect, it } from "vitest";
 
-import { normalizeRemoteUrl, removeRemoteHost, resolveActiveTarget, upsertRemoteHost } from "./host-resolve.mjs";
+import {
+  normalizeRemoteUrl,
+  removeRemoteHost,
+  resolveActiveTarget,
+  shouldStartLocalHarness,
+  upsertRemoteHost,
+} from "./host-resolve.mjs";
 
-test("normalizeRemoteUrl strips trailing slashes and validates scheme", () => {
-  assert.equal(normalizeRemoteUrl("https://host.ts.net/"), "https://host.ts.net");
-  assert.equal(normalizeRemoteUrl(" http://127.0.0.1:8799// "), "http://127.0.0.1:8799");
-  assert.throws(() => normalizeRemoteUrl("not-a-url"));
-  assert.throws(() => normalizeRemoteUrl(""));
+describe("host resolve", () => {
+  it("normalizeRemoteUrl strips trailing slashes and validates scheme", () => {
+    expect(normalizeRemoteUrl("https://host.ts.net/")).toBe("https://host.ts.net");
+    expect(normalizeRemoteUrl(" http://127.0.0.1:8799// ")).toBe("http://127.0.0.1:8799");
+    expect(() => normalizeRemoteUrl("not-a-url")).toThrow();
+    expect(() => normalizeRemoteUrl("")).toThrow();
+  });
+
+  it("upsertRemoteHost replaces by id and keeps newest first", () => {
+    const a = { id: "a", name: "A", url: "https://a" };
+    const b = { id: "b", name: "B", url: "https://b" };
+    const list = upsertRemoteHost([a], b);
+    expect(list).toEqual([b, a]);
+
+    const a2 = { id: "a", name: "A2", url: "https://a2" };
+    expect(upsertRemoteHost(list, a2)).toEqual([a2, b]);
+  });
+
+  it("removeRemoteHost drops only the matching id", () => {
+    expect(removeRemoteHost([{ id: "a" }, { id: "b" }], "a")).toEqual([{ id: "b" }]);
+  });
+
+  it("resolveActiveTarget: missing config, activeId=local, or dangling id => local", () => {
+    expect(resolveActiveTarget(null)).toEqual({ mode: "local" });
+    expect(resolveActiveTarget({ activeId: "local", hosts: [] })).toEqual({ mode: "local" });
+    expect(resolveActiveTarget({ activeId: "missing", hosts: [] })).toEqual({ mode: "local" });
+  });
+
+  it("resolveActiveTarget: known remote id => that host", () => {
+    const host = { id: "h1", url: "https://h1" };
+    expect(resolveActiveTarget({ activeId: "h1", hosts: [host] })).toEqual({ mode: "remote", host });
+  });
 });
 
-test("upsertRemoteHost replaces by id and keeps newest first", () => {
-  const a = { id: "a", name: "A", url: "https://a" };
-  const b = { id: "b", name: "B", url: "https://b" };
-  const list = upsertRemoteHost([a], b);
-  assert.deepEqual(list, [b, a]);
+describe("local harness startup decision", () => {
+  // Sedno poprawki: z aktywnym hostem zdalnym zapakowana apka nie forkuje
+  // lokalnego serwera — inaczej zakłada ~/.openmausbot i pokazuje ekran
+  // zakładania serwera, którego użytkownik nigdy nie chciał.
+  it("never starts the harness while a remote host is active", () => {
+    expect(shouldStartLocalHarness({ isPackaged: true, mode: "remote" })).toBe(false);
+  });
 
-  const a2 = { id: "a", name: "A2", url: "https://a2" };
-  const replaced = upsertRemoteHost(list, a2);
-  assert.deepEqual(replaced, [a2, b]);
-});
+  it("still starts the harness for the packaged local target", () => {
+    expect(shouldStartLocalHarness({ isPackaged: true, mode: "local" })).toBe(true);
+  });
 
-test("removeRemoteHost drops only the matching id", () => {
-  const hosts = [{ id: "a" }, { id: "b" }];
-  assert.deepEqual(removeRemoteHost(hosts, "a"), [{ id: "b" }]);
-});
-
-test("resolveActiveTarget: missing config, activeId=local, or dangling id => local", () => {
-  assert.deepEqual(resolveActiveTarget(null), { mode: "local" });
-  assert.deepEqual(resolveActiveTarget({ activeId: "local", hosts: [] }), { mode: "local" });
-  assert.deepEqual(resolveActiveTarget({ activeId: "missing", hosts: [] }), { mode: "local" });
-});
-
-test("resolveActiveTarget: known remote id => that host", () => {
-  const host = { id: "h1", url: "https://h1" };
-  assert.deepEqual(resolveActiveTarget({ activeId: "h1", hosts: [host] }), { mode: "remote", host });
+  it("never starts the harness in dev, whatever the target", () => {
+    expect(shouldStartLocalHarness({ isPackaged: false, mode: "local" })).toBe(false);
+    expect(shouldStartLocalHarness({ isPackaged: false, mode: "remote" })).toBe(false);
+  });
 });

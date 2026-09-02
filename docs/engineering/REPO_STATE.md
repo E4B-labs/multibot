@@ -18,7 +18,7 @@ zakładaliśmy proces". Aktualizuje się go świadomie, przy większych zmianach
 | Wersja | `package.json` 0.3.16 |
 | Runtime | Node >= 24, pnpm 10.33.0, Python 3.12 |
 | Śledzonych plików | 459 |
-| Testy | vitest: 104 pliki / 624 testy; pytest: 39 plików / 311 testów (obie liczby zmierzone, nie policzone z drzewa) |
+| Testy | vitest: 105 plików / 640 testów; pytest: 39 plików / 311 testów (obie liczby zmierzone, nie policzone z drzewa) |
 
 Właściciel repo to **konto użytkownika** `E4B-labs`, nie organizacja
 (`orgs/E4B-labs` zwraca 404). Jedyny kolaborator z uprawnieniami: `E4B-labs`
@@ -116,9 +116,10 @@ podstawowy przepływ pracy ich nie wymaga.
   `src/components/CursorAvatar.tsx` 1814, `src/components/Sidebar.tsx` 1354,
   `engine/server/app.py` 1280, `src/state/store.tsx` 1119. Dwie gałęzie w
   `server/index.ts` naraz to najbardziej prawdopodobny konflikt w tym repo.
-- **Pięć testów, których nikt nie uruchamia**: `vite.config.ts` włącza tylko
-  trzy pliki z `electron/`, więc testy `gpu`, `hardware-acceleration`,
-  `host-resolve`, `remote-ui`, `updater` napisane pod `node:test` są martwe.
+- **Cztery testy, których nikt nie uruchamia**: `vite.config.ts` włącza tylko
+  cztery pliki z `electron/`, więc testy `gpu`, `hardware-acceleration`,
+  `remote-ui`, `updater` napisane pod `node:test` są martwe. `host-resolve`
+  przepisano na vitest i podpięto.
 - **`hermes-agent` nie jest przypięty lockfile'em.** CI robi `git clone` +
   `checkout 17688f9`. SHA leży w trzech miejscach (`engine/requirements.txt` w
   komentarzu, `.github/workflows/engine.yml`, `engine/SLAFY-BOT-SHA.txt`) i nic

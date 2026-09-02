@@ -144,10 +144,13 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   };
   const configured = status?.server?.configured ?? false;
   const field = "mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[14px] text-ink outline-none focus:border-hairline";
-  // „Wstecz" ma sens wyłącznie w powłoce desktopowej, gdzie wraca do wyboru
+  // „Wstecz" ma sens wyłącznie w powłoce desktopowej, gdzie otwiera wybór
   // hosta. W karcie przeglądarki nie ma dokąd wracać (ekran logowania jest
   // pierwszym wpisem historii), więc `history.back()` był po prostu niczym.
-  const backToHostPicker = window.ogb?.useLocalHost;
+  // Wołało to kiedyś `useLocalHost`, czyli powrót z hosta zdalnego przestawiał
+  // komputer na lokalny harness — teraz tylko pokazuje wybór, a host zmienia
+  // się dopiero po jawnym kliknięciu w tym oknie.
+  const backToHostPicker = window.ogb?.showHostPicker;
   const switchLink = loginSwitch(mode, configured, polish);
   return (
     <main className="multibot-login flex h-full min-h-screen items-center justify-center bg-app px-5 text-ink">
