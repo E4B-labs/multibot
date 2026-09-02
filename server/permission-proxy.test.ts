@@ -16,11 +16,12 @@ const PROXY = join(dirname(fileURLToPath(import.meta.url)), "permission-proxy.ts
 let child: ChildProcess | null = null;
 let server: Server | null = null;
 let home: string | null = null;
+const brokerConnections = new WeakMap<Server, Set<Socket>>();
 
 afterEach(async () => {
   child?.kill("SIGKILL");
   child = null;
-  await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
+  await closeBroker(server);
   server = null;
   if (home) rmSync(home, { recursive: true, force: true });
   home = null;
@@ -35,7 +36,10 @@ function broker(socketPath: string): Promise<Server> {
     let attempts = 0;
     const listen = () => {
       try { unlinkSync(socketPath); } catch { /* no socket on the first bind */ }
-      const s = createServer((conn: Socket) => {
+      let s: Server;
+      s = createServer((conn: Socket) => {
+        brokerConnections.get(s)!.add(conn);
+        conn.once("close", () => brokerConnections.get(s)?.delete(conn));
         let buf = "";
         conn.on("data", (chunk) => {
           buf += chunk;
@@ -47,6 +51,7 @@ function broker(socketPath: string): Promise<Server> {
           }
         });
       });
+      brokerConnections.set(s, new Set());
       const retry = (error: NodeJS.ErrnoException) => {
         s.removeListener("error", retry);
         s.close(() => {
@@ -65,6 +70,12 @@ function broker(socketPath: string): Promise<Server> {
     };
     listen();
   });
+}
+
+async function closeBroker(value: Server | null): Promise<void> {
+  if (!value) return;
+  for (const conn of brokerConnections.get(value) ?? []) conn.destroy();
+  await new Promise<void>((resolve) => value.close(() => resolve()));
 }
 
 /** Jedno `tools/call` do proxy; zwraca tekst wyniku. */
@@ -120,7 +131,7 @@ describe.skipIf(!posix)("permission-proxy", () => {
     expect(await approve(child, 1)).toContain('"behavior":"allow"');
 
     // koniec tury — harness zamyka brokera, proces proxy zostaje przy życiu
-    await new Promise<void>((r) => server!.close(() => r()));
+    await closeBroker(server);
     await new Promise((r) => setTimeout(r, 100));
 
     // tura 2: nowy broker na tej samej ścieżce (ścieżka jest stała dla wątku)
