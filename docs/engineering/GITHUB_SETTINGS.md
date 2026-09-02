@@ -28,7 +28,7 @@ repozytorium.
 | Zatwierdzenie ostatniego pusha | `require_last_push_approval: false` | `require_last_push_approval: true` | osoba, która wypchnęła ostatnie zmiany, nie zatwierdza ich sama |
 | Rozwiązane rozmowy | `required_conversation_resolution: true` (klasyczna) | `required_review_thread_resolution: true` (zestaw) | uwagi z recenzji nie giną przy scaleniu |
 | Odrzucanie starych recenzji po pushu | `dismiss_stale_reviews: false` | `dismiss_stale_reviews_on_push: false` | bez zmian względem dzisiaj; parametr jest w API wymagany, więc musi być podany jawnie |
-| Recenzja właściciela kodu | `require_code_owner_reviews: false` | `require_code_owner_review: false` | bez zmian; w repo nie ma pliku CODEOWNERS, wymóg byłby pusty. Parametr wymagany przez API, podany jawnie |
+| Recenzja właściciela kodu | `require_code_owner_reviews: false` | `require_code_owner_review: false` | bez zmian na start. `.github/CODEOWNERS` istnieje, ale wskazuje jedynego kolaboratora, więc wymóg recenzji właściciela kodu byłby dziś nie do spełnienia. Do włączenia, gdy Bartek i Mieszko będą kolaboratorami. Parametr wymagany przez API, podany jawnie |
 | Wymagane statusy | brak, `/branches/main/protection/required_status_checks` zwraca 404 | trzy konteksty z `.github/workflows/ci.yml` (patrz niżej) | scalenie tylko przy zielonym CI na trzech systemach |
 | Aktualność gałęzi przed scaleniem | brak | `strict_required_status_checks_policy: true` | PR musi być przetestowany na aktualnym `main`, a nie na stanie sprzed tygodnia |
 | Force push na `main` | zablokowany klasyczną ochroną (`allow_force_pushes: false`) | reguła `non_fast_forward` | to samo zabezpieczenie, ale w zestawie reguł |
