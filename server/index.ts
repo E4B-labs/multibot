@@ -341,6 +341,10 @@ async function delegatedPeerTurn(callerId: string, peerId: string, message: stri
 const IDLE_WAIT_MS = 2_000;
 const IDLE_ROUNDS_LIMIT = 30;
 const ROOM_IDLE_ROUNDS_LIMIT = 30;
+// multibot: ile rund wymiany dostaje pokoj otwarty przez ask_bot, zanim
+// zamknie sie sam. Rozmowa ma trwac (zadanie → praca → ocena → poprawka), ale
+// nie w nieskonczonosc, gdy zaden bot nie wystawi [TASK COMPLETE].
+const ASK_BOT_ROOM_ROUNDS = 4;
 
 /** Clickable "X texted Y" pill on the owner's thread pointing at the room. */
 function postRoomChip(ownerBotId: string, room: RoomRecord) {
@@ -406,7 +410,10 @@ function collabRoundPrompt(freshFromPeers: string): string {
 /** Run a room to completion: sequential rounds, each bot replies once per
  * round, until a bot marks the task done or the safety ceiling (2 h) hits.
  * Busy bots are skipped for that round. */
-async function runCollab(roomId: string): Promise<void> {
+async function runCollab(
+  roomId: string,
+  opts?: { seen?: Map<string, number>; maxRounds?: number },
+): Promise<void> {
   const started = Date.now();
   // multibot: 2 h, nie 20 min — zadanie z prawdziwego świata (komputer,
   // przeszukiwanie, długa rozmowa) nie mieściło się w dawnym suficie.
@@ -414,11 +421,14 @@ async function runCollab(roomId: string): Promise<void> {
   let idleRounds = 0;
   // multibot: ile transkryptu każdy bot już dostał w prompcie — kolejne rundy
   // wysyłają sam przyrost (sesja CLI pamięta swoje wcześniejsze tury).
-  const seen = new Map<string, number>();
+  const seen = opts?.seen ?? new Map<string, number>();
+  let rounds = 0;
   for (;;) {
     const room = rooms.get(roomId);
     if (!room || room.status !== "running") break;
     if (Date.now() - started >= SAFETY_MS) break;
+    if (opts?.maxRounds !== undefined && rounds >= opts.maxRounds) break;
+    rounds++;
     let anyReply = false;
     let finished = false;
     for (const botId of room.bot_ids) {
@@ -3007,9 +3017,22 @@ const server = createServer(async (req, res) => {
           },
         });
         if (!liveMsgId) rooms.append(room.id, toBotId, reply);
-        rooms.setStatus(room.id, "done");
         appendBotMail({ from: toBotId, to: fromBotId, text: reply, status: "delivered", replyToId: mailRequest.id });
         broadcast({ kind: "room", room: rooms.get(room.id) });
+        // multibot: rozmowa TRWA. Pokój ask_bot nie zamyka sie na jednej
+        // odpowiedzi — po pierwszej wymianie przejmuje go runCollab (te same
+        // rundy, ten sam marker [TASK COMPLETE], ten sam sufit), wiec A moze
+        // ocenic prace B, B poprawic, i tak dalej. Wolajacy widzi pierwsza
+        // odpowiedz synchronicznie jak dotad; reszta leci w tle, w pokoju.
+        const seen = new Map<string, number>([[toBotId, rooms.get(room.id)?.transcript.length ?? 0]]);
+        void (async () => {
+          // wolajacy jest `busy` do konca WLASNEJ tury; bez tego pierwsza runda
+          // pominelaby go i odbiorca gadalby sam ze soba
+          for (let i = 0; i < 120 && store.bot(fromBotId)?.busy; i++) {
+            await new Promise((r) => setTimeout(r, 1_000));
+          }
+          await runCollab(room.id, { seen, maxRounds: ASK_BOT_ROOM_ROUNDS });
+        })();
         return json(res, 200, { botName: target.name, text: reply });
       }
       return json(res, 404, { error: "unknown internal endpoint" });
