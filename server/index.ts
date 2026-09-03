@@ -743,17 +743,86 @@ function sendBotMail(fromBotId: string, toBotId: string, text: string, depth = 0
   };
 }
 
+/**
+ * multibot: okno sklejania. Kilka zdań wysłanych szybko pod rząd to JEDNA tura
+ * i JEDNA odpowiedź — tura rusza dopiero, gdy przez `OMB_TURN_DEBOUNCE_MS` nic
+ * nowego nie przyszło. W wątku każda wiadomość zostaje osobną bańką; sklejony
+ * jest wyłącznie prompt lecący do drivera.
+ */
+const DEFAULT_TURN_DEBOUNCE_MS = 1500;
+const turnDebounceMs = () => {
+  const raw = Number(process.env.OMB_TURN_DEBOUNCE_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_TURN_DEBOUNCE_MS;
+};
+const turnDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+/** Co poza tekstem czeka na sklejoną turę (załączniki z całego okna). */
+type QueuedTurnOptions = {
+  attachments: ReturnType<AttachmentStore["resolveMany"]>;
+  reasoning?: "low" | "medium" | "high" | "xhigh" | "max";
+  actor?: WorkspaceActor | null;
+};
+const queuedTurnOptions = new Map<string, QueuedTurnOptions>();
+
+function queueUserTurn(botId: string, turnText: string, opts: QueuedTurnOptions): void {
+  queuedUserMessages.push(botId, turnText);
+  // `busy` zapala się już przy PRZYJĘCIU wiadomości, nie dopiero po oknie
+  // sklejania: dla użytkownika bot zabrał się do roboty w chwili wysłania, więc
+  // kompozytor blokuje się od razu i nie ma sekundy, w której czat wygląda,
+  // jakby wiadomość przepadła.
+  if (!store.bot(botId)?.busy) {
+    store.patchBot(botId, { busy: true, unread: false });
+    broadcast({ kind: "bot", bot: store.bot(botId) });
+  }
+  const previous = queuedTurnOptions.get(botId);
+  queuedTurnOptions.set(botId, {
+    attachments: [...(previous?.attachments ?? []), ...opts.attachments],
+    reasoning: opts.reasoning ?? previous?.reasoning,
+    actor: previous?.actor ?? opts.actor,
+  });
+  const pending = turnDebounce.get(botId);
+  if (pending) clearTimeout(pending);
+  const timer = setTimeout(() => {
+    turnDebounce.delete(botId);
+    drainQueuedUserMessages(botId);
+  }, turnDebounceMs());
+  timer.unref?.();
+  turnDebounce.set(botId, timer);
+}
+
 function drainQueuedUserMessages(botId: string) {
-  const queued = queuedUserMessages.take(botId);
-  if (!queued) return;
+  const pending = turnDebounce.get(botId);
+  if (pending) {
+    clearTimeout(pending);
+    turnDebounce.delete(botId);
+  }
   const bot = store.bot(botId);
-  if (!bot) return; // bot usunięty w międzyczasie — kolejka gaśnie z nim
-  if (bot.busy || bot.temporary) {
-    // z powrotem do kolejki — tura ruszyła równolegle
-    for (const text of [...queued].reverse()) queuedUserMessages.push(botId, text);
+  if (!bot) {
+    // bot usunięty w międzyczasie — kolejka gaśnie z nim
+    queuedUserMessages.take(botId);
+    queuedTurnOptions.delete(botId);
     return;
   }
-  startTurn(botId, combineQueuedMessages(queued), { userMessagePosted: true }).catch(() => {});
+  // Tura już chodzi: nic nie zabieramy z kolejki, jej koniec zawoła nas znowu.
+  // `busy` tu nie wystarczy — zapala je już przyjęcie wiadomości; ŻYWĄ turę
+  // znaczy wpis w `activeCommsDepth`, zakładany i zdejmowany razem z nią.
+  if (activeCommsDepth.has(botId)) return;
+  const queued = queuedUserMessages.take(botId);
+  if (!queued) return;
+  const opts = queuedTurnOptions.get(botId);
+  queuedTurnOptions.delete(botId);
+  // `startTurn` sam zapala `busy` w tym samym ticku — zdejmujemy je tuż przed,
+  // żeby jego własna bramka „bot już pracuje" nie odrzuciła sklejonej tury.
+  store.patchBot(botId, { busy: false });
+  startTurn(botId, combineQueuedMessages(queued), {
+    userMessagePosted: true,
+    ...(opts?.attachments.length ? { attachments: opts.attachments } : {}),
+    ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
+    ...(opts?.actor ? { actor: opts.actor } : {}),
+  }).catch(() => {
+    // Tura nie ruszyła (bot zniknął, dostawca padł) — `busy` już zgasło wyżej,
+    // ale UI wciąż widzi zapalone z chwili przyjęcia wiadomości.
+    broadcast({ kind: "bot", bot: store.bot(botId) });
+  });
 }
 const bootFleet = await registry.describe();
 bootSelection = await defaultSelection(bootFleet);
@@ -1248,11 +1317,11 @@ bus.subscribe((event: RuntimeEvent) => {
       activeCommsDepth.delete(bot.id); // multibot (F9): tura skończona — licznik też
       turnModelByThread.delete(event.threadId); // multibot (F12): sprzątanie badge
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
-      drainQueuedUserMessages(bot.id); // multibot 0.1.44: spam użytkownika z trakcie tury
-      drainQueuedBotMail(bot.id);
       if (bot.temporary) {
         // Chwilowy podagent kończy życie po swoim zadaniu, nie dopiero po
         // restarcie serwera; inaczej zaśmieca listę i pliki transkryptu.
+        // Kasujemy PRZED drainem: bota już nie ma, więc kolejki gasną razem
+        // z nim zamiast odpalać turę na rekordzie, który za chwilę zniknie.
         stopScreenPoller(bot.id);
         harnessRoutines.deleteBot(bot.id);
         attachments.deleteBot(bot.id);
@@ -1261,6 +1330,8 @@ bus.subscribe((event: RuntimeEvent) => {
         store.deleteBot(bot.id);
         broadcast({ kind: "bot.deleted", botId: bot.id, visibility: bot.visibility, ownerId: bot.ownerId, allowedUserIds: bot.allowedUserIds });
       }
+      drainQueuedUserMessages(bot.id); // multibot 0.1.44: spam użytkownika z trakcie tury
+      drainQueuedBotMail(bot.id);
       break;
     }
   }
@@ -3701,24 +3772,35 @@ const server = createServer(async (req, res) => {
         );
         return json(res, 202, { ok: true, room: collab.room.id });
       }
-      // multibot 0.1.44: bot zajęty → wiadomość NIE jest odrzucana (409).
-      // Bubel w wątku jak zwykle, treść do kolejki; koniec tury sklei wszystko
-      // i odpali jedną turą odpowiedzi na wszystkie wiadomości naraz.
-      const busyBot = store.bot(m[1]);
-      if (busyBot?.busy) {
-        const userMessage = store.appendMessage(busyBot.threadId, {
-          role: "user",
-          kind: "text",
-          text,
-          ...actorMessageFields(actor),
-          ...(replyTarget ? { replyToId: replyTarget.id } : {}),
+      // multibot: KAŻDA wiadomość idzie przez kolejkę — i ta wysłana w trakcie
+      // tury (0.1.44: zamiast 409), i ta wysłana do wolnego bota. Bańka ląduje
+      // w wątku od razu, a tura rusza po oknie `OMB_TURN_DEBOUNCE_MS`, więc
+      // trzy zdania wysłane pod rząd to JEDNA tura i JEDNA odpowiedź, nie trzy.
+      const target = store.bot(m[1]);
+      if (!target) return json(res, 404, { error: "no such bot" });
+      // Dostawca sprawdzany TU, a nie dopiero przy starcie tury: bot wpięty w
+      // nieistniejącą instancję ma paść głośno na wysyłce, nie 202-i-cisza.
+      if (!registry.get(target.modelSelection.instanceId)) {
+        return json(res, 409, {
+          error: `provider instance "${target.modelSelection.instanceId}" is unavailable — pick another model in settings`,
         });
-        broadcast({ kind: "message", threadId: busyBot.threadId, message: userMessage });
-        queuedUserMessages.push(busyBot.id, turnText);
-        return json(res, 202, { ok: true, queued: true });
       }
-      await startTurn(m[1], turnText, { reasoning, attachments: turnAttachments, actor });
-      return json(res, 202, { ok: true });
+      const userMessage = store.appendMessage(target.threadId, {
+        role: "user",
+        kind: "text",
+        text,
+        ...actorMessageFields(actor),
+        ...(replyTarget ? { replyToId: replyTarget.id } : {}),
+        // multibot (F12): badge modelu wisi na wiadomości usera, a tę dopisuje
+        // teraz kolejka, nie `startTurn` — override trzeba odczytać tutaj.
+        ...(target.pendingModelOverride ? { model: target.pendingModelOverride } : {}),
+        ...(turnAttachments.length
+          ? { attachments: turnAttachments.map(({ id, name, mime, size }) => ({ id, name, mime, size })) }
+          : {}),
+      });
+      broadcast({ kind: "message", threadId: target.threadId, message: userMessage });
+      queueUserTurn(target.id, turnText, { attachments: turnAttachments, reasoning, actor });
+      return json(res, 202, { ok: true, queued: Boolean(target.busy) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/respond$/);
     if (m && method === "POST") {

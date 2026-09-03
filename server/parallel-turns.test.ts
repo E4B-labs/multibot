@@ -1,8 +1,10 @@
-// Skarga właściciela „boty pracują jeden po drugim", na prawdziwym harnessie
-// z atrapą CLI: tury RÓŻNYCH botów mają się nakładać. Dowodem jest zrzut
-// promptów atrapy — drugi bot dostaje swój prompt, zanim tura pierwszego
-// zdąży się skończyć. Z OMB_MAX_PARALLEL_TURNS=1 ten sam test pada, więc
-// pilnuje sufitu, a nie przypadku.
+// Dwie skargi właściciela, jeden test e2e na prawdziwym harnessie z atrapą CLI:
+//
+//  A. „boty pracują jeden po drugim" — tury RÓŻNYCH botów mają się nakładać.
+//     Dowodem jest zrzut promptów atrapy: drugi bot dostaje swój prompt, zanim
+//     tura pierwszego zdąży się skończyć.
+//  B. „trzy wiadomości pod rząd = trzy odpowiedzi" — mają się skleić w JEDNĄ
+//     turę drivera zawierającą całą trójkę, a w wątku zostać osobnymi bańkami.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,8 +19,9 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = "parallel-turns-test-token";
 /** Tura atrapy trwa tyle; szeregowa flota potrzebowałaby dwa razy tyle. */
 const TURN_MS = 1_500;
+const DEBOUNCE_MS = 300;
 
-describe("parallel turns (fake ACP fleet)", () => {
+describe("parallel turns + coalesced user messages (fake ACP fleet)", () => {
   let child: ChildProcess;
   let home: string;
   let stderr = "";
@@ -94,6 +97,8 @@ describe("parallel turns (fake ACP fleet)", () => {
         OMB_HOST: "127.0.0.1",
         MULTIBOT_COMPUTER: "off",
         ENGINE_URL: "http://127.0.0.1:1",
+        // krótkie okno sklejania — test nie ma czekać domyślnych 1,5 s na turę
+        OMB_TURN_DEBOUNCE_MS: String(DEBOUNCE_MS),
         FAKE_ACP_TURN_MS: String(TURN_MS),
         FAKE_ACP_PROMPT_DUMP: join(home, "acp-prompts.ndjson"),
       },
@@ -155,4 +160,44 @@ describe("parallel turns (fake ACP fleet)", () => {
     60_000,
   );
 
+  it(
+    "trzy szybkie wiadomości to JEDNA tura drivera z całą trójką",
+    async () => {
+      const gamma = await newBot("Gamma");
+      const before = prompts().length;
+
+      for (const text of ["pierwsza", "druga", "trzecia"]) {
+        expect((await api("POST", `/api/bots/${gamma}/messages`, { text })).status).toBe(202);
+      }
+
+      await waitFor("the coalesced turn reached the CLI", 25_000, () => prompts().length > before);
+      await waitFor(
+        "gamma answered",
+        25_000,
+        async () =>
+          ((await bots()).find((b) => b.id === gamma)?.messages as any[]).some(
+            (m) => m.role === "bot" && m.kind === "text" && m.text,
+          ),
+      );
+      await waitIdle([gamma], 25_000);
+
+      const mine = prompts()
+        .slice(before)
+        .filter((p) => JSON.stringify(p.prompt).includes("pierwsza"));
+      expect(mine).toHaveLength(1); // jedna tura, nie trzy
+      const sent = JSON.stringify(mine[0].prompt);
+      expect(sent).toContain("pierwsza");
+      expect(sent).toContain("druga");
+      expect(sent).toContain("trzecia");
+
+      // w wątku wiadomości zostają OSOBNE — sklejony jest tylko prompt
+      const thread = (await bots()).find((b) => b.id === gamma)!.messages as any[];
+      const mineInThread = thread.filter((m) => m.role === "user" && m.kind === "text");
+      expect(mineInThread.map((m) => m.text)).toEqual(["pierwsza", "druga", "trzecia"]);
+      // i dokładnie JEDNA odpowiedź bota
+      const afterLastUser = thread.slice(thread.findLastIndex((m) => m.role === "user") + 1);
+      expect(afterLastUser.filter((m) => m.role === "bot" && m.kind === "text" && m.text)).toHaveLength(1);
+    },
+    60_000,
+  );
 });
