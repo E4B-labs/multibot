@@ -62,6 +62,16 @@ beforeAll(async () => {
             environment: { FAKE_ACP_MODE: "room", FAKE_ACP_ROOM_COUNTER: join(home, "room-counter.txt") },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          grokBusy: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "busy" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
+          grokRoom2: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "room", FAKE_ACP_ROOM_COUNTER: join(home, "room-counter-2.txt") },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
         },
     }),
   );
@@ -144,12 +154,6 @@ describe("collaboration rooms", () => {
       }, 10_000, "streamed contribution while the turn is still running");
       expect(sawActiveSpeaker).toBe(true);
 
-      await waitFor(
-        async () => (await api("GET", `/api/rooms/${roomId}`)).body?.activeBotId === b.id,
-        10_000,
-        "second bot turn",
-      );
-
       // runCollab settles quickly — the fake replies with the done marker
       await waitFor(async () => (await api("GET", `/api/rooms/${roomId}`)).body?.status === "done", 25_000, "room done");
 
@@ -182,6 +186,33 @@ describe("collaboration rooms", () => {
     const all = (await api("GET", "/api/rooms")).body.rooms;
     expect(all.filter((r: any) => r.bot_ids.includes(pairA) && r.bot_ids.includes(pairB))).toHaveLength(1);
   });
+
+  it(
+    "does not block an isolated room turn when its bot is busy in the main chat",
+    async () => {
+      const owner = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${owner.id}`, { name: "Busy Owner", modelSelection: { instanceId: "grokBusy", model: "fake-model" } });
+      const peer = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${peer.id}`, { name: "Room Peer", modelSelection: { instanceId: "grokRoom2", model: "fake-model" } });
+
+      await api("POST", `/api/bots/${owner.id}/messages`, { text: "keep working" });
+      await waitFor(async () => Boolean((await getBot(owner.id))?.busy), 3_000, "owner main turn");
+
+      const created = await api("POST", "/api/rooms", { task: "continue while owner works", bot_ids: [owner.id, peer.id] });
+      expect(created.status).toBe(201);
+      const roomId = created.body.id;
+
+      // The owner is still busy in its main chat, but the isolated room turn
+      // must be scheduled immediately instead of waiting for that work to end.
+      await waitFor(
+        async () => (await api("GET", `/api/rooms/${roomId}`)).body?.activeBotId === owner.id,
+        3_000,
+        "isolated owner turn",
+      );
+      await waitFor(async () => (await api("GET", `/api/rooms/${roomId}`)).body?.status === "done", 20_000, "busy-owner room done");
+    },
+    30_000,
+  );
 
   it(
     "opens a room when the user @mentions another bot, strips the tag, and folds the summary into the originator's turn",

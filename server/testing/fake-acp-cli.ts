@@ -174,6 +174,13 @@ function handle(msg: any) {
         process.stderr.write("fake-acp: simulated provider failure mid-turn\n");
         process.exit(4);
       }
+      if (mode === "busy") {
+        const chunk = (text: string) =>
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text } } } });
+        chunk("main turn still running");
+        setTimeout(complete, 5_000);
+        return;
+      }
       if (mode === "room") {
         // collaboration-room turn: one contribution per process, so progress
         // lives in a counter file (FAKE_ACP_ROOM_COUNTER) — the first turn
