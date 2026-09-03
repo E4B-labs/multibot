@@ -34,6 +34,12 @@ declare global {
       /** Unread-conversation count for the taskbar badge. Fire-and-forget;
        * absent in plain browsers, so callers must feature-detect. */
       setUnreadCount?(count: number): void;
+      /** Banerka systemowa rysowana przez proces główny — kliknięcie potrafi
+       * wtedy podnieść okno. Nieobecne w przeglądarce: tam renderer sięga po
+       * zwykłe Notification, więc callers muszą sprawdzać obecność. */
+      notify?(payload: { title: string; body: string; botId?: string }): void;
+      /** Kliknięto banerkę należącą do bota — otwórz go. Zwraca odsubskrybowanie. */
+      onNotificationClick?(cb: (botId: string) => void): () => void;
       exportDiagnostics?(): Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>;
       /** Akceleracja sprzętowa; domyślnie wyłączona. Zmiana działa dopiero po
        * restarcie — Electron rozstrzyga to przed gotowością aplikacji.

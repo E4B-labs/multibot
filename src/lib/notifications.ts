@@ -42,3 +42,99 @@ export function notifyBrowser(title: string, body: string, opts: NotifyOptions =
     /* browser denied it */
   }
 }
+
+// ── Przełącznik „Powiadomienia na pulpicie" ────────────────────────────
+// Lokalny, jak tryb animacji: dotyczy tej powłoki, nie konta. Domyślnie
+// włączony — wyłączenie zapisujemy jawnie, żeby brak klucza znaczył „tak".
+const DESKTOP_KEY = "multibot-desktop-notifications";
+
+function browserStorage(): Storage | undefined {
+  try {
+    return typeof localStorage === "undefined" ? undefined : localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+export function readDesktopNotifications(storage: Pick<Storage, "getItem"> | undefined = browserStorage()): boolean {
+  try {
+    return storage?.getItem(DESKTOP_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function setDesktopNotifications(enabled: boolean): void {
+  try {
+    browserStorage()?.setItem(DESKTOP_KEY, enabled ? "on" : "off");
+  } catch {
+    /* storage blocked — the toggle still holds for this session */
+  }
+}
+
+// ── Kiedy w ogóle pokazać banerkę ──────────────────────────────────────
+// Czysta decyzja, bez DOM-u i bez Electrona: cała reguła siedzi tutaj, więc
+// da się ją przetestować, a store tylko podaje dwie migawki bota.
+export interface NotifySnapshot {
+  id: string;
+  busy?: boolean;
+  unread?: boolean;
+  needsAttention?: string | null;
+  /** przełącznik per bot z SettingsPanel; brak = nie dotyczy (pokoje) */
+  notifications?: boolean;
+}
+
+export interface NotifyContext {
+  /** czy okno aplikacji jest aktywne */
+  focused: boolean;
+  /** bot otwarty na ekranie */
+  selectedBotId?: string;
+  /** globalny przełącznik z ustawień aplikacji */
+  enabled: boolean;
+}
+
+export type NotifyReason = "attention" | "finished" | null;
+
+export function shouldNotify(
+  prev: NotifySnapshot | undefined,
+  next: NotifySnapshot,
+  ctx: NotifyContext,
+): NotifyReason {
+  // Bez migawki „przed" nie ma przejścia — pierwsze zobaczenie bota (start
+  // aplikacji, resync po rozłączeniu) nigdy nie powiadamia.
+  if (!ctx.enabled || next.notifications === false || !prev) return null;
+  // Patrzysz na tego bota w aktywnym oknie — widzisz to samo bez banerki.
+  if (ctx.focused && ctx.selectedBotId === next.id) return null;
+  const attention = next.needsAttention ?? null;
+  if (attention && attention !== (prev.needsAttention ?? null)) return "attention";
+  const finished = (prev.busy === true && next.busy !== true) || (next.unread === true && prev.unread !== true);
+  return finished ? "finished" : null;
+}
+
+/** Pokój współpracy zamknął temat: running/failed → done. */
+export function shouldNotifyRoomDone(
+  prevStatus: string | undefined,
+  status: string,
+  ctx: { enabled: boolean; viewing?: boolean },
+): boolean {
+  if (!ctx.enabled || ctx.viewing || prevStatus === undefined) return false;
+  return prevStatus !== "done" && status === "done";
+}
+
+export interface NotifyPayload {
+  title: string;
+  body: string;
+  botId?: string;
+  icon?: string;
+}
+
+/** Jedno wyjście dla obu powłok: pod Electronem banerkę rysuje proces główny
+ *  (kliknięcie potrafi wtedy podnieść okno), w przeglądarce zwykłe API. */
+export function notify({ title, body, botId, icon }: NotifyPayload): void {
+  const bridge = typeof window === "undefined" ? undefined : window.ogb?.notify;
+  if (bridge) {
+    bridge({ title, body, botId });
+    return;
+  }
+  notifyBrowser(title, body, { tag: notificationTag(botId), icon });
+}

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, screen, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, Notification, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,7 @@ import { addRemoteHost, getActiveId, listRemoteHosts, removeHost, resolveLoadTar
 import { shouldStartLocalHarness } from "./host-resolve.mjs";
 import { isLocalSender } from "./local-origin.mjs";
 import { activateExistingWindow } from "./single-instance.mjs";
+import { activateForBot, normalizeNotification } from "./notifications.mjs";
 import { startRemoteUiServer } from "./remote-ui.mjs";
 import { startSpeech, stopSpeech } from "./speech.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
@@ -201,6 +202,18 @@ ipcMain.on("desktop:unread-count", (_event, rawCount) => {
   } else if (process.platform === "linux") {
     app.setBadgeCount(count);
   }
+});
+
+// multibot: banerka systemowa, gdy bot skończy odpowiedź, prosi o decyzję albo
+// pokój współpracy zamknie temat. O tym, KIEDY ją pokazać, decyduje renderer
+// (src/lib/notifications.ts) — on jeden wie, na co patrzysz. Tu zostaje samo
+// rysowanie i kliknięcie: okno na wierzch i wybór bota w interfejsie.
+ipcMain.on("desktop:notify", (_event, raw) => {
+  const payload = normalizeNotification(raw);
+  if (!payload || !Notification.isSupported()) return;
+  const banner = new Notification({ title: payload.title, body: payload.body });
+  banner.on("click", () => activateForBot(mainWindow, payload.botId));
+  banner.show();
 });
 
 function localAccessTokenFragment() {

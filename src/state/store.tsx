@@ -17,7 +17,14 @@ import { MAUS_COLORS } from "@/lib/mascot";
 import { authFetch, authenticatedEventSource, ensureBrowserSession, getAuthMode } from "@/lib/auth";
 import { getLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
-import { botNotificationIcon, notificationTag, notifyBrowser } from "@/lib/notifications";
+import {
+  botNotificationIcon,
+  notify,
+  readDesktopNotifications,
+  shouldNotify,
+  shouldNotifyRoomDone,
+  type NotifySnapshot,
+} from "@/lib/notifications";
 import { sortMessages } from "@/lib/messageOrder";
 import type { AutoVerifySettings } from "@/lib/autoVerifyTypes";
 
@@ -784,33 +791,60 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, rawDispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
-  const notificationState = useRef(new Map<string, { unread: boolean; attention: string | null }>());
+  const notificationState = useRef(new Map<string, NotifySnapshot>());
+  const roomNotificationState = useRef(new Map<string, string>());
 
   useEffect(() => {
     if (state.selectedId) window.localStorage.setItem(SELECTED_BOT_KEY, state.selectedId);
   }, [state.selectedId]);
 
+  // multibot: powiadomienia systemowe. Regułę „czy w ogóle" trzyma
+  // shouldNotify (czysta, testowalna); tu zostaje treść banerki i wysyłka —
+  // pod Electronem przez most do procesu głównego, w przeglądarce zwykłym API.
   useEffect(() => {
     const seen = notificationState.current;
     const lang = getLanguage();
+    const ctx = {
+      focused: typeof document === "undefined" || document.hasFocus(),
+      selectedBotId: state.selectedId,
+      enabled: readDesktopNotifications(),
+    };
     for (const bot of state.bots) {
       const before = seen.get(bot.id);
-      const attention = bot.needsAttention ?? null;
-      if (bot.notifications && before && attention && attention !== before.attention) {
-        notifyBrowser(`${botDisplayName(bot, lang)} needs your input`, attention, {
-          tag: notificationTag(bot.id),
-          icon: botNotificationIcon(MAUS_COLORS[bot.color]),
-        });
-      } else if (bot.notifications && before && bot.unread && !before.unread) {
-        const last = [...bot.messages].reverse().find((message) => message.role === "bot" && message.text);
-        notifyBrowser(`${botDisplayName(bot, lang)} finished`, last?.text?.slice(0, 180) ?? "New bot message", {
-          tag: notificationTag(bot.id),
-          icon: botNotificationIcon(MAUS_COLORS[bot.color]),
-        });
-      }
-      seen.set(bot.id, { unread: bot.unread, attention });
+      const next: NotifySnapshot = {
+        id: bot.id,
+        busy: bot.busy,
+        unread: bot.unread,
+        needsAttention: bot.needsAttention ?? null,
+        notifications: bot.notifications,
+      };
+      seen.set(bot.id, next);
+      const reason = shouldNotify(before, next, ctx);
+      if (!reason) continue;
+      const last = [...bot.messages].reverse().find((message) => message.role === "bot" && message.text);
+      notify({
+        title: `${botDisplayName(bot, lang)} ${reason === "attention" ? "needs your input" : "finished"}`,
+        body: reason === "attention" ? (next.needsAttention ?? "") : last?.text?.slice(0, 180) ?? "New bot message",
+        botId: bot.id,
+        icon: botNotificationIcon(MAUS_COLORS[bot.color]),
+      });
     }
-  }, [state.bots]);
+  }, [state.bots, state.selectedId]);
+
+  // Pokój współpracy zamknął temat — nikt na niego nie patrzy godzinami.
+  useEffect(() => {
+    const seen = roomNotificationState.current;
+    const enabled = readDesktopNotifications();
+    const focused = typeof document === "undefined" || document.hasFocus();
+    for (const room of state.rooms) {
+      const before = seen.get(room.id);
+      seen.set(room.id, room.status);
+      const viewing = focused && state.roomOpen?.id === room.id;
+      if (shouldNotifyRoomDone(before, room.status, { enabled, viewing })) {
+        notify({ title: `${room.name} finished`, body: String(room.task ?? "").slice(0, 180) });
+      }
+    }
+  }, [state.rooms, state.roomOpen]);
 
   // debounced PATCH per bot for text-field edits (name/title/description)
   const patchTimers = useRef(new Map<string, { timer: ReturnType<typeof setTimeout>; patch: Record<string, unknown> }>());
@@ -957,6 +991,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     return wrapped;
   }, []);
+
+  // Kliknięcie w banerkę: proces główny podniósł już okno, interfejsowi
+  // zostaje otworzyć tego bota. Nieobecne poza Electronem.
+  useEffect(
+    () =>
+      window.ogb?.onNotificationClick?.((botId) => {
+        if (!stateRef.current.bots.some((bot) => bot.id === botId)) return;
+        dispatch({ type: "toggleAppSettings", open: false });
+        dispatch({ type: "select", id: botId });
+      }),
+    [dispatch],
+  );
 
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {

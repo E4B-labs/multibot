@@ -21,6 +21,7 @@ import { SkinPicker } from "./SkinPicker";
 import { MicrophoneRow } from "./MicrophoneRow";
 import { BotSettingsCard } from "./BotSettingsCard";
 import { applyMotionMode, readMotionMode, type MotionMode } from "@/lib/motion";
+import { readDesktopNotifications, requestBrowserNotifications, setDesktopNotifications } from "@/lib/notifications";
 
 const slug = (value: string) =>
   value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
@@ -805,6 +806,43 @@ function UpdatesRow() {
   );
 }
 
+// multibot: banerka systemowa, gdy bot skończy albo prosi o decyzję. Ustawienie
+// jest lokalne dla tej powłoki (jak tryb animacji), bo dotyczy tego urządzenia,
+// nie konta. Zgody przeglądarki pytamy raz, dopiero przy włączeniu.
+function DesktopNotificationsRow({ polish }: { polish: boolean }) {
+  const [enabled, setEnabled] = useState(() => readDesktopNotifications());
+  const label = polish ? "Powiadomienia na pulpicie" : "Desktop notifications";
+  const toggle = () => {
+    const next = !enabled;
+    setEnabled(next);
+    setDesktopNotifications(next);
+    if (next) void requestBrowserNotifications();
+  };
+
+  return (
+    <div className="mt-4 flex items-center justify-between gap-4 border-t border-hairline/40 pt-4">
+      <div>
+        <div className="text-[15px] font-medium text-ink">{label}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">
+          {polish
+            ? "Gdy bot skończy odpowiedź, prosi o decyzję albo pokój współpracy zamknie temat. Kliknięcie otwiera tego bota."
+            : "When a bot finishes, asks for a decision, or a collab room wraps up. Clicking opens that bot."}
+        </div>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={label}
+        onClick={toggle}
+        className={cn("relative h-[26px] w-[44px] shrink-0 rounded-full transition-colors", enabled ? "bg-accent" : "bg-raised")}
+      >
+        <span className={cn("absolute top-[3px] size-5 rounded-full bg-white transition-[left]", enabled ? "left-[21px]" : "left-[3px]")} />
+      </button>
+    </div>
+  );
+}
+
 function MotionSettings({ polish }: { polish: boolean }) {
   const [mode, setMode] = useState<MotionMode>(() => readMotionMode());
   const enabled = mode === "full";
@@ -1043,6 +1081,7 @@ export function AppSettingsPanel() {
                 <div className="mt-4">
                   <MicrophoneRow polish={polish} />
                 </div>
+                <DesktopNotificationsRow polish={polish} />
                 <HardwareAccelerationRow polish={polish} />
               </div>
               <BotSettingsCard polish={polish} />
