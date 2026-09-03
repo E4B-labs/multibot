@@ -13,7 +13,7 @@
  */
 import { totalmem } from "node:os";
 
-import { turnToolsText, type TurnIntegrationsLike } from "./turn-tools.ts";
+import { mountedConnections, turnToolsText, type TurnIntegrationsLike } from "./turn-tools.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import type { BotRecord } from "./store.ts";
 
@@ -98,6 +98,35 @@ export function currentTimeLine(now: Date, timeZone?: string): string {
     clock = clockIn(now, zone);
   }
   return `Right now it is ${clock} in time zone ${zone}. Treat this as the current date and time: resolve "today", "tomorrow", "this week" and any deadline against it instead of guessing.`;
+}
+
+/**
+ * multibot: "czy jesteś podłączony?" — bot pytany o swoje połączenia odpowiadał
+ * jak agent bez narzędzi, bo nigdzie nie miał ICH SPISU: prompt opisywał, jak
+ * używać narzędzi, ale nie mówił wprost, co jest zamontowane W TEJ turze.
+ *
+ * Blok jest generowany z `integrations` (patrz `mountedConnections`), więc
+ * nigdy nie obieca narzędzia, którego bot nie dostał. Nazwa drivera/silnika tu
+ * NIE wchodzi — sekcja tożsamości zabrania ją ujawniać.
+ *
+ * Osobna funkcja, bo driver slafy `system` do silnika nie przekazuje: index.ts
+ * dokleja ten sam blok do treści tury (tak samo, jak robi to ze stanem floty).
+ */
+export function connectionsBlock(
+  bot: { name: string },
+  integrations: TurnIntegrationsLike | undefined,
+): string {
+  const mounted = mountedConnections(integrations);
+  return [
+    "# Your connections and tools",
+    // Bez id bota: blok jedzie też w TREŚCI tury drivera slafy, a tam żadna
+    // linia nie może wyglądać jak wpis floty o samym sobie (proxy.test.ts).
+    `You are ${bot.name}, working in the user's MultiBot workspace.`,
+    mounted.length
+      ? `You ARE connected. Mounted for you in THIS turn:\n${mounted.map((line) => `- ${line}`).join("\n")}`
+      : "Nothing is mounted for you in THIS turn: you work with your own built-in abilities only.",
+    "When you are asked whether you are connected, what you are connected to, what tools you have or what you can do, answer from exactly this list: name the connections above and say plainly that anything not listed is unavailable to you this turn. Never claim you have no tools, no computer and no connections while something is listed here.",
+  ].join("\n");
 }
 
 export function botSystemPrompt(
@@ -263,6 +292,6 @@ export function botSystemPrompt(
     + currentTimeLine(o.now ?? new Date(), o.timeZone) + "\n"
     + environmentLine(agents);
 
-  return ([who, creationBlock, have, how, environment, chief, knowledge, peers]
+  return ([who, creationBlock, connectionsBlock(bot, integrations), have, how, environment, chief, knowledge, peers]
     .filter(Boolean).join("\n\n") + taggedReplies).replace(/[—–]/g, "-");
 }

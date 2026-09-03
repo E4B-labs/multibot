@@ -87,6 +87,24 @@ export interface TurnIntegrationsLike {
 }
 
 /**
+ * Nazwy połączeń zamontowanych W TEJ turze, każde ze swoimi narzędziami.
+ * Generowane z `integrations` i ze stałych powyżej — nigdy wpisane na sztywno,
+ * więc to, czego harness nie zamontował, nie ma prawa się tu pojawić. Używa
+ * tego blok "Your connections and tools" w prompcie (i tura drivera slafy,
+ * który `system` w ogóle nie dostaje).
+ */
+export function mountedConnections(integrations: TurnIntegrationsLike | undefined): string[] {
+  const out: string[] = [];
+  if (integrations?.localComputer) out.push(`mcp__computer: ${COMPUTER_MCP_TOOLS.join(", ")}`);
+  if (integrations?.computer) out.push("computer box: your cloud desktop");
+  if (integrations?.agents) out.push(`agents: ${AGENTS_MCP_TOOLS.join(", ")}`);
+  if (integrations?.web) out.push("web: web_search, web_extract");
+  if (integrations?.webNative) out.push("web (native): web_search, web_extract");
+  if (integrations?.composio) out.push("composio: your connected apps, found with COMPOSIO_SEARCH_TOOLS");
+  return out;
+}
+
+/**
  * Markdown z wyliczeniem narzędzi tej tury. Pusty string tylko wtedy, gdy
  * integrations jest puste — a wtedy nie dodajemy do promptu żadnego akapitu
  * (bot po prostu działa na swoich natywnych narzędziach, jak w stockowym

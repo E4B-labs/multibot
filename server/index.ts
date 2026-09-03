@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { botSystemPrompt } from "./bot-prompt.ts";
+import { botSystemPrompt, connectionsBlock } from "./bot-prompt.ts";
 // multibot: autoweryfikacja — filtr na prośbach o zgodę, patrz server/auto-verify.ts.
 import { decideAction, normalizeAutoVerify, type AutoVerifyState } from "./auto-verify.ts";
 import { fleetStatusBlock } from "./fleet-status.ts";
@@ -1963,6 +1963,11 @@ opts?: {
         // pracy floty; zapamiętany raz byłby gorszy niż żaden.
         text: [
           fleetStatusBlock(visibleRoster, bot.id, fleetEnvironmentForBots(fleetEnvironment, visibleRoster)),
+          // multibot: spis połączeń tej tury z tego samego powodu, co stan
+          // floty wyżej — driver slafy `system` do silnika nie przekazuje, więc
+          // bot tego silnika inaczej NIGDY nie zobaczyłby, co ma zamontowane.
+          // Pozostałe drivery mają ten blok w prompcie systemowym.
+          instance.driverKind === "slafy" ? connectionsBlock(bot, integrations) : "",
           text,
           turnAttachments.length ? `Attached files:\n${turnAttachments.map((file) => `- ${file.name}: ${file.path}`).join("\n")}` : "",
         ]
