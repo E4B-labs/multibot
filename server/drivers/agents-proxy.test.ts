@@ -21,6 +21,45 @@ let lastActionBody: any = null;
 let lastAttachmentBody: any = null;
 let askResponse: unknown = { botName: "Helper", text: "hi from helper" };
 
+// multibot: rutyny w atrapie trzymają stan, bo tylko wtedy test udowadnia to,
+// na co skarżył się właściciel: bot zakładał rutynę i nie umiał jej ani
+// wyłączyć, ani skasować, więc dwie wersje chodziły naraz. Kształt odpowiedzi
+// mirroruje `routines.*` z server/index.ts.
+let routines: Array<{ id: string; name: string; prompt: string; schedule: string | null; enabled: boolean }> = [];
+let nextRoutineId = 1;
+function routineAction(body: any): unknown {
+  switch (body.action) {
+    case "routines.list":
+      return routines;
+    case "routines.create": {
+      const routine = {
+        id: `r${nextRoutineId++}`,
+        name: String(body.name),
+        prompt: String(body.prompt),
+        schedule: body.schedule ?? null,
+        enabled: true,
+      };
+      routines.push(routine);
+      return routine;
+    }
+    case "routines.update": {
+      const routine = routines.find((r) => r.id === body.id);
+      if (!routine) return { error: "no such routine" };
+      for (const key of ["name", "prompt", "schedule", "enabled"] as const) {
+        if (body[key] !== undefined) (routine as Record<string, unknown>)[key] = body[key];
+      }
+      return routine;
+    }
+    case "routines.delete": {
+      const before = routines.length;
+      routines = routines.filter((r) => r.id !== body.id);
+      return { ok: routines.length !== before };
+    }
+    default:
+      return null;
+  }
+}
+
 let child: ChildProcess;
 const pending = new Map<number, (msg: any) => void>();
 let nextId = 100;
@@ -86,7 +125,7 @@ beforeAll(async () => {
           termux: true,
           manufacturer: "samsung",
           model: "SM-G970F",
-        } : { ok: true }));
+        } : routineAction(body) ?? { ok: true }));
       });
       return;
     }
@@ -142,7 +181,7 @@ describe("agents-proxy MCP surface", () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(expect.arrayContaining(["list_bots", "ask_bot", "send_bot_mail", "read_bot_mail", "remember", "create_skill", "create_routine", "create_agent", "list_groups", "delete_group", "read_file", "run_command"]));
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(expect.arrayContaining(["list_bots", "ask_bot", "send_bot_mail", "read_bot_mail", "remember", "create_skill", "create_routine", "list_routines", "update_routine", "delete_routine", "create_agent", "list_groups", "delete_group", "read_file", "run_command"]));
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -167,7 +206,7 @@ describe("agents-proxy MCP surface", () => {
       prompt: "hej kacper!",
       schedule: "35 1 * * *",
     });
-    expect(res.result.content[0].text).toContain('"ok": true');
+    expect(res.result.content[0].text).toContain('"name": "Hej Kacper"');
     expect(lastActionBody).toMatchObject({
       fromBotId: "bot-asker",
       action: "routines.create",
@@ -233,6 +272,33 @@ describe("agents-proxy MCP surface", () => {
   it("requires bot_id and message", async () => {
     const res = await callTool("ask_bot", { bot_id: "", message: "" });
     expect(res.result.isError).toBe(true);
+  });
+
+  // multibot: skarga właściciela — "poprzednia rutyna co 15 minut nadal działa,
+  // narzędzie pozwala tworzyć rutyny, ale nie edytować ani wyłączać; obie wersje
+  // chodzą teraz". Pełna pętla przez powierzchnię MCP: załóż → wyłącz → sprawdź
+  // na liście → skasuj → lista pusta.
+  it("bot can create, disable and delete its own routines", async () => {
+    routines = [];
+    nextRoutineId = 1;
+
+    const created = JSON.parse((await callTool("create_routine", { name: "Co 15 minut", prompt: "sprawdź pocztę", schedule: "every 15m" })).result.content[0].text);
+    expect(created.id).toBe("r1");
+    expect(created.enabled).toBe(true);
+
+    const updated = await callTool("update_routine", { id: created.id, enabled: false, schedule: "every 1h" });
+    expect(updated.result.isError).toBeFalsy();
+    expect(lastActionBody).toMatchObject({ fromBotId: "bot-asker", action: "routines.update", id: "r1", enabled: false, schedule: "every 1h" });
+
+    const listed = JSON.parse((await callTool("list_routines", {})).result.content[0].text);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({ id: "r1", enabled: false, schedule: "every 1h" });
+
+    const deleted = await callTool("delete_routine", { id: created.id });
+    expect(deleted.result.content[0].text).toContain('"ok": true');
+    expect(lastActionBody).toMatchObject({ action: "routines.delete", id: "r1" });
+
+    expect(JSON.parse((await callTool("list_routines", {})).result.content[0].text)).toEqual([]);
   });
 
   // multibot: bot→user file sending — the `send_file` tool lands on the
