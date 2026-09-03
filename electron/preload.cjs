@@ -45,6 +45,16 @@ contextBridge.exposeInMainWorld("ogb", {
   /** Unread-conversation count for the taskbar badge (Windows overlay icon,
    * macOS/Linux dock badge). Fire-and-forget; dormant in plain browsers. */
   setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
+
+  /** Banerka systemowa. Renderer decyduje kiedy ją pokazać; proces główny ją
+   * rysuje, bo tylko on potrafi po kliknięciu podnieść okno. Wtedy
+   * onNotificationClick dostaje id bota do otwarcia i zwraca odsubskrybowanie. */
+  notify: (payload) => ipcRenderer.send("desktop:notify", payload),
+  onNotificationClick: (cb) => {
+    const handler = (_event, botId) => cb(botId);
+    ipcRenderer.on("desktop:notification-click", handler);
+    return () => ipcRenderer.removeListener("desktop:notification-click", handler);
+  },
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
 
   /** Akceleracja sprzętowa. Zapis dopiero następnym uruchomieniem coś zmienia:
