@@ -144,6 +144,12 @@ describe("collaboration rooms", () => {
       }, 10_000, "streamed contribution while the turn is still running");
       expect(sawActiveSpeaker).toBe(true);
 
+      await waitFor(
+        async () => (await api("GET", `/api/rooms/${roomId}`)).body?.activeBotId === b.id,
+        10_000,
+        "second bot turn",
+      );
+
       // runCollab settles quickly — the fake replies with the done marker
       await waitFor(async () => (await api("GET", `/api/rooms/${roomId}`)).body?.status === "done", 25_000, "room done");
 

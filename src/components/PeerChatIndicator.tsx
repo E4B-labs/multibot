@@ -16,13 +16,10 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useStore, type Bot } from "@/state/store";
 import { MAUS_COLORS } from "@/lib/mascot";
 import { normalizeState, stateForBot } from "@/lib/mascot";
-import { cn } from "@/lib/cn";
 import { MausAvatar } from "./Avatar";
 import { selectActivePeerChat, type BotLookup } from "@/lib/botChatAnimation";
 
 /** Ile jeszcze rysujemy scenę po zamknięciu pokoju — czas na fade/scale-out. */
-const PEER_CHAT_EXIT_MS = 240;
-
 /** Rozmiar awatara partnera: równy awatarowi gospodarza (40 px na desktopcie, 44 px w telefonie). */
 const DESKTOP_QUERY = "(min-width: 768px)";
 
@@ -31,7 +28,6 @@ export interface PeerChatView {
   peerBot: Bot;
   activeBotId?: string | null;
   /** true przez PEER_CHAT_EXIT_MS po tym, jak pokój przestał być aktywny */
-  leaving: boolean;
 }
 
 /**
@@ -51,23 +47,17 @@ export function usePeerChat(botId: string): PeerChatView | null {
     [state.rooms, botId, botsById],
   );
   const [view, setView] = useState<PeerChatView | null>(
-    active ? { ...active, leaving: false } : null,
+    active,
   );
 
   useEffect(() => {
     if (active) {
-      setView({ roomId: active.roomId, peerBot: active.peerBot, activeBotId: active.activeBotId, leaving: false });
+      setView(active);
       return;
     }
     // pokój się kończy: zostawiamy ostatnią scenę w trybie `leaving`
-    setView((current) => (current && !current.leaving ? { ...current, leaving: true } : current));
+    setView(null);
   }, [active]);
-
-  useEffect(() => {
-    if (!view?.leaving) return;
-    const timer = setTimeout(() => setView(null), PEER_CHAT_EXIT_MS);
-    return () => clearTimeout(timer);
-  }, [view?.leaving]);
 
   return view;
 }
@@ -104,7 +94,7 @@ export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView 
   return (
     <div
       aria-hidden="true"
-      className={cn("pointer-events-none select-none", view.leaving ? "peer-chat-leave" : "peer-chat-enter")}
+      className="pointer-events-none select-none peer-chat-enter"
     >
       {/* awatary: desktop zostawia lewy slot pusty — wpada tam pływający awatar
           gospodarza z composera; telefon rysuje gospodarza sam */}
