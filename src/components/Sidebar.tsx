@@ -1,6 +1,7 @@
 import { track } from "@/lib/analytics";
 import { useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   Bot as BotIcon,
   BellDot,
   ChevronDown,
@@ -34,6 +35,7 @@ import { authFetch } from "@/lib/auth";
 import { engineOnline } from "@/lib/engineStatus";
 import { getLanguage, useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
+import { groupAvatarSplit, groupRowTitle } from "@/lib/groupRow";
 // multibot: czerwony wykrzyknik na ikonie ustawień — jest widoczna aktualizacja
 import { useUpdaterState } from "@/lib/updater";
 
@@ -628,12 +630,16 @@ function GroupsSection({
   createOpen,
   onCreateOpenChange,
   onMenu,
+  groupsCollapsed,
+  onToggleCollapsed,
   collapsed,
 }: {
   bots: Bot[];
   createOpen: boolean;
   onCreateOpenChange: (open: boolean) => void;
   onMenu: (menu: GroupMenuState) => void;
+  groupsCollapsed: boolean;
+  onToggleCollapsed: () => void;
   collapsed?: boolean;
 }) {
   const { state, dispatch } = useStore();
@@ -717,58 +723,106 @@ function GroupsSection({
   return (
     <div className="flex flex-col gap-0.5">
 
-      {(groups ?? []).map((g) => (
+      {(groups ?? []).length > 0 && !collapsed && (
         <button
-          key={g.id}
-          onClick={() => dispatch({ type: "toggleGroup", group: g })}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            onMenu({ group: g, x: e.clientX, y: e.clientY });
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            setDragOverId(g.id);
-          }}
-          onDragLeave={() => setDragOverId((cur) => (cur === g.id ? null : cur))}
-          onDrop={(e) => {
-            e.preventDefault();
-            const bid = (e.dataTransfer.getData("text/mb-bot-id") || e.dataTransfer.getData("text/plain") || "").trim();
-            if (bid) void dropBot(g.id, bid);
-          }}
-          // multibot: w szynie zostają same awatary składu, więc nazwa grupy
-          // musi wrócić jako tooltip.
-          title={collapsed ? g.name || g.id : undefined}
-          className={cn(
-            "flex w-full items-center rounded-xl text-left",
-            collapsed ? "justify-center px-0 py-2" : "gap-3 px-3 py-2.5",
-            dragOverId === g.id ? "bg-raised ring-1 ring-accent" : state.groupOpen?.id === g.id ? "bg-raised" : "hover:bg-raised/50",
-          )}
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-expanded={!groupsCollapsed}
+          aria-label={groupsCollapsed ? (polish ? "Rozwiń sekcję Grupy" : "Expand section Groups") : polish ? "Zwiń sekcję Grupy" : "Collapse section Groups"}
+          title={groupsCollapsed ? (polish ? "Rozwiń sekcję" : "Expand section") : polish ? "Zwiń sekcję" : "Collapse section"}
+          className="flex w-full items-center gap-1.5 rounded-lg px-3 pb-1 pt-1 text-left text-ink-secondary hover:bg-raised/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         >
-          {/* multibot: skład grupy jako nachodzące maskotki (port z aplikacji
-              mobilnej, styl Groka) — kolor i kształt mówią od razu, kto siedzi
-              w grupie; szare inicjały (`MemberDot`) tego nie mówiły. Bez
-              pierścienia-oddzielnika: obwódka wychodzi ciemnym okręgiem na
-              podświetlonym wierszu. Fallback Users dla botów nierozpoznanych. */}
-          <span className="flex shrink-0 items-center -space-x-1.5">
-            {g.bot_ids.slice(0, 3).map((engineId) => {
-              const member = bots.find((b) => `mb-${b.threadId}` === engineId);
-              return member ? (
-                <MausAvatar key={engineId} color={member.color} avatarUrl={member.avatarUrl} shape={member.mascotShape} state={stateForBot(member)} size={20} />
-              ) : (
-                <Users key={engineId} size={14} className="shrink-0 text-ink-secondary" />
-              );
-            })}
+          {groupsCollapsed ? <ChevronRight size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />}
+          <span className="text-[12px] font-medium uppercase tracking-wide">
+            {polish ? "Grupy" : "Groups"}
           </span>
-          {!collapsed && (
-            <>
-              <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{g.name || g.id}</span>
-              <span className="shrink-0 text-[12px] text-ink-secondary">{g.bot_ids.length}</span>
-            </>
-          )}
         </button>
-      ))}
+      )}
 
+      {(!groupsCollapsed || collapsed) &&
+        (groups ?? []).map((g) => {
+          const members = g.bot_ids
+            .map((id) => bots.find((b) => ("mb-" + b.threadId) === id))
+            .filter((b): b is Bot => b != null);
+          const { shown, overflow } = groupAvatarSplit(members, 2, g.bot_ids.length);
+          const last = g.messages?.[g.messages.length - 1];
+          const attention = members.find((b) => b.needsAttention != null)?.needsAttention;
+
+          return (
+            <button
+              key={g.id}
+              onClick={() => dispatch({ type: "toggleGroup", group: g })}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onMenu({ group: g, x: e.clientX, y: e.clientY });
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setDragOverId(g.id);
+              }}
+              onDragLeave={() => setDragOverId((cur) => (cur === g.id ? null : cur))}
+              onDrop={(e) => {
+                e.preventDefault();
+                const bid = (e.dataTransfer.getData("text/mb-bot-id") || e.dataTransfer.getData("text/plain") || "").trim();
+                if (bid) void dropBot(g.id, bid);
+              }}
+              title={g.name || g.id}
+              className={cn(
+                "relative flex w-full items-center rounded-xl text-left",
+                collapsed ? "justify-center px-0 py-2" : "gap-3 px-3 py-2.5",
+                dragOverId === g.id ? "bg-raised ring-1 ring-accent" : state.groupOpen?.id === g.id ? "bg-raised" : "hover:bg-raised/50",
+              )}
+            >
+              {members.length > 0 ? (
+                <span className="relative flex shrink-0 items-center">
+                  {shown.map((b, i) => (
+                    <span key={b.id} className={cn("shrink-0", i > 0 && "-ml-3")}>
+                      <MausAvatar
+                        color={b.color}
+                        avatarUrl={b.avatarUrl}
+                        shape={b.mascotShape}
+                        size={40}
+                        state={b.busy ? busyMascotMotion(b.id).state : stateForBot(b)}
+                        motion={b.busy ? busyMascotMotion(b.id).motion : "none"}
+                        motionKey={b.busy ? 1 : 0}
+                      />
+                    </span>
+                  ))}
+                  {overflow > 0 && (
+                    <span className="absolute -bottom-1 -right-1 flex min-w-4 items-center justify-center rounded-full bg-control px-1 text-[10px] font-semibold text-ink">
+                      +{overflow}
+                    </span>
+                  )}
+                  {attention && (
+                    <span
+                      title={attention}
+                      className="absolute -right-1 -top-1 flex items-center justify-center rounded-full bg-panel text-warning"
+                    >
+                      <AlertTriangle size={12} />
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary">
+                  <Users size={20} />
+                </span>
+              )}
+              {!collapsed && (
+                <div className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
+                  <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">
+                    {groupRowTitle(members.map((b) => botDisplayName(b, lang))) || g.name || g.id}
+                  </span>
+                  {last && (
+                    <span className="shrink-0 text-[11px] text-ink-secondary">
+                      {formatTime(last.at)}
+                    </span>
+                  )}
+                </div>
+              )}
+            </button>
+          );
+        })}
       {createOpen && !collapsed && (
         <div className="mx-1 mt-1 flex flex-col gap-2 rounded-xl bg-card p-3">
           <input
@@ -850,6 +904,7 @@ export function Sidebar() {
   const [groupMenu, setGroupMenu] = useState<GroupMenuState | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
+  const [groupsCollapsed, setGroupsCollapsed] = useState(false);
   const [scoutOpen, setScoutOpen] = useState(false);
   // multibot 0.1.49: kafelek hovera — timer 350 ms gasi migotanie przy
   // przejeżdżaniu myszką przez listę; wyjazd z wiersza kasuje go natychmiast.
@@ -1233,15 +1288,6 @@ export function Sidebar() {
       <div
         className={cn("flex-1 overflow-y-auto", collapsed ? "px-1 pt-2" : "px-2")}
       >
-        {groupBots.length > 0 && (
-          <GroupsSection
-            bots={groupBots}
-            createOpen={groupCreateOpen}
-            onCreateOpenChange={setGroupCreateOpen}
-            onMenu={setGroupMenu}
-            collapsed={collapsed}
-          />
-        )}
         <div className="flex flex-col gap-0.5">
           {flatBots.map((b) => (
             <BotListItem
@@ -1279,6 +1325,17 @@ export function Sidebar() {
               )}
             </div>
           ))}
+        {groupBots.length > 0 && (
+          <GroupsSection
+            bots={groupBots}
+            createOpen={groupCreateOpen}
+            onCreateOpenChange={setGroupCreateOpen}
+            onMenu={setGroupMenu}
+            groupsCollapsed={groupsCollapsed}
+            onToggleCollapsed={() => setGroupsCollapsed((value) => !value)}
+            collapsed={collapsed}
+          />
+        )}
       </div>
 
       {/* Footer */}
