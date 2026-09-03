@@ -367,7 +367,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       const room = rooms.find((r: any) => r.ownerBotId === askerId);
       expect(room).toBeTruthy();
       expect(room.task).toBe("ping from fake");
-      expect(room.transcript).toHaveLength(2);
+      expect(room.transcript.length).toBeGreaterThanOrEqual(2);
       // pytanie wołającego pierwsze, odpowiedź wołanego druga — w tej kolejności
       expect(room.transcript[0]).toMatchObject({ from: askerId, text: "ping from fake" });
       expect(room.transcript[1]).toMatchObject({ from: helperId, text: "hello from fake acp" });
@@ -375,11 +375,40 @@ describe("comms e2e (fake ACP fleet)", () => {
     15_000,
   );
 
-  it("the ask_bot room settles to status done", async () => {
-    const rooms = (await api("GET", "/api/rooms")).body.rooms;
-    const room = rooms.find((r: any) => r.ownerBotId === askerId);
-    expect(room?.status).toBe("done");
-  });
+  // multibot: właściciel chce ROZMOWY, nie jednej odpowiedzi — A daje zadanie,
+  // B robi, A ocenia, B poprawia. Pokój ask_bot przechodzi po pierwszej
+  // wymianie w ręce runCollab, więc transkrypt rośnie dalej i dopiero potem
+  // pokój zamyka się sam (marker [TASK COMPLETE] albo sufit rund).
+  it(
+    "the ask_bot room keeps alternating after the first answer, then settles to done",
+    async () => {
+      const roomOf = async () =>
+        (await api("GET", "/api/rooms")).body.rooms.find((r: any) => r.ownerBotId === askerId);
+
+      const deadline = Date.now() + 60_000;
+      for (;;) {
+        const room = await roomOf();
+        if ((room?.transcript?.length ?? 0) > 2 && room?.status !== "running") break;
+        if (Date.now() > deadline) {
+          throw new Error(
+            `pokój ask_bot nie kontynuował rozmowy: ${JSON.stringify({ status: room?.status, len: room?.transcript?.length })}
+stderr: ${stderr.slice(-2000)}`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      const room = await roomOf();
+      // co najmniej jedna tura PO pierwszej odpowiedzi — na starym kodzie
+      // transkrypt zatrzymywał się na dwóch wpisach i statusie "done"
+      expect(room.transcript.length).toBeGreaterThan(2);
+      // wołający wraca do rozmowy, nie tylko odbiorca
+      expect(room.transcript.slice(2).some((m: any) => m.from === askerId)).toBe(true);
+      // i pętla ma dno: pokój kończy się sam, więc wskaźnik "myśli" w UI gaśnie
+      expect(room.status).toBe("done");
+    },
+    70_000,
+  );
 
   it(
     "delivers asynchronous mail to a fresh target turn and keeps it durable",
@@ -456,10 +485,9 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(await countHelperMessages()).toBe(before);
 
       // ...a transkrypt pokoju ma obie strony wymiany, w kolejności
-      const room = (await api("GET", "/api/rooms")).body.rooms.find((r: any) => r.ownerBotId === asker.id);
+      const room = (await api("GET", "/api/rooms")).body.rooms.findLast((r: any) => r.ownerBotId === asker.id);
       expect(room).toBeTruthy();
-      expect(room.status).toBe("done");
-      expect(room.transcript).toHaveLength(2);
+      expect(room.transcript.length).toBeGreaterThanOrEqual(2);
       // fake ACP pyta peera hardcoded "ping from fake" — to on ląduje w pokoju
       // jako strona wołającego, nie tekst użytkownika do A
       expect(room.transcript[0]).toMatchObject({ from: asker.id, text: "ping from fake" });
