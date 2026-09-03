@@ -186,8 +186,15 @@ const TASK_HINTS =
 // ma agents zamontowane na stałe w profilu (`drivers/slafy.ts`, `syncAgents`),
 // więc tam deklaracja zamarza na 0.
 const activeCommsDepth = new Map<string, number>();
-// multibot (K9): lease held from computer setup until provider turn ends.
-const activeComputerLeases = new Map<string, string>();
+// multibot: boty, których tura trzyma slot z OMB_MAX_PARALLEL_TURNS. Slot
+// bierze tylko tura główna (nieizolowana, depth 0) — tura zagnieżdżona czekałaby
+// na slot trzymany przez własnego wołającego.
+const gatedTurnBots = new Set<string>();
+/** Koniec tury (udany, błędny, przerwany, ubity watchdogiem) oddaje slot. */
+function releaseTurnSlot(botId: string): void {
+  if (!gatedTurnBots.delete(botId)) return;
+  broadcast({ kind: "computer-queue", ...computerControl.releaseAgent(botId) });
+}
 // multibot (U1): prywatny Store nie zna izolowanych wątków grupy, ale ich
 // zużycie nadal należy do konkretnego bota.
 const isolatedTurnBots = new Map<string, string>();
@@ -1071,11 +1078,8 @@ bus.subscribe((event: RuntimeEvent) => {
   recordInspectorEvent(event);
   broadcast({ kind: "runtime", event });
   if (event.type === "turn.completed" || event.type === "runtime.error") {
-    const leasedBotId = activeComputerLeases.get(event.threadId);
-    if (leasedBotId) {
-      activeComputerLeases.delete(event.threadId);
-      broadcast({ kind: "computer-queue", ...computerControl.releaseAgent(leasedBotId) });
-    }
+    const gatedBotId = store.botByThread(event.threadId)?.id;
+    if (gatedBotId) releaseTurnSlot(gatedBotId);
   }
   const bot = store.botByThread(event.threadId);
   const usageBot = bot ?? (isolatedTurnBots.get(event.threadId) ? store.bot(isolatedTurnBots.get(event.threadId)!) : undefined);
@@ -1780,16 +1784,11 @@ opts?: {
   }
 
   const turnAttachments = opts?.attachments ?? [];
-  let computerLeaseHeld = false;
-  const releaseComputerLease = () => {
-    if (!computerLeaseHeld || activeComputerLeases.get(turnThreadId) !== bot.id) {
-      computerLeaseHeld = false;
-      return;
-    }
-    computerLeaseHeld = false;
-    activeComputerLeases.delete(turnThreadId);
-    broadcast({ kind: "computer-queue", ...computerControl.releaseAgent(bot.id) });
-  };
+  // multibot: tury RÓŻNYCH botów chodzą równolegle. Jedyne, co je ogranicza, to
+  // liczba jednoczesnych tur (OMB_MAX_PARALLEL_TURNS) — nie kolejność. Tura
+  // zagnieżdżona (izolowana albo delegowana, depth > 0) slotu nie bierze: jej
+  // wołający właśnie jeden trzyma, więc czekałaby sama na siebie.
+  const gated = !isolated && commsDepth === 0;
   const userMessage = isolated || opts?.userMessagePosted ? null : store.appendMessage(bot.threadId, {
     role: "user",
     kind: "text",
@@ -1843,6 +1842,7 @@ opts?: {
         store.patchBot(bot.id, { busy: false });
         activeCommsDepth.delete(bot.id);
         busyWatchdog.delete(bot.id);
+        releaseTurnSlot(bot.id); // zawieszony dostawca nie trzyma slotu całej floty
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
       }
     }, 70_000);
@@ -1852,6 +1852,13 @@ opts?: {
 
   void (async () => {
     try {
+      // Slot na turę. Wolny (flota poniżej OMB_MAX_PARALLEL_TURNS) → rusza od
+      // razu, więc dwa boty pracują naprawdę równolegle.
+      if (gated) {
+        gatedTurnBots.add(bot.id);
+        await computerControl.acquireAgent(bot.id);
+        broadcast({ kind: "computer-queue", ...computerControl.control() });
+      }
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
       if (!isolated && cfg.composio?.key && canUseIntegration(bot.threadId, "integrations")) {
         integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
@@ -1869,12 +1876,11 @@ opts?: {
           ? await ensureComputer()
           : null;
         if (computer) broadcast({ kind: "computer", botId: bot.id, state: computer.state });
-        if (computer?.state === "ready") {
-          await computerControl.acquireAgent(bot.id);
-          computerLeaseHeld = true;
-          activeComputerLeases.set(turnThreadId, bot.id);
-          broadcast({ kind: "computer-queue", ...computerControl.control() });
-        }
+        // ponytail: wspólny pulpit nie jest tu rezerwowany na wyłączność —
+        // żadne narzędzie komputera i tak nigdy tej dzierżawy nie sprawdzało,
+        // a czekanie na nią szeregowało całą flotę. Gdyby dwa boty naprawdę
+        // nie mogły klikać naraz, blokada należy do ścieżki narzędzi, nie do
+        // startu tury.
         // Tożsamość bota po stronie silnika NIE zależy od kontenera: profil
         // trzyma pamięć, skille i rutyny, więc musi istnieć także wtedy, gdy
         // komputer nie wstał. (Wcześniej zakładał go wybór "playwright" —
@@ -1977,7 +1983,7 @@ opts?: {
       } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel });
       if (integrations.computer) startScreenPoller(bot.id);
     } catch (e) {
-      releaseComputerLease();
+      releaseTurnSlot(bot.id);
       if (isolated) isolatedTurnBots.delete(turnThreadId);
       const message = e instanceof Error ? e.message : String(e);
       if (!isolated) {
@@ -3756,6 +3762,7 @@ const server = createServer(async (req, res) => {
       activeCommsDepth.delete(bot.id);
       settleMailTurn(bot.threadId, "failed");
       stopScreenPoller(bot.id);
+      releaseTurnSlot(bot.id);
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
       await instance?.adapter.interruptTurn(bot.threadId);
       drainQueuedUserMessages(bot.id);

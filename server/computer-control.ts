@@ -10,8 +10,13 @@
 // harness restart the correct owner is the agent, which is what "no lease"
 // already means.
 //
-// ponytail: one FIFO queue is enough because this installation has one shared
-// desktop. Per-bot locks would still let two bots click the same screen.
+// The agent side is NOT a mutex. It used to be: a turn took an exclusive lease
+// for its whole length, so a second bot could not start until the first one
+// finished and the fleet looked serial even when nothing touched the desktop.
+// No computer tool ever checked the lease, so the exclusivity bought nothing
+// and cost every parallel turn. Running turns are now admitted (and only
+// capped) by the shared TurnGate — see server/turn-gate.ts.
+import { turnGate } from "./turn-gate.ts";
 
 /** Long enough to survive a slow render or a brief network hiccup, short enough
  *  that an abandoned tab frees the computer quickly. */
@@ -23,22 +28,19 @@ export interface Control {
   owner: ControlOwner;
   /** epoch ms; only meaningful while `owner === "user"` */
   expiresAt?: number;
-  /** Bot currently allowed to send computer input. */
+  /** A bot with a turn running on the computer right now. */
   agentOwner?: string;
-  /** Bots waiting for that input lease, in FIFO order. */
+  /** Bots whose turn waits for a free slot, in FIFO order. */
   agentQueue?: string[];
 }
 
 let leaseExpiresAt: number | null = null;
 
-type AgentWaiter = { botId: string; resolve: () => void };
-let agentOwner: string | null = null;
-const agentWaiters: AgentWaiter[] = [];
-
 function agentState() {
+  const { active, waiting } = turnGate.state();
   return {
-    ...(agentOwner ? { agentOwner } : {}),
-    ...(agentWaiters.length ? { agentQueue: agentWaiters.map((waiter) => waiter.botId) } : {}),
+    ...(active.length ? { agentOwner: active[0] } : {}),
+    ...(waiting.length ? { agentQueue: waiting } : {}),
   };
 }
 
@@ -64,38 +66,22 @@ export function release(): Control {
   return { owner: "agent", ...agentState() };
 }
 
-/** Wait until this bot is the only bot driving shared desktop. */
+/** Admit this bot's turn. Resolves at once while the fleet is under
+ *  OMB_MAX_PARALLEL_TURNS — other bots are never waited for one by one. */
 export function acquireAgent(botId: string): Promise<void> {
-  if (agentOwner === botId) return Promise.resolve();
-  if (agentOwner === null) {
-    agentOwner = botId;
-    return Promise.resolve();
-  }
-  const existing = agentWaiters.find((waiter) => waiter.botId === botId);
-  if (existing) return new Promise((resolve) => {
-    const index = agentWaiters.indexOf(existing);
-    agentWaiters[index] = { botId, resolve };
-  });
-  return new Promise((resolve) => agentWaiters.push({ botId, resolve }));
+  return turnGate.acquire(botId);
 }
 
-/** Release bot's turn and wake next queued bot, if any. */
+/** End this bot's turn and let the next waiting one in. Safe for a bot that
+ *  never took a slot. */
 export function releaseAgent(botId: string): Control {
-  if (agentOwner !== botId) {
-    const index = agentWaiters.findIndex((waiter) => waiter.botId === botId);
-    if (index >= 0) agentWaiters.splice(index, 1);
-    return control();
-  }
-  const next = agentWaiters.shift();
-  agentOwner = next?.botId ?? null;
-  next?.resolve();
+  turnGate.release(botId);
   return control();
 }
 
 /** Test/reset hook; no live turn can survive a harness restart. */
 export function resetAgentQueue(): void {
-  agentOwner = null;
-  agentWaiters.splice(0).forEach((waiter) => waiter.resolve());
+  turnGate.reset();
 }
 
 /**
