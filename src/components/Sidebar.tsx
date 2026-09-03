@@ -71,6 +71,12 @@ export function sidebarAvatarProps(
   return { state: busy.state, motion: busy.motion, animated: true, motionKey: 1 };
 }
 
+/**
+ * Awatar czlonka grupy w stosie na wierszu grupy — dokladnie ta sama zasada
+ * co wiersz bota: stoi, dopoki bot nie pracuje.
+ */
+export const groupMemberAvatarProps = sidebarAvatarProps;
+
 function readSidebarWidth(key: string, fallback: number): number {
   if (typeof window === "undefined") return fallback;
   try {
@@ -783,9 +789,7 @@ function GroupsSection({
                         avatarUrl={b.avatarUrl}
                         shape={b.mascotShape}
                         size={40}
-                        state={b.busy ? busyMascotMotion(b.id).state : stateForBot(b)}
-                        motion={b.busy ? busyMascotMotion(b.id).motion : "none"}
-                        motionKey={b.busy ? 1 : 0}
+                        {...groupMemberAvatarProps(b)}
                       />
                     </span>
                   ))}
@@ -1268,10 +1272,8 @@ export function Sidebar() {
                     <MausAvatar
                       color={b.color} avatarUrl={b.avatarUrl}
                       shape={b.mascotShape}
-                      state={b.busy ? busyMascotMotion(b.id).state : stateForBot(b)}
                       size={avatarSize}
-                      motion={b.busy ? busyMascotMotion(b.id).motion : "none"}
-                      motionKey={b.busy ? 1 : 0}
+                      {...sidebarAvatarProps(b)}
                     />
                     <span className="w-full truncate text-center text-[12px] font-medium leading-tight text-ink">
                       {botDisplayName(b, lang)}
