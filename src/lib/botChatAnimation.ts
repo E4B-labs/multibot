@@ -17,6 +17,8 @@ export interface ActivePeerChat {
   roomId: string;
   /** bot pokazywany po prawej od awatara oglądanego bota */
   peerBot: Bot;
+  /** bot whose turn is currently being generated in this room */
+  activeBotId?: string | null;
 }
 
 function lookupBot(bots: BotLookup, id: string): Bot | undefined {
@@ -49,7 +51,7 @@ export function selectActivePeerChat(
       if (id === watchedBotId) continue;
       const peer = lookupBot(bots, id);
       if (!peer || peer.hidden) continue;
-      return { roomId: room.id, peerBot: peer };
+      return { roomId: room.id, peerBot: peer, activeBotId: room.activeBotId };
     }
   }
   return null;

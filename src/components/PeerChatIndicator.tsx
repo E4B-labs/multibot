@@ -29,6 +29,7 @@ const DESKTOP_QUERY = "(min-width: 768px)";
 export interface PeerChatView {
   roomId: string;
   peerBot: Bot;
+  activeBotId?: string | null;
   /** true przez PEER_CHAT_EXIT_MS po tym, jak pokój przestał być aktywny */
   leaving: boolean;
 }
@@ -55,7 +56,7 @@ export function usePeerChat(botId: string): PeerChatView | null {
 
   useEffect(() => {
     if (active) {
-      setView({ roomId: active.roomId, peerBot: active.peerBot, leaving: false });
+      setView({ roomId: active.roomId, peerBot: active.peerBot, activeBotId: active.activeBotId, leaving: false });
       return;
     }
     // pokój się kończy: zostawiamy ostatnią scenę w trybie `leaving`
@@ -77,6 +78,16 @@ const SPARK_ANGLES = [0, 60, 120, 180, 240, 300];
 export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView }) {
   const peer = view.peerBot;
   const peerColor = MAUS_COLORS[peer.color] ?? MAUS_COLORS.green;
+  // The room state is authoritative. The fallback keeps older rooms usable
+  // without ever animating both avatars when both bots are busy.
+  const botThinking = view.activeBotId === bot.id || (
+    view.activeBotId === undefined && bot.busy === true && peer.busy !== true
+  );
+  const peerThinking = view.activeBotId === peer.id || (
+    view.activeBotId === undefined && peer.busy === true && bot.busy !== true
+  );
+  const normalBotState = normalizeState(bot.mascotExpression) ?? stateForBot({ ...bot, busy: false });
+  const normalPeerState = normalizeState(peer.mascotExpression) ?? stateForBot({ ...peer, busy: false });
 
   // Rozmiar awatara zależy od szerokości ekranu (40 px przy gospodarzu na
   // desktopie, 44 px w pionowym telefonie) — jeden breakpoint co w Tailwindzie.
@@ -103,9 +114,11 @@ export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView 
           <MausAvatar
             color={bot.color}
             shape={bot.mascotShape}
-            state={normalizeState(bot.mascotExpression) ?? stateForBot(bot)}
+            state={botThinking ? "thinking" : normalBotState}
             size={44}
-            animated={false}
+            motion={botThinking ? "thinking-dots" : "none"}
+            motionKey={botThinking ? 1 : 0}
+            animated={botThinking}
           />
         </span>
         <span
@@ -116,8 +129,11 @@ export function PeerChatIndicator({ bot, view }: { bot: Bot; view: PeerChatView 
           <MausAvatar
             color={peer.color}
             shape={peer.mascotShape}
-            state={normalizeState(peer.mascotExpression) ?? stateForBot(peer)}
+            state={peerThinking ? "thinking" : normalPeerState}
             size={isWide ? 40 : 44}
+            motion={peerThinking ? "thinking-dots" : "none"}
+            motionKey={peerThinking ? 1 : 0}
+            animated={peerThinking}
           />
           {/* iskry małego wybuchu — zamknięte w pudełku awatara (position:
               absolute), więc nie rozpychają rzędu i promieniują ze środka peera */}

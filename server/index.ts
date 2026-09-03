@@ -465,6 +465,8 @@ async function runCollab(
       // markera czeka w carry na następny spłuk, zamiast ginąć.
       let liveMsgId: string | null = null;
       let carry = "";
+      rooms.setActiveBot(roomId, botId);
+      broadcast({ kind: "room", room: rooms.get(roomId) });
       const reply = await askBotAndWait(botId, prompt, 1, {
         threadId: roomThreadId(roomId, botId),
         transcript: live.transcript.map((m) => ({ role: "assistant" as const, text: m.text })),
@@ -493,6 +495,8 @@ async function runCollab(
           broadcast({ kind: "room", room: rooms.get(roomId) });
         },
       });
+      rooms.setActiveBot(roomId, null);
+      broadcast({ kind: "room", room: rooms.get(roomId) });
       const current = rooms.get(roomId);
       if (!current || current.status !== "running") {
         finished = true;
@@ -2999,6 +3003,8 @@ const server = createServer(async (req, res) => {
         // tego pokój był pusty do 20 minut i wyglądał na zacięty. Cała tura
         // to JEDNA rosnąca wiadomość, nie dymek na każdy spłuk bufora.
         let liveMsgId: string | null = null;
+        rooms.setActiveBot(room.id, toBotId);
+        broadcast({ kind: "room", room: rooms.get(room.id) });
         const reply = await askBotAndWait(toBotId, prefixed, depth, {
           // multibot: tura odbiorcy idzie na izolowaną nitkę POKOJU (jak tura
           // uczestnika w runCollab) — ani koperta, ani odpowiedź, ani pigułki
@@ -3016,6 +3022,8 @@ const server = createServer(async (req, res) => {
             broadcast({ kind: "room", room: rooms.get(room.id) });
           },
         });
+        rooms.setActiveBot(room.id, null);
+        broadcast({ kind: "room", room: rooms.get(room.id) });
         if (!liveMsgId) rooms.append(room.id, toBotId, reply);
         appendBotMail({ from: toBotId, to: fromBotId, text: reply, status: "delivered", replyToId: mailRequest.id });
         broadcast({ kind: "room", room: rooms.get(room.id) });
