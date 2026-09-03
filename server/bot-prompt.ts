@@ -13,7 +13,7 @@
  */
 import { totalmem } from "node:os";
 
-import { turnToolsText, type TurnIntegrationsLike } from "./turn-tools.ts";
+import { mountedConnections, turnToolsText, type TurnIntegrationsLike } from "./turn-tools.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import type { BotRecord } from "./store.ts";
 
@@ -100,6 +100,35 @@ export function currentTimeLine(now: Date, timeZone?: string): string {
   return `Right now it is ${clock} in time zone ${zone}. Treat this as the current date and time: resolve "today", "tomorrow", "this week" and any deadline against it instead of guessing.`;
 }
 
+/**
+ * multibot: "czy jesteś podłączony?" — bot pytany o swoje połączenia odpowiadał
+ * jak agent bez narzędzi, bo nigdzie nie miał ICH SPISU: prompt opisywał, jak
+ * używać narzędzi, ale nie mówił wprost, co jest zamontowane W TEJ turze.
+ *
+ * Blok jest generowany z `integrations` (patrz `mountedConnections`), więc
+ * nigdy nie obieca narzędzia, którego bot nie dostał. Nazwa drivera/silnika tu
+ * NIE wchodzi — sekcja tożsamości zabrania ją ujawniać.
+ *
+ * Osobna funkcja, bo driver slafy `system` do silnika nie przekazuje: index.ts
+ * dokleja ten sam blok do treści tury (tak samo, jak robi to ze stanem floty).
+ */
+export function connectionsBlock(
+  bot: { name: string },
+  integrations: TurnIntegrationsLike | undefined,
+): string {
+  const mounted = mountedConnections(integrations);
+  return [
+    "# Your connections and tools",
+    // Bez id bota: blok jedzie też w TREŚCI tury drivera slafy, a tam żadna
+    // linia nie może wyglądać jak wpis floty o samym sobie (proxy.test.ts).
+    `You are ${bot.name}, working in the user's MultiBot workspace.`,
+    mounted.length
+      ? `You ARE connected. Mounted for you in THIS turn:\n${mounted.map((line) => `- ${line}`).join("\n")}`
+      : "Nothing is mounted for you in THIS turn: you work with your own built-in abilities only.",
+    "When you are asked whether you are connected, what you are connected to, what tools you have or what you can do, answer from exactly this list: name the connections above and say plainly that anything not listed is unavailable to you this turn. Never claim you have no tools, no computer and no connections while something is listed here.",
+  ].join("\n");
+}
+
 export function botSystemPrompt(
   bot: BotLike,
   o: {
@@ -183,7 +212,7 @@ export function botSystemPrompt(
     // multibot: prośby o rutynę idą prosto do zamontowanego narzędzia —
     // katalogi ToolSearch/MCP dostawcy nie są infrastrukturą MultiBota.
     agents &&
-      "Routines — anything recurring (\"every morning\", \"when a mail like this arrives\") is a routine. Call `create_routine` directly with name, prompt and a five-field cron schedule such as `35 1 * * *`; never call ToolSearch, /schedule or a provider-specific MCP search. Routines are local MultiBot routines and persist on this server. Confirm the routine's name and time back to the user in one line.",
+      "Routines — anything recurring (\"every morning\", \"when a mail like this arrives\") is a routine. Call `create_routine` directly with name, prompt and a five-field cron schedule such as `35 1 * * *`; never call ToolSearch, /schedule or a provider-specific MCP search. Routines are local MultiBot routines and persist on this server. Confirm the routine's name and time back to the user in one line. When the user changes their mind about something recurring, do NOT create a second routine: call `list_routines`, take the id, then `update_routine` (new schedule, new prompt, or `enabled: false` to switch it off) or `delete_routine` to remove it for good. Two routines doing the same job means you forgot to update the old one.",
     agents &&
       "Questions — `ask_user(question, choices)` is the ONLY way to ask the human anything. Whenever you lack a decision or data you cannot obtain yourself, call it: one question per call, with 2-5 ready answers as `choices`. NEVER end a message with a question mark (`?`) in plain text — every question must go through `ask_user` and the human answers via the in-chat card. Do not ask about something a tool can check.",
     agents &&
@@ -263,6 +292,6 @@ export function botSystemPrompt(
     + currentTimeLine(o.now ?? new Date(), o.timeZone) + "\n"
     + environmentLine(agents);
 
-  return ([who, creationBlock, have, how, environment, chief, knowledge, peers]
+  return ([who, creationBlock, connectionsBlock(bot, integrations), have, how, environment, chief, knowledge, peers]
     .filter(Boolean).join("\n\n") + taggedReplies).replace(/[—–]/g, "-");
 }

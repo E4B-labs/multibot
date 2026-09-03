@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { botSystemPrompt } from "./bot-prompt.ts";
+import { botSystemPrompt, connectionsBlock } from "./bot-prompt.ts";
 // multibot: autoweryfikacja — filtr na prośbach o zgodę, patrz server/auto-verify.ts.
 import { decideAction, normalizeAutoVerify, type AutoVerifyState } from "./auto-verify.ts";
 import { fleetStatusBlock } from "./fleet-status.ts";
@@ -2046,6 +2046,11 @@ opts?: {
         // pracy floty; zapamiętany raz byłby gorszy niż żaden.
         text: [
           fleetStatusBlock(visibleRoster, bot.id, fleetEnvironmentForBots(fleetEnvironment, visibleRoster)),
+          // multibot: spis połączeń tej tury z tego samego powodu, co stan
+          // floty wyżej — driver slafy `system` do silnika nie przekazuje, więc
+          // bot tego silnika inaczej NIGDY nie zobaczyłby, co ma zamontowane.
+          // Pozostałe drivery mają ten blok w prompcie systemowym.
+          instance.driverKind === "slafy" ? connectionsBlock(bot, integrations) : "",
           text,
           turnAttachments.length ? `Attached files:\n${turnAttachments.map((file) => `- ${file.name}: ${file.path}`).join("\n")}` : "",
         ]
@@ -2884,6 +2889,20 @@ const server = createServer(async (req, res) => {
           case "skills.delete": { requireFull(); const ok = workspace.deleteSkill(fromBotId, String(body.name)); broadcast({ kind: "workspace", botId: fromBotId, resource: "skills" }); return json(res, 200, { ok }); }
           case "routines.list": return json(res, 200, harnessRoutines.list(fromBotId).map((routine) => routineView(fromBotId, routine)));
           case "routines.create": { requireFull(); const routine = harnessRoutines.create(fromBotId, body); appendBotEvent(fromBotId, { type: "routine-created", value: routine.name }); broadcast({ kind: "workspace", botId: fromBotId, resource: "routines" }); return json(res, 201, routineView(fromBotId, routine)); }
+          // multibot: bot umiał TYLKO założyć rutynę — nie umiał jej wyłączyć
+          // ani przestawić, więc po zmianie planu na serwerze zostawały dwie
+          // działające naraz. Ta sama ścieżka co PATCH /api/bots/:id/routines/:rid.
+          case "routines.update": {
+            requireFull();
+            const patch: Partial<Pick<HarnessRoutine, "name" | "prompt" | "schedule" | "enabled">> = {};
+            for (const key of ["name", "prompt", "schedule", "enabled"] as const) {
+              if (body[key] !== undefined) (patch as Record<string, unknown>)[key] = body[key];
+            }
+            const routine = harnessRoutines.update(fromBotId, String(body.id), patch);
+            if (!routine) return json(res, 404, { error: "no such routine" });
+            broadcast({ kind: "workspace", botId: fromBotId, resource: "routines" });
+            return json(res, 200, routineView(fromBotId, routine));
+          }
           case "routines.run": { requireFull(); const routine = await harnessRoutines.runNow(fromBotId, String(body.id)); broadcast({ kind: "workspace", botId: fromBotId, resource: "routines" }); return json(res, 200, routine ? routineView(fromBotId, routine) : { error: "no such routine" }); }
           case "routines.delete": { requireFull(); const ok = harnessRoutines.delete(fromBotId, String(body.id)); broadcast({ kind: "workspace", botId: fromBotId, resource: "routines" }); return json(res, 200, { ok }); }
           case "agent.create": {
