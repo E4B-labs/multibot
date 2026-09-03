@@ -27,8 +27,16 @@ function bot(id: string, over: Partial<Bot> = {}): Bot {
   };
 }
 
-function room(id: string, botIds: string[], status: Room["status"] = "running"): Room {
-  return { id, name: id, task: "task", bot_ids: botIds, transcript: [], status };
+function room(id: string, botIds: string[], status: Room["status"] = "running", activeBotId?: string | null): Room {
+  return {
+    id,
+    name: id,
+    task: "task",
+    bot_ids: botIds,
+    transcript: [],
+    status,
+    ...(activeBotId !== undefined ? { activeBotId } : {}),
+  };
 }
 
 describe("selectActivePeerChat", () => {
@@ -44,6 +52,13 @@ describe("selectActivePeerChat", () => {
     expect(result).not.toBeNull();
     expect(result?.roomId).toBe("r1");
     expect(result?.peerBot.id).toBe("b");
+  });
+
+  it("passes the current speaker from the room", () => {
+    const a = bot("a");
+    const b = bot("b");
+    const result = selectActivePeerChat([room("r1", ["a", "b"], "running", "b")], "a", { a, b });
+    expect(result?.activeBotId).toBe("b");
   });
 
   it("ignoruje pokoje zakończone — status inny niż running", () => {

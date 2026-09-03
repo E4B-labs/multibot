@@ -28,6 +28,8 @@ export interface RoomRecord {
   ownerThread: string;
   /** originator bot id (shown as "X texted Y") */
   ownerBotId: string;
+  /** Bot whose turn is currently being generated; null while the room is idle. */
+  activeBotId?: string | null;
 }
 
 /** A bot ends its room contribution with this exact line once the task is
@@ -77,6 +79,7 @@ export class RoomStore {
       createdAt: now,
       ownerThread: input.ownerThread,
       ownerBotId: input.ownerBotId,
+      activeBotId: null,
     };
     this.rooms.set(room.id, room);
     this.persist();
@@ -119,6 +122,14 @@ export class RoomStore {
     const room = this.rooms.get(id);
     if (!room) return null;
     room.status = status;
+    this.persist();
+    return this.get(id);
+  }
+
+  setActiveBot(id: string, activeBotId: string | null): RoomRecord | null {
+    const room = this.rooms.get(id);
+    if (!room) return null;
+    room.activeBotId = activeBotId;
     this.persist();
     return this.get(id);
   }

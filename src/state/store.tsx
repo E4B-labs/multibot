@@ -152,6 +152,7 @@ export interface Room {
   bot_ids: string[];
   transcript: Array<{ id: string; from: string; text: string; at: number }>;
   status: "running" | "done" | "failed";
+  activeBotId?: string | null;
 }
 
 /** Durable asynchronous 1:1 agent mailbox. */

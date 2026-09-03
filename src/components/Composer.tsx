@@ -5,7 +5,7 @@ import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
 import { MausAvatar } from "./Avatar";
-import { normalizeState } from "@/lib/mascot";
+import { normalizeState, stateForBot } from "@/lib/mascot";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { parseSchedule, type PresetOrUnknown } from "@/lib/routineSchedule";
@@ -252,6 +252,12 @@ export function Composer({ bot }: { bot: Bot }) {
   // multibot: aktywna rozmowa bot-bot dla oglądanego bota (awatar partnera +
   // dymki ze szlaczkami nad composereem); null gdy bot nikogo nie „gadaje"
   const peerChat = usePeerChat(bot.id);
+  const botThinkingInPeerChat = peerChat
+    ? peerChat.activeBotId === bot.id || (
+        peerChat.activeBotId === undefined && bot.busy === true && peerChat.peerBot.busy !== true
+      )
+    : bot.busy === true;
+  const composerAvatarState = normalizeState(bot.mascotExpression) ?? stateForBot({ ...bot, busy: false });
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const filesRef = useRef<HTMLInputElement>(null);
   const previewUrls = useRef(new Set<string>());
@@ -879,9 +885,18 @@ export function Composer({ bot }: { bot: Bot }) {
         {peerChat && <PeerChatIndicator bot={bot} view={peerChat} />}
         <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5">
         {/* Awatar pojawia się tylko na czas aktywnej tury bota. */}
-        {bot.busy && (
+        {(bot.busy || peerChat) && (
           <div className="pointer-events-none absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
-            <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state="thinking" size={40} motion="thinking-dots" motionKey={1} animated />
+            <MausAvatar
+              color={bot.color}
+              avatarUrl={bot.avatarUrl}
+              shape={bot.mascotShape}
+              state={botThinkingInPeerChat ? "thinking" : composerAvatarState}
+              size={40}
+              motion={botThinkingInPeerChat ? "thinking-dots" : "none"}
+              motionKey={botThinkingInPeerChat ? 1 : 0}
+              animated={botThinkingInPeerChat}
+            />
           </div>
         )}
         <button

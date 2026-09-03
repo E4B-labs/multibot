@@ -409,7 +409,8 @@ function collabRoundPrompt(freshFromPeers: string): string {
 
 /** Run a room to completion: sequential rounds, each bot replies once per
  * round, until a bot marks the task done or the safety ceiling (2 h) hits.
- * Busy bots are skipped for that round. */
+ * Room turns use isolated threads, so they must not be blocked by the bot's
+ * main chat turn (the owner is commonly busy while an ask_bot call is open). */
 async function runCollab(
   roomId: string,
   opts?: { seen?: Map<string, number>; maxRounds?: number },
@@ -434,7 +435,6 @@ async function runCollab(
     for (const botId of room.bot_ids) {
       const bot = store.bot(botId);
       if (!bot) continue;
-      if (bot.busy) continue; // busy-safe: that bot is mid-turn elsewhere
       // świeży zrzut TUŻ przed turą — snapshot z początku rundy nie widzi
       // wkładek botów, które właśnie skończyły w tej samej rundzie
       const live = rooms.get(roomId);
@@ -465,6 +465,8 @@ async function runCollab(
       // markera czeka w carry na następny spłuk, zamiast ginąć.
       let liveMsgId: string | null = null;
       let carry = "";
+      rooms.setActiveBot(roomId, botId);
+      broadcast({ kind: "room", room: rooms.get(roomId) });
       const reply = await askBotAndWait(botId, prompt, 1, {
         threadId: roomThreadId(roomId, botId),
         transcript: live.transcript.map((m) => ({ role: "assistant" as const, text: m.text })),
@@ -493,6 +495,8 @@ async function runCollab(
           broadcast({ kind: "room", room: rooms.get(roomId) });
         },
       });
+      rooms.setActiveBot(roomId, null);
+      broadcast({ kind: "room", room: rooms.get(roomId) });
       const current = rooms.get(roomId);
       if (!current || current.status !== "running") {
         finished = true;
@@ -2999,6 +3003,8 @@ const server = createServer(async (req, res) => {
         // tego pokój był pusty do 20 minut i wyglądał na zacięty. Cała tura
         // to JEDNA rosnąca wiadomość, nie dymek na każdy spłuk bufora.
         let liveMsgId: string | null = null;
+        rooms.setActiveBot(room.id, toBotId);
+        broadcast({ kind: "room", room: rooms.get(room.id) });
         const reply = await askBotAndWait(toBotId, prefixed, depth, {
           // multibot: tura odbiorcy idzie na izolowaną nitkę POKOJU (jak tura
           // uczestnika w runCollab) — ani koperta, ani odpowiedź, ani pigułki
@@ -3016,6 +3022,8 @@ const server = createServer(async (req, res) => {
             broadcast({ kind: "room", room: rooms.get(room.id) });
           },
         });
+        rooms.setActiveBot(room.id, null);
+        broadcast({ kind: "room", room: rooms.get(room.id) });
         if (!liveMsgId) rooms.append(room.id, toBotId, reply);
         appendBotMail({ from: toBotId, to: fromBotId, text: reply, status: "delivered", replyToId: mailRequest.id });
         broadcast({ kind: "room", room: rooms.get(room.id) });
@@ -3026,11 +3034,8 @@ const server = createServer(async (req, res) => {
         // odpowiedz synchronicznie jak dotad; reszta leci w tle, w pokoju.
         const seen = new Map<string, number>([[toBotId, rooms.get(room.id)?.transcript.length ?? 0]]);
         void (async () => {
-          // wolajacy jest `busy` do konca WLASNEJ tury; bez tego pierwsza runda
-          // pominelaby go i odbiorca gadalby sam ze soba
-          for (let i = 0; i < 120 && store.bot(fromBotId)?.busy; i++) {
-            await new Promise((r) => setTimeout(r, 1_000));
-          }
+          // The room uses isolated threads, so the caller's main turn does not
+          // block the next room round.
           await runCollab(room.id, { seen, maxRounds: ASK_BOT_ROOM_ROUNDS });
         })();
         return json(res, 200, { botName: target.name, text: reply });

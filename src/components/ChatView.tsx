@@ -33,6 +33,7 @@ import { cn } from "@/lib/cn";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { authFetch } from "@/lib/auth";
+import { usePeerChat } from "./PeerChatIndicator";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
  * bury the conversation; bots get full markdown. */
@@ -344,7 +345,17 @@ export function ChatView({ bot }: { bot: Bot }) {
   const streaming = state.streaming[bot.threadId];
   const provisioning = state.provisioning[bot.id];
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
-  const busyMotion = bot.busy ? busyMascotMotion(bot.id) : null;
+  const peerChat = usePeerChat(bot.id);
+  const botIsThinking = peerChat
+    ? peerChat.activeBotId === bot.id || (
+        peerChat.activeBotId === undefined && bot.busy === true && peerChat.peerBot.busy !== true
+      )
+    : bot.busy === true;
+  const busyMotion = botIsThinking
+    ? peerChat
+      ? { state: "thinking" as const, motion: "thinking-dots" as const }
+      : busyMascotMotion(bot.id)
+    : null;
 
   // Scroll pinning: follow the bottom while the user hasn't scrolled away.
   // Follow breaks ONLY on an upward user gesture (wheel/touch), never on
@@ -470,8 +481,8 @@ export function ChatView({ bot }: { bot: Bot }) {
               shape={bot.mascotShape}
               state={busyMotion?.state ?? stateForBot(bot)}
               size={40}
-              motion={busyMotion?.motion ?? mascotMotion?.kind ?? "none"}
-              motionKey={busyMotion ? 1 : mascotMotion?.nonce ?? 0}
+              motion={busyMotion?.motion ?? (peerChat ? "none" : mascotMotion?.kind ?? "none")}
+              motionKey={busyMotion ? 1 : peerChat ? 0 : mascotMotion?.nonce ?? 0}
               animated
             />
           </span>
