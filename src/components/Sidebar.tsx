@@ -26,7 +26,7 @@ import {
 import { useStore, formatTime, type Bot, type EngineGroup } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { ScoutTeamModal } from "./ScoutTeamModal";
-import { busyMascotMotion, stateForBot } from "@/lib/mascot";
+import { busyMascotMotion, stateForBot, type MausMotion, type MausState } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { plainPreview } from "@/lib/plainPreview";
 import { authFetch } from "@/lib/auth";
@@ -54,6 +54,19 @@ export function clampSidebarWidth(width: number): number {
 
 export function sidebarWidthFromDrag(startWidth: number, deltaX: number): number {
   return clampSidebarWidth(startWidth + deltaX);
+}
+
+/**
+ * Awatar w pasku bocznym: bot, ktory nie pracuje, stoi calkiem nieruchomo
+ * (neutralny stan "idle", zero beatow, `animated:false` -> `paused` w
+ * CursorAvatar). Animacja tylko na czas `busy`.
+ */
+export function sidebarAvatarProps(
+  bot: Bot,
+): { state: MausState; motion: MausMotion; animated: boolean; motionKey: number } {
+  if (!bot.busy) return { state: "idle", motion: "none", animated: false, motionKey: 0 };
+  const busy = busyMascotMotion(bot.id);
+  return { state: busy.state, motion: busy.motion, animated: true, motionKey: 1 };
 }
 
 function readSidebarWidth(key: string, fallback: number): number {
@@ -386,8 +399,7 @@ function BotListItem({
   // U20: zaznaczenie ma być jedno — po otwarciu grupy bot przestaje być
   // podświetlony (inaczej świecą dwa: grupa i ostatni bot).
   const selected = state.selectedId === bot.id && !state.groupOpen;
-  const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
-  const busyMotion = bot.busy ? busyMascotMotion(bot.id) : null;
+  const avatar = sidebarAvatarProps(bot);
   const lang = useLanguage();
   const last = bot.messages[bot.messages.length - 1];
   return (
@@ -417,10 +429,11 @@ function BotListItem({
       <MausAvatar
         color={bot.color} avatarUrl={bot.avatarUrl}
         shape={bot.mascotShape}
-        state={busyMotion?.state ?? stateForBot(bot)}
+        state={avatar.state}
         size={48}
-        motion={busyMotion?.motion ?? mascotMotion?.kind ?? "none"}
-        motionKey={busyMotion ? 1 : mascotMotion?.nonce ?? 0}
+        motion={avatar.motion}
+        motionKey={avatar.motionKey}
+        animated={avatar.animated}
       />
       {/* multibot: nazwa i podgląd znikają w szynie, ale kropka zostaje —
           to jedyny sygnał „coś się tu dzieje", jaki tam przeżył. Ta sama
