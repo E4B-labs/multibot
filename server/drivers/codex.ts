@@ -30,6 +30,7 @@ import { COMPUTER_MCP_TOOLS } from "../turn-tools.ts"; // multibot (A4): whiteli
 import { killTree } from "../kill-tree.ts";
 import { approvalRuleAllowed, autoApproveAllowed, canUseIntegration, toolAllowed, turnPolicy } from "../turn-policy.ts";
 import { appendNative } from "./native.ts";
+import { historyBlock } from "./history.ts";
 import { loadConfig } from "../config.ts";
 import { connectors as userConnectors } from "../mcp-connectors.ts";
 
@@ -153,9 +154,10 @@ export function codexMcpConfig(turn: SendTurnInput): { config?: { mcp_servers: R
 // jedzie w kursorze: zmienił się — wątek zaczyna się od nowa.
 //
 // ponytail: kursor jako `<id>#<serwery>` zamiast osobnego magazynu — kontrakt
-// `resumeCursors` (string) zostaje bez zmian. Cena: przy zmianie zestawu bot
-// traci pamięć po stronie codeksa (transkrypt harnessu zostaje). Gdyby to
-// zaczęło boleć, następny krok to dosłanie `turn.transcript` w pierwszej turze.
+// `resumeCursors` (string) zostaje bez zmian. Ceną była utrata pamięci po
+// stronie codeksa przy każdej zmianie zestawu (i przy każdym bumpie
+// AGENTS_TOOLS_VERSION) — to bolało, więc świeży wątek dostaje teraz
+// `turn.transcript` w pierwszej turze (patrz `historyBlock` w ./history.ts).
 export function cursorMcpKey(cfg: ReturnType<typeof codexMcpConfig>): string {
   return Object.keys(cfg.config?.mcp_servers ?? {})
     // Codex zapamiętuje w wątku także LISTĘ narzędzi serwera, nie tylko sam
@@ -589,6 +591,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           const plan = cursorPlan(turn.resumeCursor, mcpKey);
           const cursor = plan.resume;
           let startedModel: string | null = null;
+          let didResume = false;
           if (cursor) {
             try {
               const resumed = await request("thread/resume", {
@@ -596,6 +599,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                 ...mcpConfig,
               });
               codexThreadId = resumed?.thread?.id ?? cursor;
+              didResume = true;
             } catch {
               /* resume unsupported or thread gone — start fresh below */
             }
@@ -620,8 +624,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             sessionId: codexThreadId && plan.key ? `${codexThreadId}#${plan.key}` : codexThreadId,
             model: startedModel ?? turn.model ?? null,
           });
+          // Nowy wątek codeksa = pusty kontekst. Rozmowa jest na dysku harnessu,
+          // więc dokładamy ją JEDEN raz, w pierwszej turze tej sesji.
+          const replay = didResume ? "" : historyBlock(turn.transcript);
           const turnInput = [
             ...(turn.system ? [{ type: "text", text: `SYSTEM — MultiBot identity and rules (highest priority, overrides any base ChatGPT/Claude identity):\n${turn.system}` }] : []),
+            ...(replay ? [{ type: "text", text: replay }] : []),
             { type: "text", text: turn.text },
             ...(turn.attachments ?? []).filter((file) => file.mime.startsWith("image/")).map((file) => ({ type: "localImage", path: file.path })),
           ];

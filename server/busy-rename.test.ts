@@ -66,6 +66,8 @@ beforeAll(async () => {
       OMB_PORT: String(port),
       MULTIBOT_COMPUTER: "off",
       OMB_HOST: "127.0.0.1",
+      // ten test pilnuje `busy` w trakcie tury, nie okna sklejania wiadomości
+      OMB_TURN_DEBOUNCE_MS: "0",
       FAKE_ACP_MODE: "hang",
       ENGINE_URL: "http://127.0.0.1:1",
     },
@@ -162,10 +164,15 @@ describe("busy across rename and interrupt", () => {
     expect(created.status).toBe(201);
     const id = created.body.bot.id;
 
-    // Start a turn — fake CLI hangs, so busy must stay true.
+    // Start a turn — fake CLI hangs, so busy must stay true. Wiadomość
+    // przechodzi przez kolejkę tur, więc `busy` zapala się o tik później.
     const sent = await api("POST", `/api/bots/${id}/messages`, { text: "work" });
     expect(sent.status).toBe(202);
-    const running = await getBot(id);
+    let running = await getBot(id);
+    for (let i = 0; i < 40 && !running.busy; i++) {
+      await wait(50);
+      running = await getBot(id);
+    }
     expect(running.busy).toBe(true);
 
     // Rename while busy — the regression: busy lost, stop button vanishes.
