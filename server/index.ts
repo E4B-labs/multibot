@@ -50,6 +50,7 @@ import { CLI_TOOLS, installCommandText } from "./cli-tools.ts";
 import { deviceInfo, deviceResources } from "./device.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { trimTranscript } from "./drivers/history.ts";
 import { openCodeCatalog, startOpenCodeModelRefresh } from "./drivers/acp/opencode-catalog.ts";
 // multibot: silnik slafy — proxy `/api/engine/*`, pipe WS i uwaga botów (D7)
 import { engineBotIdFor, threadIdOfEngineBot } from "./drivers/slafy.ts";
@@ -1873,12 +1874,17 @@ opts?: {
   });
   if (userMessage) broadcast({ kind: "message", threadId: bot.threadId, message: userMessage });
 
-  // transcript for API-backed drivers: settled text turns only
-  const transcript = opts?.transcript ?? store
-    .messagesFor(bot.threadId)
-    .filter((m) => m.kind === "text" && m.text && m.id !== userMessage?.id)
-    .slice(-40)
-    .map((m) => ({ role: m.role === "user" ? ("user" as const) : ("assistant" as const), text: m.text! }));
+  // transcript: settled text turns only. Driverzy API-owi (grok) grają z niego
+  // rozmowę co turę, drivery CLI (codex/claude) dostają go tylko wtedy, gdy
+  // sesja dostawcy przepadła i trzeba odtworzyć rozmowę od zera. Dlatego CAŁY
+  // wątek, przycięty budżetem znaków (OMB_HISTORY_MAX_CHARS) zamiast sztywnym
+  // „ostatnie 40" — po 40 wiadomościach bot zapominał początek rozmowy.
+  const transcript = opts?.transcript ?? trimTranscript(
+    store
+      .messagesFor(bot.threadId)
+      .filter((m) => m.kind === "text" && m.text && m.id !== userMessage?.id)
+      .map((m) => ({ role: m.role === "user" ? ("user" as const) : ("assistant" as const), text: m.text! })),
+  );
   const promptUser = opts?.actor ?? (() => {
     const lastUser = store.messagesFor(bot.threadId).reverse().find((message) => message.role === "user" && message.userId);
     return lastUser?.userId ? { uid: lastUser.userId, name: lastUser.userName } : undefined;

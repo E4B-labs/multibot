@@ -156,6 +156,85 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
+  // multibot: "bot nie pamięta, co było wcześniej". Sesja codeksa przepada przy
+  // każdym nowym wątku (aktualizacja CLI, skasowany rollout, bump
+  // AGENTS_TOOLS_VERSION), a wtedy CLI startuje z pustym kontekstem. Harness ma
+  // rozmowę na dysku, więc świeży wątek MUSI ją dostać w pierwszej turze.
+  const earlier: SendTurnInput["transcript"] = [
+    { role: "user", text: "my dog is called Bruno" },
+    { role: "assistant", text: "noted, Bruno it is" },
+  ];
+
+  it("replays the stored thread history when the codex session is gone", async () => {
+    await create(); // fake rejects thread/resume outside resume mode
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-replay",
+      text: "what is my dog called?",
+      resumeCursor: "gone-thread",
+      transcript: earlier,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    const turnStart = calls.find((c: { method: string }) => c.method === "turn/start");
+    const sent = turnStart.params.input.map((part: { text?: string }) => part.text ?? "").join("\n");
+    expect(sent).toContain("my dog is called Bruno");
+    expect(sent).toContain("noted, Bruno it is");
+    expect(sent).toContain("what is my dog called?");
+    // labels tell the model who said what
+    expect(sent).toContain("User: my dog is called Bruno");
+    expect(sent).toContain("You: noted, Bruno it is");
+  });
+
+  it("does not replay history when the codex thread resumed", async () => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-no-replay",
+      text: "and now?",
+      resumeCursor: "codex-thread-9",
+      transcript: earlier,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    const turnStart = calls.find((c: { method: string }) => c.method === "turn/start");
+    const sent = turnStart.params.input.map((part: { text?: string }) => part.text ?? "").join("\n");
+    expect(sent).not.toContain("my dog is called Bruno");
+  });
+
+  it("drops the oldest messages when the replay budget is exceeded", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.OMB_HISTORY_MAX_CHARS = "40";
+    try {
+      await instance.adapter.sendTurn({
+        threadId: "t-budget",
+        text: "go on",
+        transcript: [
+          { role: "user", text: "x".repeat(200) },
+          { role: "assistant", text: "the tail that still fits" },
+        ],
+      });
+      await recorder.until((e) => e.type === "turn.completed");
+    } finally {
+      delete process.env.OMB_HISTORY_MAX_CHARS;
+    }
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    const turnStart = calls.find((c: { method: string }) => c.method === "turn/start");
+    const sent = turnStart.params.input.map((part: { text?: string }) => part.text ?? "").join("\n");
+    expect(sent).toContain("the tail that still fits");
+    expect(sent).not.toContain("x".repeat(200));
+    expect(sent).toContain("1 oldest message(s) omitted");
+  });
+
   it("surfaces an approval request and forwards the user's decision", async () => {
     await create({ mode: "approval" });
     const dump = join(scratch, "dump.json");
