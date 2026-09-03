@@ -1,7 +1,7 @@
 // multibot (H5): the takeover lease. One computer for the whole installation
 // means one input owner, so the lease is global. Time is injected so the expiry
 // path is tested for real rather than slept through.
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { LEASE_MS, acquire, acquireAgent, agentMayAct, control, release, releaseAgent, resetAgentQueue } from "./computer-control.ts";
 
@@ -59,7 +59,18 @@ describe("agentMayAct", () => {
 });
 
 describe("shared computer turn queue", () => {
-  it("hands desktop to queued bots in FIFO order", async () => {
+  afterEach(() => { delete process.env.OMB_MAX_PARALLEL_TURNS; resetAgentQueue(); });
+
+  it("a second bot does NOT wait for the first one to finish", async () => {
+    await acquireAgent("alpha");
+    let betaStarted = false;
+    await acquireAgent("beta").then(() => { betaStarted = true; });
+    expect(betaStarted).toBe(true);
+    expect(control().agentQueue).toBeUndefined();
+  });
+
+  it("queues in FIFO order only above OMB_MAX_PARALLEL_TURNS", async () => {
+    process.env.OMB_MAX_PARALLEL_TURNS = "1";
     await acquireAgent("alpha");
     let betaStarted = false;
     const beta = acquireAgent("beta").then(() => { betaStarted = true; });

@@ -258,6 +258,29 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv).not.toContain("--session-id");
   });
 
+  // multibot: sesja bez kursora nie zna rozmowy — harness dokłada ją z dysku.
+  it("replays the stored thread history into a session started without --resume", async () => {
+    await create();
+    const dump = join(scratch, "replay.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-replay",
+      text: "what is my dog called?",
+      transcript: [
+        { role: "user", text: "my dog is called Bruno" },
+        { role: "assistant", text: "noted, Bruno it is" },
+      ],
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).toContain("--session-id");
+    expect(seen.prompt.message.content).toContain("User: my dog is called Bruno");
+    expect(seen.prompt.message.content).toContain("You: noted, Bruno it is");
+    expect(seen.prompt.message.content).toContain("what is my dog called?");
+  });
+
   it("rejects a second turn while one is in flight", async () => {
     await create("hang");
     await instance.adapter.sendTurn({ threadId: "t-busy", text: "one" });

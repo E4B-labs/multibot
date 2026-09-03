@@ -12,7 +12,9 @@
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
 //                   argv shape (agent/stdio flags) and env hygiene
 //   FAKE_ACP_PROMPT_DUMP  path to append every received session/prompt as a
-//                   JSON line — lets tests pin what text actually reached the CLI
+//                   JSON line ({mode, at, prompt}) — lets tests pin what text
+//                   actually reached the CLI and when
+//   FAKE_ACP_TURN_MS  how long the `busy` mode's turn runs (default 5000)
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
@@ -148,7 +150,10 @@ function handle(msg: any) {
       // multibot: dowód dla testów, CO fake dostało w prompcie — drivery CLI
       // nie czytają pola `transcript`, więc prompt to jedyny kanał treści.
       if (process.env.FAKE_ACP_PROMPT_DUMP) {
-        appendFileSync(process.env.FAKE_ACP_PROMPT_DUMP, `${JSON.stringify({ mode, prompt: msg.params?.prompt ?? null })}\n`);
+        appendFileSync(
+          process.env.FAKE_ACP_PROMPT_DUMP,
+          `${JSON.stringify({ mode, at: Date.now(), prompt: msg.params?.prompt ?? null })}\n`,
+        );
       }
       const complete = () =>
         result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } });
@@ -178,7 +183,9 @@ function handle(msg: any) {
         const chunk = (text: string) =>
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text } } } });
         chunk("main turn still running");
-        setTimeout(complete, 5_000);
+        // FAKE_ACP_TURN_MS: ile tura ma trwać. Testy równoległości potrzebują
+        // tury krótszej niż domyślne pięć sekund, ale wciąż mierzalnej.
+        setTimeout(complete, Number(process.env.FAKE_ACP_TURN_MS) || 5_000);
         return;
       }
       if (mode === "room") {

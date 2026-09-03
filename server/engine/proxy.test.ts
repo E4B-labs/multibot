@@ -536,5 +536,8 @@ describe("stan floty dociera do silnika", () => {
     expect(chat.message).toContain("czesc");
     // bot nie dostaje wpisu o samym sobie
     expect(chat.message.split("\n").filter((l) => l.includes(bot.id))).toHaveLength(0);
+    // multibot: spis połączeń tej tury jedzie tą samą drogą i z tego samego
+    // powodu — bez niego bot silnika odpowiadał, jakby nie miał żadnych narzędzi.
+    expect(chat.message).toContain("# Your connections and tools");
   });
 });

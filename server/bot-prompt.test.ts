@@ -153,11 +153,43 @@ describe("botSystemPrompt", () => {
     expect(currentTimeLine(now, "Nowhere/Nothing")).toContain(host);
   });
 
+  // multibot: "czy jesteś podłączony?" — bot odpowiadał jak agent bez narzędzi,
+  // bo prompt nigdzie nie mówił wprost, CO jest zamontowane w tej turze.
+  it("wylicza połączenia tej tury i każe z nich odpowiadać na pytanie o podłączenie", () => {
+    const text = prompt(ALL);
+    expect(text).toContain("# Your connections and tools");
+    expect(text).toContain("You are Ola, working in the user's MultiBot workspace.");
+    expect(text).toContain("You ARE connected. Mounted for you in THIS turn:");
+    expect(text).toContain("- mcp__computer: screenshot, navigate");
+    expect(text).toContain("- agents: list_bots");
+    expect(text).toContain("- composio:");
+    expect(text).toContain("Never claim you have no tools, no computer and no connections");
+    // spis siedzi PRZED opisem jak używać narzędzi
+    expect(text.indexOf("# Your connections and tools")).toBeLessThan(text.indexOf("# What you have"));
+  });
+
+  it("spis połączeń wymienia tylko to, co naprawdę zamontowane", () => {
+    const noComputer = prompt({ agents: { command: "node" } });
+    expect(noComputer).toContain("- agents: list_bots");
+    expect(noComputer).not.toContain("mcp__computer");
+    expect(noComputer).not.toContain("- composio:");
+    const noAgents = prompt({ localComputer: { command: "py" } });
+    expect(noAgents).toContain("- mcp__computer: screenshot, navigate");
+    expect(noAgents).not.toContain("- agents:");
+    const nothing = prompt({});
+    expect(nothing).toContain("Nothing is mounted for you in THIS turn");
+    expect(nothing).not.toContain("You ARE connected");
+  });
+
   it("routine halucynacja zablokowana — tylko create_routine, zero cloud", () => {
     const text = prompt(ALL);
     expect(text).toContain("create_routine");
     expect(text).toContain("never call ToolSearch, /schedule");
     expect(text).toContain("Routines are local MultiBot routines and persist on this server");
     expect(text).toContain("Do not use provider-private memory, external cloud schedules");
+    // multibot: zmiana zdania = update/delete istniejącej rutyny, nie druga obok
+    expect(text).toContain("do NOT create a second routine");
+    expect(text).toContain("`update_routine`");
+    expect(text).toContain("`delete_routine`");
   });
 });

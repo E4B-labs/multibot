@@ -32,6 +32,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
+import { historyBlock } from "./history.ts";
 
 const DRIVER_KIND = "claudeAgent";
 
@@ -314,6 +315,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       child: ReturnType<typeof spawn>;
       signature: string;
       sessionId: string | null;
+      /** multibot: proces wstał BEZ `--resume`, więc nie zna rozmowy — pierwsza
+       *  prawdziwa tura tej sesji dostaje historię wątku z dysku harnessu.
+       *  Osobne pole, nie zmienna lokalna, bo rozgrzewka (`warmOnly`) stawia
+       *  proces bez tury i to następna tura musi tę historię dowieźć. */
+      needsReplay: boolean;
       broker?: Broker;
       current?: Turn;
       buffer: string;
@@ -473,7 +479,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           cwd: turn.cwd ?? homedir(), env, stdio: ["pipe", "pipe", "pipe"],
           windowsVerbatimArguments: cli.windowsVerbatimArguments, detached: true,
         });
-        const fresh: Worker = { child, signature, sessionId, buffer: "", stderr: "", system: turn.system ?? "", lastUsed: ++useSeq };
+        const fresh: Worker = { child, signature, sessionId, needsReplay: resume === null, buffer: "", stderr: "", system: turn.system ?? "", lastUsed: ++useSeq };
         workers.set(threadId, fresh);
         return fresh;
       };
@@ -698,9 +704,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       // Keep stdin open: Claude Code accepts multiple stream-json user frames.
       const nativeImages = (turn.attachments ?? []).filter((file) => /^image\/(?:png|jpeg|gif|webp)$/i.test(file.mime));
-      const promptText = contextUpdate
+      const turnText = contextUpdate
         ? `[MultiBot] Updated workspace context — this replaces the context you were given at session start; where they differ, this one wins:\n${contextUpdate}\n\n${turn.text}`
         : turn.text;
+      // Sesja bez `--resume` nie zna rozmowy — dokładamy ją RAZ, z dysku.
+      const replay = worker!.needsReplay ? historyBlock(turn.transcript) : "";
+      worker!.needsReplay = false;
+      const promptText = replay ? `${replay}\n\n${turnText}` : turnText;
       const content = nativeImages.length
         ? [
             { type: "text", text: promptText },
