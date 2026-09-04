@@ -93,28 +93,19 @@ export const MAUS_MOTIONS = [
 
 export type MausMotion = "none" | (typeof MAUS_MOTIONS)[number];
 
-export function busyMascotMotion(botId: string): { state: MausState; motion: MausMotion } {
-  let hash = 0;
-  for (const char of botId) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  return (Math.abs(hash) % 2) === 0
-    ? { state: "sending", motion: "sending" }
-    : { state: "thinking", motion: "thinking-dots" };
-}
-
 /**
- * Awatar bota: bot, ktory nie pracuje, stoi calkiem nieruchomo
- * (neutralny stan "idle", zero beatow, `animated:false` -> `paused` w
- * CursorAvatar). Animacja tylko na czas `busy`.
+ * Awatar bota poza paskiem nad composerem: ZAWSZE nieruchomy — neutralny stan
+ * "idle", zero beatow, `animated:false` -> `paused` w CursorAvatar. Takze gdy
+ * bot pracuje.
  *
- * Mieszkalo w Sidebar.tsx; naglowek czatu trzyma sie tej samej zasady,
- * wiec helper stoi tu, a oba miejsca go importuja.
+ * Jeden animowany bot na cala aplikacje, ten na pasku nad composerem; o jego
+ * stanie decyduje `stripMascotState`. Pasek boczny, naglowek czatu, wiersz
+ * grupy i karta hovera wolaja ten helper i stoja.
  */
 export function sidebarAvatarProps(
-  bot: Bot,
+  _bot: Bot,
 ): { state: MausState; motion: MausMotion; animated: boolean; motionKey: number } {
-  if (!bot.busy) return { state: "idle", motion: "none", animated: false, motionKey: 0 };
-  const busy = busyMascotMotion(bot.id);
-  return { state: busy.state, motion: busy.motion, animated: true, motionKey: 1 };
+  return { state: "idle", motion: "none", animated: false, motionKey: 0 };
 }
 
 /**

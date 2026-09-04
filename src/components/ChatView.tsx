@@ -16,7 +16,7 @@ import { formatPeerEnvelope, parsePeerEnvelope } from "@/lib/peerEnvelope";
 import { PeerBadge } from "./PeerBadge";
 import { formatChatSessionTime, shouldStartChatSession } from "@/lib/chatSessions";
 import { MausAvatar } from "./Avatar";
-import { busyMascotMotion, sidebarAvatarProps, stateForBot } from "@/lib/mascot";
+import { sidebarAvatarProps, stateForBot } from "@/lib/mascot";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { OptionCard } from "./OptionCard";
 import { ComputerHandoffCard } from "./ComputerHandoffCard";
@@ -34,7 +34,6 @@ import { cn } from "@/lib/cn";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { authFetch } from "@/lib/auth";
-import { usePeerChat } from "./PeerChatIndicator";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
  * bury the conversation; bots get full markdown. */
@@ -351,27 +350,10 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   const streaming = state.streaming[bot.threadId];
   const provisioning = state.provisioning[bot.id];
-  const peerChat = usePeerChat(bot.id);
-  const botIsThinking = peerChat
-    ? peerChat.activeBotId === bot.id || (
-        peerChat.activeBotId === undefined && bot.busy === true && peerChat.peerBot.busy !== true
-      )
-    : bot.busy === true;
-  const busyMotion = botIsThinking
-    ? peerChat
-      ? { state: "thinking" as const, motion: "thinking-dots" as const }
-      : busyMascotMotion(bot.id)
-    : null;
   // multibot: awatar w naglowku czatu trzyma sie tej samej zasady co pasek
-  // boczny — bot, ktory nie pracuje, stoi nieruchomo (`animated:false`), bez
-  // jednorazowych beatow z magazynu (mascotMotion). W rozmowie bot-bot o pracy
-  // decyduje `botIsThinking`, nie samo `bot.busy`, wiec tam liczymy to samo
-  // z `busyMotion`.
-  const headerAvatar = peerChat
-    ? busyMotion
-      ? { state: busyMotion.state, motion: busyMotion.motion, animated: true, motionKey: 1 }
-      : { state: "idle" as const, motion: "none" as const, animated: false, motionKey: 0 }
-    : sidebarAvatarProps(bot);
+  // boczny i wiersz grupy — stoi nieruchomo ZAWSZE, takze gdy bot pracuje.
+  // Jedyny animowany bot w aplikacji siedzi na pasku nad composerem.
+  const headerAvatar = sidebarAvatarProps(bot);
 
   // Scroll pinning: follow the bottom while the user hasn't scrolled away.
   // Follow breaks ONLY on an upward user gesture (wheel/touch), never on

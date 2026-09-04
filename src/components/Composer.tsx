@@ -495,7 +495,7 @@ export function Composer({ bot }: { bot: Bot }) {
         label: botDisplayName(peer, polish ? "pl" : "en"),
         hint: peer.id === bot.id ? (polish ? "Bieżący" : "Current") : (polish ? "Przełącz" : "Switch to bot"),
         kind: "agent" as const,
-        icon: <MausAvatar color={peer.color} avatarUrl={peer.avatarUrl} shape={peer.mascotShape} state={normalizeState(peer.mascotExpression) ?? "happy"} size={20} />,
+        icon: <MausAvatar color={peer.color} avatarUrl={peer.avatarUrl} shape={peer.mascotShape} state={normalizeState(peer.mascotExpression) ?? "happy"} size={20} animated={false} />,
         run: () => dispatch({ type: "select", id: peer.id }),
       })),
       ...(slashRoutines?.rows ?? []).map((routine) => ({
@@ -843,7 +843,7 @@ export function Composer({ bot }: { bot: Bot }) {
               >
                 {row.type === "bot" ? (
                   <>
-                    <MausAvatar color={row.peer.color} shape={row.peer.mascotShape} state={normalizeState(row.peer.mascotExpression) ?? "happy"} size={24} />
+                    <MausAvatar color={row.peer.color} shape={row.peer.mascotShape} state={normalizeState(row.peer.mascotExpression) ?? "happy"} size={24} animated={false} />
                     <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{botDisplayName(row.peer, polish ? "pl" : "en")}</span>
                     <span className="shrink-0 text-xs text-ink-secondary">{polish ? "Bot" : "Agent"}</span>
                   </>
