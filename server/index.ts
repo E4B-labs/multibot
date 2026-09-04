@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { botSystemPrompt, connectionsBlock } from "./bot-prompt.ts";
+import { botSystemPrompt, computerPlaybook, connectionsBlock } from "./bot-prompt.ts";
 // multibot: autoweryfikacja — filtr na prośbach o zgodę, patrz server/auto-verify.ts.
 import { decideAction, normalizeAutoVerify, type AutoVerifyState } from "./auto-verify.ts";
 import { fleetStatusBlock } from "./fleet-status.ts";
@@ -2071,6 +2071,11 @@ opts?: {
           // bot tego silnika inaczej NIGDY nie zobaczyłby, co ma zamontowane.
           // Pozostałe drivery mają ten blok w prompcie systemowym.
           instance.driverKind === "slafy" ? connectionsBlock(bot, integrations) : "",
+          // multibot: playbook komputera tą samą drogą i z tego samego powodu.
+          // Sam blok jest warunkowy na `integrations.localComputer`, więc bot
+          // bez zamontowanego komputera dostaje pusty string (i nic się nie
+          // dokleja) — tak jak w prompcie systemowym pozostałych driverów.
+          instance.driverKind === "slafy" ? computerPlaybook(integrations) : "",
           text,
           turnAttachments.length ? `Attached files:\n${turnAttachments.map((file) => `- ${file.name}: ${file.path}`).join("\n")}` : "",
         ]

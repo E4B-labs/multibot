@@ -7,7 +7,7 @@
 // Listy są statyczne — mirror z dwóch miejsc, żeby nie importować spawnerów
 // (agents-proxy.ts to skrypt z runem, nie moduł):
 //   - AGENTS_MCP_TOOLS  = TOOLS w server/drivers/agents-proxy.ts (28 narzędzi)
-//   - COMPUTER_MCP_TOOLS = @mcp.tool() w engine/server/computer_mcp.py (10)
+//   - COMPUTER_MCP_TOOLS = @mcp.tool() w engine/server/computer_mcp.py (12)
 // Staleness pilnuje test, który czyta oba źródła z dysku (tak samo, jak test
 // pilnuje CURSOR_COLORS).
 
@@ -16,11 +16,13 @@ export const COMPUTER_MCP_TOOLS = [
   "screenshot",
   "navigate",
   "read_page",
+  "find",
   "click",
   "move",
   "type_text",
   "key",
   "scroll",
+  "actions",
   "status",
   "computer_exec",
 ] as const;
@@ -121,7 +123,13 @@ export function turnToolsText(integrations: TurnIntegrationsLike | undefined): s
     // ale każdy ma do niego pełny dostęp. Opis musi być obok listy narzędzi, bo
     // sama lista nie mówi do czego służy.
     lines.push(
-      `Your computer this turn — THIS IS YOUR COMPUTER: one persistent Linux desktop per workspace, shared by all bots but fully yours to use right now (browser, terminal and files are one environment). Computer MCP tools this turn (${COMPUTER_MCP_TOOLS.length}): ${COMPUTER_MCP_TOOLS.join(", ")} — browser: navigate/screenshot/read_page/click/move/type_text/key/scroll/status, terminal: computer_exec (runs INSIDE your computer, same filesystem the browser sees). Use them WITHOUT asking — this is your machine; never say you have no browser or terminal when these tools are listed.`,
+      `Your computer this turn — THIS IS YOUR COMPUTER: one persistent Linux desktop per workspace, shared by all bots but fully yours to use right now (browser, terminal and files are one environment). Computer MCP tools this turn (${COMPUTER_MCP_TOOLS.length}): ${COMPUTER_MCP_TOOLS.join(", ")} — browser: navigate/read_page/find/click/type_text/key/scroll/actions/move/screenshot/status, terminal: computer_exec, which runs a shell command INSIDE it (same filesystem and downloads the browser sees). Use them WITHOUT asking — this is your machine; never say you have no browser or terminal when these tools are listed.`,
+    );
+    // Kolejność pracy jest tu, a nie w opisach narzędzi, bo model wybiera ścieżkę
+    // ZANIM przeczyta pierwszy docstring. Zmierzone: zrzut = ~0,4 s i ~1,7 tys.
+    // tokenów obrazu, lista elementów = 3–6 ms i sam tekst.
+    lines.push(
+      "How to drive the computer cheaply: start with `read_page` (or `find`) — it returns a tree of interactive elements with refs like `[e12] button \"Log in\"`, and `click`/`type_text` take those refs, so you rarely need pixels. `screenshot` is the most expensive tool you have (~0.4 s and ~1.5-2k image tokens): take one only when you need the LAYOUT, or on a page with no text (PDF, canvas, map). Chain steps with `actions` instead of calling click/type_text/key one at a time — it runs them in one go and returns a fresh page snapshot; put any step that changes the page last, because the batch stops there. Anything you could do in a shell — download a file, check a URL, list a directory — is cheaper with `computer_exec` than by clicking.",
     );
   }
   if (integrations.web || integrations.webNative || integrations.agents) {
