@@ -187,7 +187,6 @@ describe("botSystemPrompt", () => {
   it("z komputerem dostaje playbook użycia komputera", () => {
     const text = prompt(ALL);
     expect(text).toContain("# Using your computer well");
-    expect(text).toContain("never click a spot you have not just seen");
     expect(text).toContain("at least three genuinely different attempts");
     expect(text).toContain("The same click three times is a loop");
     // korekta: komputer to cała maszyna, nie sama przeglądarka
@@ -202,6 +201,34 @@ describe("botSystemPrompt", () => {
     // playbook siedzi po opisie narzędzi, przed regułami pracy
     expect(text.indexOf("# Using your computer well")).toBeGreaterThan(text.indexOf("# What you have"));
     expect(text.indexOf("# Using your computer well")).toBeLessThan(text.indexOf("# How you work"));
+  });
+
+  // Narzędzia komputera dostały refy (`read_page` zwraca drzewo elementów z
+  // numerami), `find` i `actions` (kilka kroków jednym wywołaniem). Playbook,
+  // który dalej każe otwierać stronę zrzutem, płaci ~40× więcej tokenów za to
+  // samo kliknięcie i celuje w piksele zamiast w element.
+  it("playbook prowadzi przez drzewo elementów i refy, nie przez zrzut", () => {
+    const text = prompt(ALL);
+    const playbook = text.slice(text.indexOf("# Using your computer well"), text.indexOf("# How you work"));
+    expect(playbook).toContain("Start any browser task with `read_page`");
+    expect(playbook).toContain("`find`");
+    expect(playbook).toContain("Act by ref");
+    expect(playbook).toContain("`actions`");
+    expect(playbook).toContain("Refs die when the document changes");
+    // zrzut zostaje — ale jako ostateczność (canvas, pdf, wygląd), nie jako wejście
+    expect(playbook).toContain("`screenshot` is the expensive tool and the last resort");
+    expect(playbook).not.toContain("Start any browser task with `screenshot`");
+    expect(playbook).not.toContain("screenshotting as you go");
+  });
+
+  // Spis narzędzi generuje `connectionsBlock` z tego, co harness zamontował.
+  // Druga, wpisana ręcznie lista rozjeżdża się z nim po cichu (find/actions).
+  it("prompt nie wylicza narzędzi komputera drugi raz z ręki", () => {
+    const text = prompt(ALL);
+    expect(text).not.toContain("navigate, screenshot, read_page, click, move, type_text, key, scroll, status");
+    expect(text).not.toContain("Take a screenshot or read_page first");
+    // lista z rzeczywistych narzędzi tury zostaje
+    expect(text).toContain("- mcp__computer: screenshot, navigate");
   });
 
   // Produkcja to Termux na Androidzie bez roota, dev bywa Debianem w kontenerze

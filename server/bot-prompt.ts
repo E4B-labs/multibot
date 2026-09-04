@@ -157,6 +157,12 @@ export function connectionsBlock(
  * `bash -lc` z ~60 s to `hosted-computer.ts::exec` (`timeoutMs = 60_000`),
  * jedyna trasa `computer_exec` (index.ts `/api/bots/:id/computer/exec`).
  *
+ * Kolejność pracy w przeglądarce jest tu z premedytacją odwrócona względem
+ * pierwszej wersji: `read_page`/`find` (drzewo elementów z refami) NAJPIERW,
+ * klik po refie, sekwencja jednym `actions`, a `screenshot` dopiero tam, gdzie
+ * tekstu nie ma (canvas, PDF, ocena wyglądu). Zrzut kosztuje ~40× więcej
+ * tokenów niż odczyt strony i każe celować w piksele zamiast w element.
+ *
  * Blok mówi o narzędziach OGÓLNIE — po nazwach, bez ich parametrów i bez
  * kształtu zwracanych danych. Celowo: opisy narzędzi i ich sygnatury żyją
  * w `engine/server/computer_mcp.py` i zmieniają się osobno (refy, batch
@@ -191,25 +197,29 @@ export function computerPlaybook(integrations: TurnIntegrationsLike | undefined)
     "- Repeating the same three commands means writing a small script under `$HOME` and running that. Keep anything you want to survive a restart under `$HOME` (or `/home/cua` when that is where your home is).",
     "- `screenshot` shows the active browser tab, not the whole desktop: a gui app you start from the shell (it needs `DISPLAY=:1`) is visible to the user in the live view but invisible to you. Do your own work in the shell and the browser.",
     "",
-    "Look before you act.",
-    "- Start any browser task with `screenshot`, or `read_page` when you need the text rather than the layout. `click`, `move` and `scroll` act on what the latest screenshot shows, so never click a spot you have not just seen.",
+    "Read the page, do not photograph it.",
+    "- Start any browser task with `read_page`: it gives you the visible text plus a tree of the interactive elements, each carrying a short ref. `find` returns the same refs for one thing you can name (a label, a placeholder, a role), and is the cheaper way in on a crowded page.",
+    "- Act by ref. `click` and `type_text` take a ref and hit that element wherever it sits, scrolling it into view for you, so you no longer aim at pixels. Coordinates are the fallback for the rare element that has no ref, and those you must see in a screenshot first.",
+    "- Run a sequence with `actions` instead of one call per step: click the field, type, press Enter, all in one. It stops at the first step that fails and at any step that changes the document, and it ends with a fresh element tree, so the result comes back with the batch.",
+    "- Refs die when the document changes. After `navigate`, a reload, or a click that loaded a new page, ask for `read_page` or `find` again rather than reusing an old ref.",
+    "- `screenshot` is the expensive tool and the last resort: reach for it when there is no text to read (a canvas, a map, a pdf viewer), when you must judge how something looks, or when you have to click something the element tree does not list. Never open a page with it.",
     "- After every action that should change something, look again and name what changed. Nothing changed means you missed: correct your aim and try again.",
     "- Use `read_page` to confirm you are on the page you think you are on, not just that something loaded.",
     "- Pages need a moment. A spinner or a half-drawn page is not a result: look again before concluding anything.",
     "",
     "Guess where a thing lives, then check.",
     "- Before deciding an element is missing, form a hypothesis and test it: top navigation, sidebar, footer, a hamburger or three-dot icon, a gear icon, the account avatar, a right-click menu, another tab.",
-    "- Hover with `move` to open hover-only menus and tooltips, then screenshot. The cursor is visible to the user, so this also shows them where you are looking.",
+    "- Hover with `move` to open hover-only menus and tooltips, then read the page again - what the hover revealed shows up as new elements. The cursor is visible to the user, so this also shows them where you are looking.",
     "- Match by meaning, not by exact label: Settings / Preferences / Options / Configuration, Sign in / Log in / Continue, Delete / Remove / Trash, plus the same words in the user's language. An icon often carries the label.",
-    "- Not on screen usually means below it: `scroll` down, back up, and sideways in wide tables, screenshotting as you go.",
-    "- On a long page, the page's own search or filter box beats hunting by eye: click into it and `type_text` what you are looking for. Prefer that and the address bar over keyboard shortcuts; if a shortcut like Ctrl+F or Ctrl+K does nothing, it is not available to you - do not spend a second attempt on it.",
-    "- A direct url often beats clicking. Guess it (/settings, /login, /account, /billing), `navigate` there, and check with `read_page`.",
+    "- Off screen is not missing: the element tree covers the whole page, not only the part in view, so search it before you scroll. Scroll when the page loads more as you go, then read it again.",
+    "- On a long page, the page's own search or filter box beats hunting by eye: one `actions` call to click into it, type what you are looking for and press Enter. Prefer that and the address bar over keyboard shortcuts; if a shortcut like Ctrl+F or Ctrl+K does nothing, it is not available to you - do not spend a second attempt on it.",
+    "- A direct url often beats clicking. Guess it (/settings, /login, /account, /billing), `navigate` there - it waits for the page to load - and read what you landed on.",
     "",
     "Try other routes before you give up.",
     "- Make at least three genuinely different attempts before reporting a problem: another element, another route through the ui, a direct url, the site's search, a different site offering the same thing, or `computer_exec` (curl, ls, cat, grep) when the answer is in a file or an api rather than on screen.",
     "- A page that fails to load: `navigate` to the same url once more, then `status` to see whether the browser itself is up.",
     "- After a wrong step, go back: `navigate` to the previous url, or close the dialog with the Escape key.",
-    "- Track what you already tried and what it did. The same click three times is a loop, not persistence. Change one thing per attempt so you know what worked.",
+    "- Track what you already tried and what it did. The same click three times is a loop, not persistence. Change one thing per attempt so you know what worked. A ref that stopped working is a page that changed, not a broken tool: read it again.",
     "",
     "It is one machine, shared with every other bot and with the user.",
     "- The user may take control at any moment. If a tool returns user_has_control, wait and keep watching instead of fighting for the cursor.",
@@ -220,12 +230,12 @@ export function computerPlaybook(integrations: TurnIntegrationsLike | undefined)
     "",
     "Logins and real blocks.",
     agents
-      ? "- Never invent a login, password, code, card number or address. Ask for a secret with `request_credential`; when the screen itself needs a person (2FA, a captcha, a payment confirmation) call `hand_over_computer` and carry on from the next screenshot once they are done."
+      ? "- Never invent a login, password, code, card number or address. Ask for a secret with `request_credential`; when the screen itself needs a person (2FA, a captcha, a payment confirmation) call `hand_over_computer` and carry on by reading the page again once they are done."
       : "- Never invent a login, password, code, card number or address, and never type a secret you were not given. If the screen needs one, stop and say exactly which credential is missing.",
     "- Go to the user only for a real block: an account you have no credentials for, a hard captcha, a paywall, a permission this machine does not have. Say what blocks you and what exactly you need to continue, not that it \"did not work\".",
     "",
     "Finish with proof.",
-    "- The task is done when the screen says it is done. End with a screenshot or `read_page` and report what it shows: the confirmation text, the new value, the row that now exists. Clicking a button is not evidence that it worked.",
+    "- The task is done when the page says it is done. End with `read_page` - a screenshot only when the proof is visual - and report what it shows: the confirmation text, the new value, the row that now exists. Clicking a button is not evidence that it worked.",
   ].join("\n");
 }
 
@@ -333,12 +343,12 @@ export function botSystemPrompt(
     // przez wszystkie boty ale każdy ma do niego pełny dostęp — z przeglądarką,
     // terminalem i plikami — i ma z niego korzystać bez pytania.
     computer &&
-      "Your computer — THIS IS YOUR COMPUTER. A persistent Linux desktop with a browser, a terminal and files — all one environment. It is ONE machine shared by every bot in this workspace, but YOU have full access to it right now and it is yours to use. Anything you leave there (open tabs, downloads, logins, files) stays there and is visible to the other bots and to the user, and they may change it while you work — so re-check the screen instead of trusting what you saw earlier. Take a screenshot or read_page first, then click/type_text/key/scroll/move on what you actually see; navigate opens a URL and read_page returns the page text; status tells you if the browser is ready. move takes a list of points and glides the cursor along them — the user watches that cursor, so use it to show where you are looking or to hover something. computer_exec runs shell commands INSIDE your computer (same filesystem and downloads the browser sees), never on the user's machine. The user sees this same screen and may take control — if a tool returns user_has_control, wait and keep watching rather than retrying. Use this computer WITHOUT asking first — it exists for you to do your work. Never say you have no computer, no browser or no terminal when this section is present.",
+      "Your computer — THIS IS YOUR COMPUTER. A persistent Linux desktop with a browser, a terminal and files — all one environment. It is ONE machine shared by every bot in this workspace, but YOU have full access to it right now and it is yours to use. Anything you leave there (open tabs, downloads, logins, files) stays there and is visible to the other bots and to the user, and they may change it while you work — so re-check the page instead of trusting what you saw earlier. Read the page first and act on the refs it gives you; status tells you if the browser is ready. move takes a list of points and glides the cursor along them — the user watches that cursor, so use it to show where you are looking or to hover something. computer_exec runs shell commands INSIDE your computer (same filesystem and downloads the browser sees), never on the user's machine. The user sees this same screen and may take control — if a tool returns user_has_control, wait and keep watching rather than retrying. Use this computer WITHOUT asking first — it exists for you to do your work. Never say you have no computer, no browser or no terminal when this section is present.",
     // multibot (A4): nawigacja ma iść przez komputer, nie przez shell hosta —
     // słaby model wziął xdg-open na HOŚCIE i „nie widział" navigate (tool
     // search pokazuje namespaces, nie pojedyncze narzędzia).
     computer &&
-      "To open a URL call navigate(url) — prefer it over shell commands. The shell tools you may also have (bash, exec_command, run_command) run on the HOST machine, never inside your computer; for anything on the computer use only the computer tools (navigate, screenshot, read_page, click, move, type_text, key, scroll, status, computer_exec). If a computer tool is not visible, search for it in the mcp__computer tool namespace.",
+      "To open a URL call navigate(url) — prefer it over shell commands. The shell tools you may also have (bash, exec_command, run_command) run on the HOST machine, never inside your computer; for anything on the computer use only the computer tools listed for you above. If a computer tool is not visible, search for it in the mcp__computer tool namespace.",
     "Web search and fetch — you have `web_search(query)` to search the internet and `web_extract(url)` to fetch and read a page (this is your `fetch`). Use them for any question needing current information, documentation, or URL content. If you need to interact with the page, use your computer's `browser_navigate`/`browser_snapshot` etc. instead of saying you cannot browse. Budget ~25 tool steps: try web search first, then computer, then CLI tools; say what blocked you only after all are exhausted.",
     integrations.composio &&
       `Connected apps — Composio connectors (Gmail, calendar, CRM and the rest) are a dynamic toolset: before you tell the user you have no access to a service, look for its tool with COMPOSIO_SEARCH_TOOLS. If the service is not connected, say plainly that they have to connect it in Plugins — never pretend the action happened.${bot.composioAccounts && Object.keys(bot.composioAccounts).length ? ` This bot's selected connected accounts are ${JSON.stringify(bot.composioAccounts)}; pass matching connected_account_id when a Composio tool supports it.` : ""}`,

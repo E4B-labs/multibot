@@ -121,7 +121,7 @@ export function turnToolsText(integrations: TurnIntegrationsLike | undefined): s
     // ale każdy ma do niego pełny dostęp. Opis musi być obok listy narzędzi, bo
     // sama lista nie mówi do czego służy.
     lines.push(
-      `Your computer this turn — THIS IS YOUR COMPUTER: one persistent Linux desktop per workspace, shared by all bots but fully yours to use right now (browser, terminal and files are one environment). Computer MCP tools this turn (${COMPUTER_MCP_TOOLS.length}): ${COMPUTER_MCP_TOOLS.join(", ")} — browser: navigate/screenshot/read_page/click/move/type_text/key/scroll/status, terminal: computer_exec (runs INSIDE your computer, same filesystem the browser sees). Use them WITHOUT asking — this is your machine; never say you have no browser or terminal when these tools are listed.`,
+      `Your computer this turn — THIS IS YOUR COMPUTER: one persistent Linux desktop per workspace, shared by all bots but fully yours to use right now (browser, terminal and files are one environment). Computer MCP tools this turn (${COMPUTER_MCP_TOOLS.length}): ${COMPUTER_MCP_TOOLS.join(", ")} — all of them drive that computer's browser, except computer_exec, which runs a shell command INSIDE it (same filesystem and downloads the browser sees). Use them WITHOUT asking — this is your machine; never say you have no browser or terminal when these tools are listed.`,
     );
   }
   if (integrations.web || integrations.webNative || integrations.agents) {
