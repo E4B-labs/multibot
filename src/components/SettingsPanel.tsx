@@ -162,7 +162,6 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
   const activeState = stateForBot(bot);
-  const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
 
   const handleAvatarClick = () => setAppearanceMode((m) => (m === "closed" ? "bot" : "closed"));
 
@@ -259,8 +258,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               avatarUrl={bot.avatarUrl}
               state={activeState}
               size={72}
-              motion={mascotMotion?.kind ?? "none"}
-              motionKey={mascotMotion?.nonce ?? 0}
+              animated={false}
             />
             <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100">
               <Pencil size={24} strokeWidth={2.2} />

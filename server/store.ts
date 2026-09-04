@@ -18,7 +18,8 @@ export type MausColor =
   | "pink"
   | "yellow"
   | "teal"
-  | "coral";
+  | "coral"
+  | "black";
 
 /**
  * The face a bot rests on, as one of the engine's state names. Kept as a plain
@@ -171,6 +172,8 @@ export function sortMessages<T extends { id: string; at: number; order?: number 
   return [...messages].sort((a, b) => a.at - b.at || (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id));
 }
 
+/** Rotacja kolorow dla nowych botow — czarnego celowo nie ma, dostaje go
+ *  tylko bot, ktoremu ktos go ustawi. */
 const COLORS: MausColor[] = [
   "green",
   "blue",
@@ -183,6 +186,10 @@ const COLORS: MausColor[] = [
   "teal",
   "coral",
 ];
+
+/** Kazdy kolor, na ktory wolno ustawic bota. Jedno zrodlo prawdy dla
+ *  `managedBotPatch` (bot zmienia bota) i dla PATCH /api/bots/:id (UI). */
+export const BOT_COLORS: MausColor[] = [...COLORS, "black"];
 
 const MANAGED_MASCOT_SHAPES = new Set([
   "blob", "leaf", "cursor", "circle", "square", "pill", "triangle", "star", "diamond", "folder",
@@ -211,7 +218,7 @@ export function managedBotPatch(input: unknown, options: { temporary?: boolean }
     patch[key] = value[key];
   }
   if (value.color !== undefined) {
-    if (!COLORS.includes(value.color as MausColor)) throw new Error(`color must be one of: ${COLORS.join(", ")}`);
+    if (!BOT_COLORS.includes(value.color as MausColor)) throw new Error(`color must be one of: ${BOT_COLORS.join(", ")}`);
     patch.color = value.color as MausColor;
   }
   if (value.mascotShape !== undefined) {

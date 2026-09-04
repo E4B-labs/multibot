@@ -95,6 +95,10 @@ function mix(hex: string, toward: string, t: number): string {
  * ["#9FE6B5", "#3FAE6E", "#1C7A4C"].
  */
 const gradientFor = (color: MausColor): [string, string, string] => {
+  // Czarny nie znosi tej formuly: rozjasnienie o 55% do bieli daje szarosc,
+  // a przyciemnienie o 42% do czerni — plaska plame. Stad wlasny gradient,
+  // ktory trzyma kontrast na ciemnym tle zamiast go gubic.
+  if (color === "black") return ["#5A5A5A", "#2A2A2A", "#101010"];
   const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };

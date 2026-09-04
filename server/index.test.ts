@@ -247,6 +247,14 @@ describe("harness HTTP API", () => {
       instructions: "Run tests.",
     });
     expect(skill.status).toBe(201);
+    // multibot: skill z panelu zostawia w transkrypcie tę samą pigułkę co skill
+    // napisany narzędziem bota — bez tego powstawał niewidocznie.
+    const withSkill = (await api("GET", "/api/bots")).body.bots.find((b: { id: string }) => b.id === bot.id);
+    expect(
+      withSkill.messages.some((msg: { event?: { type: string; value: string } }) =>
+        msg.event?.type === "skill-created" && msg.event.value === "review",
+      ),
+    ).toBe(true);
     expect((await api("PATCH", `/api/bots/${bot.id}/skills/review`, { enabled: false })).body.enabled).toBe(false);
     expect((await api("GET", `/api/bots/${bot.id}/skills`)).body).toHaveLength(1);
 
@@ -487,6 +495,20 @@ describe("harness HTTP API", () => {
     expect(deleted.status).toBe(200);
     const after = await api("GET", "/api/bots");
     expect(after.body.bots.find((b: { id: string }) => b.id === bot.id)).toBeUndefined();
+  });
+
+  // multibot: kolor spoza allowlisty zapisywal sie cicho, a klient rysowal
+  // takiego bota domyslna zielenia — wygladalo to jak „bot bez koloru".
+  it("rejects an unknown bot colour and accepts black", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+
+    const bad = await api("PATCH", `/api/bots/${bot.id}`, { color: "pink2" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toContain("unknown color");
+
+    const black = await api("PATCH", `/api/bots/${bot.id}`, { color: "black" });
+    expect(black.status).toBe(200);
+    expect(black.body.bot.color).toBe("black");
   });
 
   it("patches a bot section with validation and clearing (multibot port OMB #296)", async () => {

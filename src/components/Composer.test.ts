@@ -1,6 +1,7 @@
 // multibot: paleta "/" — jedyna nietrywialna logika listy to filtr z limitem
 // na kategorię. Bez limitu akcje i skille zjadają całą listę i wtyczki, agenci
 // ani rutyny nigdy się nie pokazują, więc ten test pilnuje właśnie tego.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { fastModeAvailable, reasoningLevels, slashVisible, withCommand, type SlashRow } from "./Composer";
@@ -97,5 +98,31 @@ describe("fastModeAvailable", () => {
     expect(fastModeAvailable("claude", "claude-sonnet-5")).toBe(false);
     expect(fastModeAvailable("slafy", "hermes-agent")).toBe(false);
     expect(fastModeAvailable(undefined, "gpt-5.6-sol")).toBe(false);
+  });
+});
+
+// multibot: „max 1 bot nad composerem". Wcześniej pasek rysował gospodarza PLUS
+// partnera z PeerChatIndicator, a w grupie dokładało się trzecie oczko — trzy
+// maskotki naraz, każda z własną animacją. Testu nie da się postawić na DOM
+// (vitest chodzi w node, repo nie ma jsdom), więc pilnujemy źródła.
+const composer = readFileSync(new URL("./Composer.tsx", import.meta.url), "utf8");
+
+describe("pasek nad composerem", () => {
+  it("ma dokładnie jeden animowany awatar", () => {
+    // Pozostałe MausAvatar w pliku to ikonki wierszy palety „/" — stoją
+    // nieruchomo (bez propa `animated`), więc liczy się właśnie ten prop.
+    expect(composer.match(/^\s*animated\s*$/gm) ?? []).toHaveLength(1);
+    const strip = composer.slice(composer.indexOf("{strip && ("));
+    expect(strip.slice(0, strip.indexOf("</div>")).match(/<MausAvatar/g) ?? []).toHaveLength(1);
+  });
+
+  it("nie renderuje już wskaźnika rozmów bot-bot", () => {
+    expect(composer).not.toContain("PeerChatIndicator");
+  });
+
+  it("stan awatara liczy stripMascotState, nie samo `bot.busy`", () => {
+    expect(composer).toContain("stripMascotState(");
+    expect(composer).toContain("state={strip.state}");
+    expect(composer).toContain("motion={strip.motion}");
   });
 });

@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import { ArrowDown, Bell, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, ScanSearch, Search, Upload, Wand2 } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
-import { SkillPill } from "./SkillPill";
+import { SkillRef } from "./SkillRef";
 import { AttachmentCard } from "./AttachmentCard";
 // multibot: lightbox załączników-obrazków (port z OpenMausBot #436)
 import { AttachmentPreviewDialog } from "./AttachmentPreview";
@@ -16,7 +16,7 @@ import { formatPeerEnvelope, parsePeerEnvelope } from "@/lib/peerEnvelope";
 import { PeerBadge } from "./PeerBadge";
 import { formatChatSessionTime, shouldStartChatSession } from "@/lib/chatSessions";
 import { MausAvatar } from "./Avatar";
-import { busyMascotMotion, sidebarAvatarProps, stateForBot } from "@/lib/mascot";
+import { sidebarAvatarProps, stateForBot } from "@/lib/mascot";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { OptionCard } from "./OptionCard";
 import { ComputerHandoffCard } from "./ComputerHandoffCard";
@@ -34,7 +34,6 @@ import { cn } from "@/lib/cn";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { authFetch } from "@/lib/auth";
-import { usePeerChat } from "./PeerChatIndicator";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
  * bury the conversation; bots get full markdown. */
@@ -229,11 +228,12 @@ function EventPill({ message, polish }: { message: Message; polish: boolean }) {
     : { renamed: "Renamed to", "skill-created": "Created skill", "routine-created": "Created routine", "reminder-created": "Reminder", "goal-progress": "Goal" };
   // multibot: wspólna pigułka zamiast własnego markupu — patrz EventChip.tsx.
   // Rutyna dostaje ikonę zegara, zmiana nazwy zostaje czystym tekstem.
-  // skill-created → centered SkillPill (czarno-amber, klikalny) jak na screenie 561×110
+  // skill-created → wyśrodkowany SkillRef: ta sama nazwa, ten sam kolor i ten
+  // sam popover co skill wspomniany w zdaniu.
   if (message.event.type === "skill-created") {
     return (
       <div className="flex w-full justify-center py-1">
-        <SkillPill name={message.event.value} />
+        <SkillRef name={message.event.value} block />
       </div>
     );
   }
@@ -351,27 +351,10 @@ export function ChatView({ bot }: { bot: Bot }) {
 
   const streaming = state.streaming[bot.threadId];
   const provisioning = state.provisioning[bot.id];
-  const peerChat = usePeerChat(bot.id);
-  const botIsThinking = peerChat
-    ? peerChat.activeBotId === bot.id || (
-        peerChat.activeBotId === undefined && bot.busy === true && peerChat.peerBot.busy !== true
-      )
-    : bot.busy === true;
-  const busyMotion = botIsThinking
-    ? peerChat
-      ? { state: "thinking" as const, motion: "thinking-dots" as const }
-      : busyMascotMotion(bot.id)
-    : null;
   // multibot: awatar w naglowku czatu trzyma sie tej samej zasady co pasek
-  // boczny — bot, ktory nie pracuje, stoi nieruchomo (`animated:false`), bez
-  // jednorazowych beatow z magazynu (mascotMotion). W rozmowie bot-bot o pracy
-  // decyduje `botIsThinking`, nie samo `bot.busy`, wiec tam liczymy to samo
-  // z `busyMotion`.
-  const headerAvatar = peerChat
-    ? busyMotion
-      ? { state: busyMotion.state, motion: busyMotion.motion, animated: true, motionKey: 1 }
-      : { state: "idle" as const, motion: "none" as const, animated: false, motionKey: 0 }
-    : sidebarAvatarProps(bot);
+  // boczny i wiersz grupy — stoi nieruchomo ZAWSZE, takze gdy bot pracuje.
+  // Jedyny animowany bot w aplikacji siedzi na pasku nad composerem.
+  const headerAvatar = sidebarAvatarProps(bot);
 
   // Scroll pinning: follow the bottom while the user hasn't scrolled away.
   // Follow breaks ONLY on an upward user gesture (wheel/touch), never on
@@ -429,13 +412,17 @@ export function ChatView({ bot }: { bot: Bot }) {
     let active = true;
     authFetch(`/api/bots/${bot.id}/skills`)
       .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((skills: Array<{ name?: unknown }>) => {
+      .then((skills: Array<{ name?: unknown; description?: unknown }>) => {
         if (active) dispatch({
-          type: "setSkillNames",
-          names: skills.flatMap((skill) => typeof skill.name === "string" ? [skill.name] : []),
+          type: "setSkills",
+          skills: skills.flatMap((skill) =>
+            typeof skill.name === "string"
+              ? [{ name: skill.name, description: typeof skill.description === "string" ? skill.description : undefined }]
+              : [],
+          ),
         });
       })
-      .catch(() => active && dispatch({ type: "setSkillNames", names: [] }));
+      .catch(() => active && dispatch({ type: "setSkills", skills: [] }));
     return () => { active = false; };
   }, [bot.id, latestSkillEvent, dispatch]);
   useEffect(() => {

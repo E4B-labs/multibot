@@ -57,6 +57,9 @@ export const MAUS_COLOR_NAMES = [
   "yellow",
   "teal",
   "coral",
+  // multibot: czarny jest wybieralny, ale nie wchodzi do rotacji nowych botow
+  // (serwerowe COLORS) — bot dostaje go tylko wtedy, gdy ktos go ustawi.
+  "black",
 ] as const;
 
 export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
@@ -72,6 +75,7 @@ export const MAUS_COLORS: Record<MausColor, string> = {
   yellow: "#D8A729",
   teal: "#01A492",
   coral: "#E5634E",
+  black: "#1A1A1A",
 };
 
 export const MAUS_MOTIONS = [
@@ -93,28 +97,19 @@ export const MAUS_MOTIONS = [
 
 export type MausMotion = "none" | (typeof MAUS_MOTIONS)[number];
 
-export function busyMascotMotion(botId: string): { state: MausState; motion: MausMotion } {
-  let hash = 0;
-  for (const char of botId) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  return (Math.abs(hash) % 2) === 0
-    ? { state: "sending", motion: "sending" }
-    : { state: "thinking", motion: "thinking-dots" };
-}
-
 /**
- * Awatar bota: bot, ktory nie pracuje, stoi calkiem nieruchomo
- * (neutralny stan "idle", zero beatow, `animated:false` -> `paused` w
- * CursorAvatar). Animacja tylko na czas `busy`.
+ * Awatar bota poza paskiem nad composerem: ZAWSZE nieruchomy — neutralny stan
+ * "idle", zero beatow, `animated:false` -> `paused` w CursorAvatar. Takze gdy
+ * bot pracuje.
  *
- * Mieszkalo w Sidebar.tsx; naglowek czatu trzyma sie tej samej zasady,
- * wiec helper stoi tu, a oba miejsca go importuja.
+ * Jeden animowany bot na cala aplikacje, ten na pasku nad composerem; o jego
+ * stanie decyduje `stripMascotState`. Pasek boczny, naglowek czatu, wiersz
+ * grupy i karta hovera wolaja ten helper i stoja.
  */
 export function sidebarAvatarProps(
-  bot: Bot,
+  _bot: Bot,
 ): { state: MausState; motion: MausMotion; animated: boolean; motionKey: number } {
-  if (!bot.busy) return { state: "idle", motion: "none", animated: false, motionKey: 0 };
-  const busy = busyMascotMotion(bot.id);
-  return { state: busy.state, motion: busy.motion, animated: true, motionKey: 1 };
+  return { state: "idle", motion: "none", animated: false, motionKey: 0 };
 }
 
 /**
@@ -173,7 +168,10 @@ export const PICKABLE_STATES: MausState[] = [
 
 type MascotMessage = {
   kind: string;
+  at?: number;
   tool?: { ok?: boolean };
+  card?: { kind?: string; answered?: string; dismissed?: boolean };
+  secret?: { provided?: boolean; dismissed?: boolean };
 };
 
 export type MascotBotProfile = {
@@ -183,8 +181,70 @@ export type MascotBotProfile = {
   mascotExpression?: string | null;
   busy?: boolean;
   unread?: boolean;
+  needsAttention?: string | null;
   messages?: MascotMessage[];
 };
+
+/** Ile trwa „ładowanie modelu": tura ruszyła, ale nic jeszcze nie płynie. */
+export const MODEL_LOAD_MS = 3_000;
+/** Po tylu milisekundach nierozstrzygnięte narzędzie robi się „długim zadaniem". */
+export const QUIET_TOOL_MS = 8_000;
+/** Ile świętujemy koniec tury, zanim bot zejdzie z paska. */
+export const CELEBRATE_MS = 1_000;
+
+/** Faza tury złożona z eventów runtime — patrz `runtime` w store. */
+export type RuntimeKind = "start" | "reasoning" | "text" | "done";
+export type RuntimePhase = { at: number; kind: RuntimeKind };
+
+/** Karta, na którą bot wciąż czeka — pytanie, wybór, sekret albo komputer. */
+function pendingAsk(last: MascotMessage | undefined): boolean {
+  if (!last) return false;
+  if (last.kind === "secret") return !last.secret?.provided && !last.secret?.dismissed;
+  if (last.kind !== "options" || !last.card) return false;
+  if (last.card.dismissed) return false;
+  // Karta przekazania komputera zostaje żywa po „takeover" — człowiek dopiero
+  // zaczyna robotę; zamykają ją dopiero „done" i „skip".
+  if (last.card.kind === "computer-handoff") return last.card.answered !== "done" && last.card.answered !== "skip";
+  return last.card.answered === undefined;
+}
+
+/**
+ * Jedyny animowany bot w aplikacji: ten na pasku nad composerem. Zwraca stan
+ * maskotki albo `null` — wtedy pasek jest pusty i nie ma czego animować.
+ *
+ * Kolejność wierszy jest tabelą priorytetów, pierwsze dopasowanie wygrywa:
+ * pytanie > uwaga > rozumowanie > pisanie > ładowanie > sukces > nieprzeczytane.
+ * `bot.busy` samo w sobie NIE jest wyzwalaczem — pracujący bot, o którym nic
+ * jeszcze nie wiadomo, nie zajmuje paska.
+ */
+export function stripMascotState(input: {
+  bot: MascotBotProfile;
+  runtime?: RuntimePhase | null;
+  /** trwa strumień tekstu asystenta (store.streaming[threadId]) */
+  streaming?: boolean;
+  /** okno aplikacji jest na wierzchu — wtedy „nieprzeczytane" nic nie znaczy */
+  focused?: boolean;
+  now?: number;
+}): { state: MausState; motion: MausMotion } | null {
+  const { bot, runtime = null, streaming = false, focused = false, now = Date.now() } = input;
+  const last = bot.messages?.[bot.messages.length - 1];
+  const attention = bot.needsAttention ?? null;
+
+  if (pendingAsk(last) || attention?.trimEnd().endsWith("?")) return { state: "confused", motion: "none" };
+  if (attention !== null) return { state: "alerting", motion: "none" };
+  if (runtime?.kind === "reasoning") return { state: "thinking", motion: "none" };
+  if (streaming || runtime?.kind === "text") return { state: "thinking", motion: "thinking-dots" };
+  // Zawieszone narzędzie liczymy tylko przy żywej turze: porzucona aktywność
+  // po ubitej turze inaczej trzymałaby „loading" na pasku w nieskończoność.
+  const quietTool =
+    bot.busy === true && last?.kind === "activity" && last.tool?.ok === undefined && now - (last.at ?? 0) > QUIET_TOOL_MS;
+  if ((runtime?.kind === "start" && now - runtime.at > MODEL_LOAD_MS) || quietTool) {
+    return { state: "loading", motion: "none" };
+  }
+  if (runtime?.kind === "done" && now - runtime.at < CELEBRATE_MS) return { state: "celebrate", motion: "none" };
+  if (bot.unread && !focused) return { state: "notifying", motion: "none" };
+  return null;
+}
 
 /**
  * Selects a state from live state first, then from what the bot is about.

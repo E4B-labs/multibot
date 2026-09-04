@@ -5,12 +5,11 @@ import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
 import { MausAvatar } from "./Avatar";
-import { normalizeState, stateForBot } from "@/lib/mascot";
+import { normalizeState, stripMascotState } from "@/lib/mascot";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { parseSchedule, type PresetOrUnknown } from "@/lib/routineSchedule";
 import { AttachmentCard } from "./AttachmentCard";
-import { PeerChatIndicator, usePeerChat } from "./PeerChatIndicator";
 
 // multibot: szybki przełącznik dostępu w composerze (port z OpenMausBot #442,
 // tam PermissionModeSelector) — te same endpointy co EngineAutonomy.
@@ -262,15 +261,24 @@ export function Composer({ bot }: { bot: Bot }) {
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [reasoning, setReasoning] = useState<ReasoningLevel>("low");
   const [dismissedAt, setDismissedAt] = useState<number | null>(null); // Esc'd this @
-  // multibot: aktywna rozmowa bot-bot dla oglądanego bota (awatar partnera +
-  // dymki ze szlaczkami nad composereem); null gdy bot nikogo nie „gadaje"
-  const peerChat = usePeerChat(bot.id);
-  const botThinkingInPeerChat = peerChat
-    ? peerChat.activeBotId === bot.id || (
-        peerChat.activeBotId === undefined && bot.busy === true && peerChat.peerBot.busy !== true
-      )
-    : bot.busy === true;
-  const composerAvatarState = normalizeState(bot.mascotExpression) ?? stateForBot({ ...bot, busy: false });
+  // multibot: pasek nad composerem — JEDYNY animowany bot w aplikacji. Stan
+  // wybiera czysta `stripMascotState`; `null` znaczy „pasek pusty".
+  const runtime = state.runtime[bot.threadId] ?? null;
+  // Wiersze zależne od czasu (loading po 3 s, celebrate gaśnie po 1 s) nie mają
+  // własnego eventu, więc przy żywej turze przeliczamy je co pół sekundy.
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    if (!bot.busy && !runtime) return;
+    const timer = setInterval(() => setClock(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [bot.busy, runtime]);
+  const strip = stripMascotState({
+    bot,
+    runtime,
+    streaming: state.streaming[bot.threadId] !== undefined,
+    focused: typeof document === "undefined" || document.hasFocus(),
+    now: clock,
+  });
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const filesRef = useRef<HTMLInputElement>(null);
   const previewUrls = useRef(new Set<string>());
@@ -487,7 +495,7 @@ export function Composer({ bot }: { bot: Bot }) {
         label: botDisplayName(peer, polish ? "pl" : "en"),
         hint: peer.id === bot.id ? (polish ? "Bieżący" : "Current") : (polish ? "Przełącz" : "Switch to bot"),
         kind: "agent" as const,
-        icon: <MausAvatar color={peer.color} avatarUrl={peer.avatarUrl} shape={peer.mascotShape} state={normalizeState(peer.mascotExpression) ?? "happy"} size={20} />,
+        icon: <MausAvatar color={peer.color} avatarUrl={peer.avatarUrl} shape={peer.mascotShape} state={normalizeState(peer.mascotExpression) ?? "happy"} size={20} animated={false} />,
         run: () => dispatch({ type: "select", id: peer.id }),
       })),
       ...(slashRoutines?.rows ?? []).map((routine) => ({
@@ -835,7 +843,7 @@ export function Composer({ bot }: { bot: Bot }) {
               >
                 {row.type === "bot" ? (
                   <>
-                    <MausAvatar color={row.peer.color} shape={row.peer.mascotShape} state={normalizeState(row.peer.mascotExpression) ?? "happy"} size={24} />
+                    <MausAvatar color={row.peer.color} shape={row.peer.mascotShape} state={normalizeState(row.peer.mascotExpression) ?? "happy"} size={24} animated={false} />
                     <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{botDisplayName(row.peer, polish ? "pl" : "en")}</span>
                     <span className="shrink-0 text-xs text-ink-secondary">{polish ? "Bot" : "Agent"}</span>
                   </>
@@ -894,25 +902,19 @@ export function Composer({ bot }: { bot: Bot }) {
             ))}
           </div>
         )}
-        {/* multibot: scena „boty rozmawiają między sobą" — w przepływie tuż nad
-            wierszem pisania, więc dymki niczego nie zakrywają; pusty slot 40px
-            po lewej trafia dokładnie tam, gdzie unosi się awatar gospodarza.
-            Gdy scena gra, jej rząd awatara ZASTĘPUJE pas md:mt-[48px] — inaczej
-            margines wsunąłby 48px przerwy i partner nie stałby na równi. */}
-        {peerChat && <PeerChatIndicator bot={bot} view={peerChat} />}
         <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5">
-        {/* Awatar pojawia się tylko na czas aktywnej tury bota. */}
-        {(bot.busy || peerChat) && (
+        {/* Pasek: maksymalnie jeden bot, animowany, i tylko gdy ma co pokazać. */}
+        {strip && (
           <div className="pointer-events-none absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
             <MausAvatar
               color={bot.color}
               avatarUrl={bot.avatarUrl}
               shape={bot.mascotShape}
-              state={botThinkingInPeerChat ? "thinking" : composerAvatarState}
+              state={strip.state}
               size={40}
-              motion={botThinkingInPeerChat ? "thinking-dots" : "none"}
-              motionKey={botThinkingInPeerChat ? 1 : 0}
-              animated={botThinkingInPeerChat}
+              motion={strip.motion}
+              motionKey={strip.motion === "none" ? 0 : 1}
+              animated
             />
           </div>
         )}
