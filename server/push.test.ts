@@ -1,10 +1,12 @@
 // Powiadomienia push, end to end: prawdziwy harness (jak w comms.test.ts) z
 // atrapą CLI, a zamiast exp.host lokalny serwerek, który zbiera payloady
-// (`MULTIBOT_EXPO_PUSH_URL`). Pinuje cztery przypadki ze specyfikacji:
-// pytanie do człowieka, start pracy, koniec pracy oraz ciszę tam, gdzie
-// powiadomienie byłoby szumem (tura bot-bot, wyłączony przełącznik bota).
+// (`MULTIBOT_EXPO_PUSH_URL`) i odpowiada ticketami jak exp.host. Pinuje
+// przypadki ze specyfikacji: pytanie do człowieka, start pracy, koniec pracy,
+// ciszę tam, gdzie powiadomienie byłoby szumem (tura bot-bot, wyłączony
+// przełącznik bota), ładunek dostarczalny na Androidzie oraz sprzątanie
+// urządzenia po tickecie `DeviceNotRegistered`.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,8 +18,19 @@ const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
 let port = 0;
 let base = "";
 const TOKEN = "push-test-access-token";
+/** Token, na który atrapa exp.host odpowiada ticketem `DeviceNotRegistered`. */
+const DEAD_TOKEN = "ExponentPushToken[dead]";
 
-type Push = { title: string; body: string; data?: { botId?: string; kind?: string } };
+type Push = {
+  to?: string;
+  title: string;
+  body: string;
+  ttl?: number;
+  priority?: string;
+  channelId?: string;
+  sound?: string;
+  data?: { botId?: string; kind?: string };
+};
 
 describe("push na telefon (fake ACP fleet)", () => {
   let child: ChildProcess;
@@ -49,6 +62,15 @@ describe("push na telefon (fake ACP fleet)", () => {
     return bot.id;
   };
 
+  /** Urządzenia zapisane w configu serwera; pusto, gdy trafimy w moment zapisu. */
+  const pushDevices = (): Record<string, { token?: string }> => {
+    try {
+      return JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).pushDevices ?? {};
+    } catch {
+      return {};
+    }
+  };
+
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
     const probe = createServer();
@@ -64,12 +86,21 @@ describe("push na telefon (fake ACP fleet)", () => {
       let raw = "";
       req.on("data", (c) => (raw += c));
       req.on("end", () => {
+        let batch: Push[] = [];
         try {
-          pushes.push(JSON.parse(raw));
+          const parsed = JSON.parse(raw);
+          batch = Array.isArray(parsed) ? parsed : [parsed];
         } catch {
           /* nieistotne dla testu */
         }
-        res.writeHead(200, { "content-type": "application/json" }).end("{}");
+        pushes.push(...batch);
+        // ticket na wiadomość, w tej samej kolejności — tak samo jak exp.host
+        const data = batch.map((m) =>
+          m.to === DEAD_TOKEN
+            ? { status: "error", message: "not a registered recipient", details: { error: "DeviceNotRegistered" } }
+            : { status: "ok", id: "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" },
+        );
+        res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data }));
       });
     });
     await new Promise<void>((resolve, reject) => {
@@ -182,4 +213,28 @@ describe("push na telefon (fake ACP fleet)", () => {
     await until(() => kinds(askerId).includes("finished"), 30_000);
     expect(kinds(helperId)).toEqual([]);
   }, 60_000);
+
+  it("ładunek dla Androida: high priority, kanał `default`, dźwięk i ttl", async () => {
+    const botId = await newBot("Ładunek", "happy");
+    expect((await api("POST", `/api/bots/${botId}/messages`, { text: "cześć" })).status).toBe(202);
+    await until(() => kinds(botId).includes("finished"));
+    const push = pushes.find((p) => p.data?.botId === botId);
+    expect(push?.priority).toBe("high");
+    expect(push?.channelId).toBe("default");
+    expect(push?.sound).toBe("default");
+    // koniec tury jest nieaktualny po godzinie; pytanie do człowieka żyje dobę
+    expect(push?.ttl).toBe(3600);
+    expect(push?.data).toMatchObject({ botId, kind: "finished" });
+  }, 40_000);
+
+  it("ticket `DeviceNotRegistered` kasuje urządzenie z configu", async () => {
+    expect((await api("POST", "/api/devices/dead-phone/push", { token: DEAD_TOKEN })).status).toBe(200);
+    expect(pushDevices()["dead-phone"]).toBeDefined();
+    const botId = await newBot("Sprzątacz", "happy");
+    expect((await api("POST", `/api/bots/${botId}/messages`, { text: "cześć" })).status).toBe(202);
+    await until(() => pushDevices()["dead-phone"] === undefined);
+    expect(pushDevices()["dead-phone"]).toBeUndefined();
+    // żywe urządzenie zostaje — kasujemy tylko to, które Expo odrzuciło
+    expect(pushDevices()["test-phone"]).toBeDefined();
+  }, 40_000);
 });
