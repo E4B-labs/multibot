@@ -125,6 +125,9 @@ export function nextRun(schedule: string | null, after: number): number | null {
   // Data jednorazowa: minęła → null, czyli rutyna sama gaśnie po odpaleniu.
   const once = oneShotAt(schedule);
   if (once !== null) return once > after ? once : null;
+  // Wygląda jak data, ale nią nie jest ("2030-13-45T99:99") — powiedz to
+  // wprost, zamiast zrzucić model na komunikat o pięciu polach crona.
+  if (ONE_SHOT.test(schedule.trim())) throw new Error("invalid reminder datetime");
   const interval = EVERY.exec(schedule.trim());
   if (interval) {
     const amount = Number(interval[1]);

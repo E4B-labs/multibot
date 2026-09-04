@@ -96,6 +96,10 @@ describe("one-off reminders (ISO schedule)", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
+  it("names a malformed datetime instead of complaining about cron fields", () => {
+    expect(() => nextRun("2030-13-45T99:99", Date.now())).toThrow(/invalid reminder datetime/);
+  });
+
   it("refuses a reminder set in the past instead of storing a dead routine", () => {
     const routines = new HarnessRoutines(file(), async () => {}, () => new Date(2030, 0, 2, 9, 0).getTime(), 0);
     expect(() => routines.create("bot-cli", { name: "wczoraj", prompt: "x", schedule: "2030-01-01T09:00" }))
