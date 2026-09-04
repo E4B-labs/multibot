@@ -55,6 +55,12 @@ export interface OptionCardData {
   connector?: ConnectorTarget;
 }
 
+/** Skill widziany przez czat: nazwa do podświetlenia + opis do popovera. */
+export interface SkillRefInfo {
+  name: string;
+  description?: string;
+}
+
 export interface Message {
   id: string;
   role: "bot" | "user";
@@ -225,8 +231,11 @@ interface AppState {
   // multibot: live team map (port z OpenMausBot)
   teamMapOpen: boolean;
   inspectorOpen: boolean;
-  /** multibot: nazwy skilli do podświetlania w treści wiadomości (skillRefs) */
-  skillNames: string[];
+  /** multibot: skille bieżącego bota — nazwy podświetlają się w treści
+   *  wiadomości (skillRefs), a opis wchodzi do popovera nad taką nazwą. */
+  skills: SkillRefInfo[];
+  /** multibot: skill, na którym panel skilli ma się otworzyć rozwinięty. */
+  skillFocus: string | null;
   // multibot: F9-FE — otwarty pokój grupowy (prawy slot); null = zamknięty
   groupOpen: EngineGroup | null;
   // multibot: otwarty read-only pokój współpracy botów (zastępuje widok czatu)
@@ -294,12 +303,12 @@ type Action =
   | { type: "toggleRoutines"; open?: boolean }
   // multibot: F8 — otwarcie/zamknięcie paneli pamięci i skilli
   | { type: "toggleMemory"; open?: boolean }
-  | { type: "toggleSkills"; open?: boolean }
+  | { type: "toggleSkills"; open?: boolean; skill?: string }
   // multibot: team map (port z OpenMausBot)
   | { type: "toggleTeamMap"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
   /** multibot: nazwy skilli do podświetlania w treści wiadomości */
-  | { type: "setSkillNames"; names: string[] }
+  | { type: "setSkills"; skills: SkillRefInfo[] }
   // multibot: F9-FE — otwarcie pokoju grupowego (group) / zamknięcie (null)
   | { type: "toggleGroup"; group: EngineGroup | null }
   // multibot: otwarcie read-only pokoju współpracy / zamknięcie (null)
@@ -633,6 +642,7 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         skillsOpen: open,
+        skillFocus: open ? action.skill ?? null : null,
         memoryOpen: open ? false : state.memoryOpen,
         settingsOpen: open ? false : state.settingsOpen,
         computerOpen: open ? false : state.computerOpen,
@@ -659,8 +669,8 @@ function reducer(state: AppState, action: Action): AppState {
         mailOpen: open ? false : state.mailOpen,
       };
     }
-    case "setSkillNames":
-      return { ...state, skillNames: action.names };
+    case "setSkills":
+      return { ...state, skills: action.skills };
     // multibot: F9-FE — pokój grupowy w prawym slocie, ta sama zasada wykluczania
     case "toggleGroup": {
       const open = action.group !== null;
@@ -784,7 +794,8 @@ const initialState: AppState = {
   skillsOpen: false,
   teamMapOpen: false,
   inspectorOpen: false,
-  skillNames: [],
+  skills: [],
+  skillFocus: null,
   groupOpen: null,
   roomOpen: null,
   mailOpen: false,

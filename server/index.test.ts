@@ -247,6 +247,14 @@ describe("harness HTTP API", () => {
       instructions: "Run tests.",
     });
     expect(skill.status).toBe(201);
+    // multibot: skill z panelu zostawia w transkrypcie tę samą pigułkę co skill
+    // napisany narzędziem bota — bez tego powstawał niewidocznie.
+    const withSkill = (await api("GET", "/api/bots")).body.bots.find((b: { id: string }) => b.id === bot.id);
+    expect(
+      withSkill.messages.some((msg: { event?: { type: string; value: string } }) =>
+        msg.event?.type === "skill-created" && msg.event.value === "review",
+      ),
+    ).toBe(true);
     expect((await api("PATCH", `/api/bots/${bot.id}/skills/review`, { enabled: false })).body.enabled).toBe(false);
     expect((await api("GET", `/api/bots/${bot.id}/skills`)).body).toHaveLength(1);
 

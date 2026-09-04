@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import { ArrowDown, Bell, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, ScanSearch, Search, Upload, Wand2 } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
-import { SkillPill } from "./SkillPill";
+import { SkillRef } from "./SkillRef";
 import { AttachmentCard } from "./AttachmentCard";
 // multibot: lightbox załączników-obrazków (port z OpenMausBot #436)
 import { AttachmentPreviewDialog } from "./AttachmentPreview";
@@ -228,11 +228,12 @@ function EventPill({ message, polish }: { message: Message; polish: boolean }) {
     : { renamed: "Renamed to", "skill-created": "Created skill", "routine-created": "Created routine", "reminder-created": "Reminder", "goal-progress": "Goal" };
   // multibot: wspólna pigułka zamiast własnego markupu — patrz EventChip.tsx.
   // Rutyna dostaje ikonę zegara, zmiana nazwy zostaje czystym tekstem.
-  // skill-created → centered SkillPill (czarno-amber, klikalny) jak na screenie 561×110
+  // skill-created → wyśrodkowany SkillRef: ta sama nazwa, ten sam kolor i ten
+  // sam popover co skill wspomniany w zdaniu.
   if (message.event.type === "skill-created") {
     return (
       <div className="flex w-full justify-center py-1">
-        <SkillPill name={message.event.value} />
+        <SkillRef name={message.event.value} block />
       </div>
     );
   }
@@ -411,13 +412,17 @@ export function ChatView({ bot }: { bot: Bot }) {
     let active = true;
     authFetch(`/api/bots/${bot.id}/skills`)
       .then((response) => response.ok ? response.json() : Promise.reject())
-      .then((skills: Array<{ name?: unknown }>) => {
+      .then((skills: Array<{ name?: unknown; description?: unknown }>) => {
         if (active) dispatch({
-          type: "setSkillNames",
-          names: skills.flatMap((skill) => typeof skill.name === "string" ? [skill.name] : []),
+          type: "setSkills",
+          skills: skills.flatMap((skill) =>
+            typeof skill.name === "string"
+              ? [{ name: skill.name, description: typeof skill.description === "string" ? skill.description : undefined }]
+              : [],
+          ),
         });
       })
-      .catch(() => active && dispatch({ type: "setSkillNames", names: [] }));
+      .catch(() => active && dispatch({ type: "setSkills", skills: [] }));
     return () => { active = false; };
   }, [bot.id, latestSkillEvent, dispatch]);
   useEffect(() => {

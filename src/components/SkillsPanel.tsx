@@ -18,7 +18,7 @@ import {
 import { useStore, type Bot } from "@/state/store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { cn } from "@/lib/cn";
-import { SkillPill } from "./SkillPill";
+import { SkillRef } from "./SkillRef";
 import { authFetch } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
 
@@ -380,7 +380,7 @@ export function TeachCard({
         <>
           <div className="mt-3 text-[13px] text-success">
             {polish ? "Utworzono umiejętność: " : "Skill created: "}
-            <SkillPill name={teach.skillName} />
+            <SkillRef name={teach.skillName} />
           </div>
           <button
             onClick={() => setTeach({ phase: "idle" })}
@@ -401,12 +401,14 @@ export function TeachCard({
 }
 
 export function SkillsPanel({ bot }: { bot: Bot }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const skillsRoot = `/api/bots/${bot.id}/skills`;
   const [status, setStatus] = useState<"loading" | "offline" | "ready">("loading");
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  // multibot: panel otwarty klikiem w nazwę skilla w czacie startuje rozwinięty
+  // na tym skillu — inaczej trzeba go było szukać na liście.
+  const [expanded, setExpanded] = useState<string | null>(state.skillFocus);
   const [editing, setEditing] = useState<Skill | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // "delete:<name>"
   const [error, setError] = useState<string | null>(null);
@@ -419,8 +421,12 @@ export function SkillsPanel({ bot }: { bot: Bot }) {
       setSkills(ss);
       setStatus("ready");
       // multibot: nazwy skilli do podświetlania w treści wiadomości (skillRefs)
-      dispatch({ type: "setSkillNames", names: ss.map((s) => s.name) });
+      dispatch({ type: "setSkills", skills: ss.map((s) => ({ name: s.name, description: s.description })) });
     });
+
+  useEffect(() => {
+    if (state.skillFocus) setExpanded(state.skillFocus);
+  }, [state.skillFocus]);
 
   useEffect(() => {
     let alive = true;

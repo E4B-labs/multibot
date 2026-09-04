@@ -4213,6 +4213,10 @@ const server = createServer(async (req, res) => {
       if (method === "POST" && !name) {
         const body = await readBody(req);
         const skill = workspace.addSkill(m[1], body);
+        // multibot: ta sama pigułka w transkrypcie co przy `skills.create` z
+        // narzędzia bota — skill utworzony z panelu był dotąd niewidoczny
+        // w czacie, choć powstaje dokładnie tak samo.
+        appendBotEvent(m[1], { type: "skill-created", value: skill.name });
         broadcast({ kind: "workspace", botId: m[1], resource: "skills" });
         return json(res, 201, skill);
       }
