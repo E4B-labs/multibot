@@ -472,6 +472,116 @@ def test_http_navigate_and_read_page(client, page):
     assert body["text"].strip() == "y"  # innerText, nie znaczniki
 
 
+# ── snapshot z refami: read_page / find / click(ref) ──────────────────────────
+# Bez refów każdy klik wymagał zrzutu ekranu (0,24 s kodowania JPEG + ~1,7 tys.
+# tokenów obrazu). Te testy pilnują, że tekstowa droga naprawdę klika.
+
+_FORM = (
+    "data:text/html,<body style='margin:0'>"
+    "<h1>Logowanie</h1>"
+    "<form><label>Email<input id=mail placeholder='jan@example.com'></label>"
+    "<button id=go type=button onclick=\"document.title='wyslane'\">Zaloguj</button>"
+    "</form><p>zwykly akapit</p></body>"
+)
+
+
+def _lines(tree: str) -> list[str]:
+    return [line for line in tree.splitlines() if line.strip()]
+
+
+def test_read_page_returns_numbered_interactive_tree(client, page):
+    page.goto(_FORM, marker="go")
+    body = client.get(f"/api/bots/{_BOT}/computer/page").json()
+
+    tree = body["elements"]
+    assert 'heading "Logowanie"' in tree
+    assert 'button "Zaloguj"' in tree
+    assert 'textbox' in tree and 'placeholder="jan@example.com"' in tree
+    # akapit nie jest ani interaktywny, ani nagłówkiem — do drzewa nie wchodzi,
+    # ale zostaje w `text`, bo to nadal treść strony
+    assert "zwykly akapit" not in tree
+    assert "zwykly akapit" in body["text"]
+    # każdy wpis ma ref, którym da się kliknąć
+    assert all(line.strip().startswith("[e") for line in _lines(tree))
+    assert body["elements_total"] == len(_lines(tree))
+
+
+def test_click_by_ref_hits_the_element(client, page):
+    page.goto(_FORM, marker="go")
+    tree = client.get(f"/api/bots/{_BOT}/computer/page").json()["elements"]
+    ref = next(line.split("]")[0].strip("[ ") for line in _lines(tree) if 'button "Zaloguj"' in line)
+
+    hit = {"kind": "mouse", "ref": ref, "button": "left", "clickCount": 1}
+    assert client.post(
+        f"/api/bots/{_BOT}/computer/input",
+        json={"events": [
+            {"kind": "mouse", "type": "mouseMoved", "ref": ref},
+            {**hit, "type": "mousePressed"},
+            {**hit, "type": "mouseReleased"},
+        ]},
+    ).json() == {"ok": True}
+    assert page.wait_for("document.title === 'wyslane'") is True
+
+
+def test_type_text_by_ref_focuses_the_field(client, page):
+    page.goto(_FORM, marker="go")
+    tree = client.get(f"/api/bots/{_BOT}/computer/page").json()["elements"]
+    ref = next(line.split("]")[0].strip("[ ") for line in _lines(tree) if "textbox" in line)
+
+    hit = {"kind": "mouse", "ref": ref, "button": "left", "clickCount": 1}
+    client.post(
+        f"/api/bots/{_BOT}/computer/input",
+        json={"events": [
+            {"kind": "mouse", "type": "mouseMoved", "ref": ref},
+            {**hit, "type": "mousePressed"},
+            {**hit, "type": "mouseReleased"},
+            {"kind": "text", "text": "jan@nowak.pl"},
+        ]},
+    )
+    assert page.wait_for("document.getElementById('mail').value === 'jan@nowak.pl'") is True
+
+
+def test_stale_ref_says_so_instead_of_clicking_blind(client, page):
+    """Nawigacja kasuje mapę refów razem z globalnymi JS-ami strony. Stary ref MUSI
+    dostać czytelny błąd — klik "gdzieś" na nowej stronie jest gorszy niż odmowa."""
+    page.goto(_FORM, marker="go")
+    client.get(f"/api/bots/{_BOT}/computer/page")
+    page.goto(_PAGE2, marker="b2")
+
+    res = client.post(
+        f"/api/bots/{_BOT}/computer/input",
+        json={"events": [{"kind": "mouse", "type": "mouseMoved", "ref": "e1"}]},
+    )
+    assert res.status_code == 422
+    assert "nieaktualny" in res.text
+
+
+def test_find_narrows_to_matching_refs_keeping_numbering(client, page):
+    page.goto(_FORM, marker="go")
+    full = client.get(f"/api/bots/{_BOT}/computer/page").json()["elements"]
+    found = client.get(f"/api/bots/{_BOT}/computer/page", params={"find": "zaloguj"}).json()
+
+    assert found["matches"] == 1
+    assert 'button "Zaloguj"' in found["elements"]
+    assert "Logowanie" not in found["elements"]
+    assert "text" not in found  # find nie płaci za cały innerText
+    # ten sam ref, co w pełnym snapshocie — inaczej find byłby pułapką
+    ref = found["elements"].split("]")[0].strip("[ ")
+    assert next(line for line in _lines(full) if 'button "Zaloguj"' in line).strip().startswith(f"[{ref}]")
+
+    miss = client.get(f"/api/bots/{_BOT}/computer/page", params={"find": "nie ma tego"}).json()
+    assert miss["matches"] == 0 and "note" in miss
+
+
+def test_page_without_text_tells_the_model_to_use_a_screenshot(client, page):
+    """Karta z PDF-em zwraca 115 B pustki (zmierzone na telefonie) — model musi
+    usłyszeć, że ma sięgnąć po zrzut, zamiast wołać read_page drugi raz."""
+    page.goto("data:text/html,<body style='margin:0'><canvas id=b width=10 height=10></canvas></body>")
+    body = client.get(f"/api/bots/{_BOT}/computer/page").json()
+    assert body["elements"] == ""
+    assert "screenshot" in body.get("note", "")
+
+
 def test_http_input_404_without_browser(client):
     """Brak przeglądarki = 404 z `KeyError`, nie 500 — MCP ma z czego zrobić błąd."""
     other = Path(os.environ["SLAFY_DATA_DIR"]) / "profiles" / "bezkompa3"
@@ -665,6 +775,39 @@ def test_set_external_closes_running_local_browser(tmp_path, monkeypatch):
     assert closed == ["sess-local-1"]
     saved = json.loads((profile / "browser.json").read_text(encoding="utf-8"))
     assert saved == {"cdp_url": "http://127.0.0.1:32773", "external": True}
+
+
+def test_snapshot_tree_indents_and_caps_its_own_size():
+    """Format i limit liczone są w Pythonie, więc dają się sprawdzić bez przeglądarki.
+    Limit jest twardy: model płaci za każdy znak tego drzewa w każdej turze."""
+    from server import computer as _computer
+
+    tree, cut = _computer._render_tree(
+        [
+            {"ref": "e1", "role": "heading", "name": "Tytuł", "depth": 0, "attrs": {}},
+            {"ref": "e2", "role": "textbox", "name": "Email", "depth": 1,
+             "attrs": {"placeholder": "jan@ex.pl", "value": "a"}},
+            {"ref": "e3", "role": "checkbox", "name": "Zgoda", "depth": 1,
+             "attrs": {"checked": "true", "disabled": "true"}},
+        ],
+        truncated=False,
+        total=3,
+    )
+    assert tree.splitlines() == [
+        '[e1] heading "Tytuł"',
+        '  [e2] textbox "Email" placeholder="jan@ex.pl" value="a"',
+        '  [e3] checkbox "Zgoda" checked disabled',
+    ]
+    assert cut is False
+
+    many = [
+        {"ref": f"e{i}", "role": "link", "name": "x" * 100, "depth": 0, "attrs": {}}
+        for i in range(1, 400)
+    ]
+    tree, cut = _computer._render_tree(many, truncated=False, total=len(many))
+    assert cut is True
+    assert len(tree) < _computer._SNAPSHOT_MAX_CHARS + 200  # sam komunikat o obcięciu wystaje
+    assert "find(query)" in tree.splitlines()[-1]
 
 
 def test_set_external_clears_marker_on_null(tmp_path, monkeypatch):

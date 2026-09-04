@@ -65,8 +65,13 @@ class _FakeEngine(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         type(self).calls.append((self.command, self.path, {}))
-        if self.path.endswith("/computer/page"):
-            return self._json(200, {"url": "https://example.test/", "title": "T", "text": "tekst strony"})
+        path, _, query = self.path.partition("?")
+        if path.endswith("/computer/page"):
+            if "find=" in query:  # narzędzie `find` — ta sama trasa, zawężony wynik
+                return self._json(200, {"url": "https://example.test/", "matches": 1,
+                                        "elements": '[e7] button "Zaloguj"'})
+            return self._json(200, {"url": "https://example.test/", "title": "T",
+                                    "text": "tekst strony", "elements": '[e7] button "Zaloguj"'})
         if self.path.endswith("/computer/status"):
             return self._json(200, {"running": True, "url": "https://example.test/"})
         return self._json(404, {"detail": "not found"})
@@ -118,6 +123,23 @@ async def _exercise(params: StdioServerParameters) -> None:
             assert "tekst strony" in str(page.content[0].text)
 
 
+async def _exercise_refs(params: StdioServerParameters) -> None:
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as client:
+            await client.initialize()
+            assert "find" in {t.name for t in (await client.list_tools()).tools}
+
+            found = await client.call_tool("find", {"query": "zaloguj"})
+            assert not found.isError
+            assert "e7" in str(found.content[0].text)
+
+            assert not (await client.call_tool("click", {"ref": "e7"})).isError
+            assert not (await client.call_tool("type_text", {"text": "jan", "ref": "e9"})).isError
+            # bez `ref` i bez pary x/y nie ma w co kliknąć — narzędzie musi odmówić,
+            # a nie wysłać kliknięcie w (0, 0)
+            assert (await client.call_tool("click", {})).isError
+
+
 def test_handshake_tools_and_calls(params):
     asyncio.run(_exercise(params))
 
@@ -134,6 +156,26 @@ def test_handshake_tools_and_calls(params):
     path_events = inputs[1]["events"]
     assert [e["type"] for e in path_events] == ["mouseMoved"] * 3
     assert [(e["x"], e["y"]) for e in path_events] == [(5, 6), (7, 8), (9, 10)]
+
+
+def test_refs_travel_from_find_into_click_and_type(params):
+    """Refy ze snapshotu MUSZĄ dojść do silnika jako `ref`, nie jako zgadnięte
+    współrzędne — inaczej cała oszczędność na zrzutach ekranu przepada."""
+    asyncio.run(_exercise_refs(params))
+
+    assert any(path.startswith("/api/bots/") and "computer/page?find=zaloguj" in path
+               for _, path, _ in _FakeEngine.calls)
+    inputs = [body for _, path, body in _FakeEngine.calls if path.endswith("/computer/input")]
+    click = inputs[0]["events"]
+    assert [e["type"] for e in click] == ["mouseMoved", "mousePressed", "mouseReleased"]
+    assert {e["ref"] for e in click} == {"e7"}
+    assert not any("x" in e for e in click)  # zero pikseli w klikaniu po refie
+    # type_text(ref=…) sam klika w pole, a dopiero potem wpisuje
+    typed = inputs[1]["events"]
+    assert [e.get("type") or e["kind"] for e in typed] == [
+        "mouseMoved", "mousePressed", "mouseReleased", "text",
+    ]
+    assert typed[-1] == {"kind": "text", "text": "jan"}
 
 
 async def _exercise_exec_without_harness(params: StdioServerParameters) -> None:

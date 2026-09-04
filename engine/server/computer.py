@@ -650,36 +650,55 @@ async def send_input(bot_id: str, events: list[dict]) -> None:
     `call`, nie `send`: połączenie zamyka się zaraz po żądaniu, więc odpowiedź
     CDP jest jedynym dowodem, że przeglądarka zdążyła zdarzenie przetworzyć.
     """
-    color = _browser_state(bot_id).get("cursor_color")
-    color = color if isinstance(color, str) and _HEX_RE.match(color) else _CURSOR_DEFAULT
     async with _operation(bot_id):
         async with _attached(bot_id) as (cdp, session):
-            origin: dict = {}
-            if _can_warp() and any(e.get("kind") == "mouse" for e in events):
-                try:
-                    got = await cdp.call(
-                        "Runtime.evaluate",
-                        {"expression": _VIEWPORT_ORIGIN_JS, "returnByValue": True},
-                        session_id=session,
-                    )
-                    origin = got["result"].get("value") or {}
-                except Exception:  # noqa: BLE001 — podgląd, nie akcja
-                    origin = {}
-            # Pierścień zamiast strzałki tylko wtedy, gdy PRAWDZIWY wskaźnik
-            # naprawdę pojedzie za agentem — inaczej user zostałby z samą obwódką
-            # w jednym miejscu i wskaźnikiem w drugim.
-            warp = bool(origin)
-            for event in events:
-                kind = event.get("kind")
-                if kind == "mouse":
-                    # kursor PRZED zdarzeniem: klik może zabrać stronę gdzie indziej
-                    await _show_cursor(cdp, session, event, color, warp)
-                    await asyncio.to_thread(_warp_pointer, origin, event)
-                    await cdp.call("Input.dispatchMouseEvent", _mouse_params(event), session_id=session)
-                elif kind == "key":
-                    await cdp.call("Input.dispatchKeyEvent", _key_params(event), session_id=session)
-                elif kind == "text":  # wpisanie ciągu jednym zdarzeniem (bez VK per znak)
-                    await cdp.call("Input.insertText", {"text": str(event.get("text") or "")}, session_id=session)
+            await _dispatch(bot_id, cdp, session, events)
+
+
+def _cursor_color(bot_id: str) -> str:
+    color = _browser_state(bot_id).get("cursor_color")
+    return color if isinstance(color, str) and _HEX_RE.match(color) else _CURSOR_DEFAULT
+
+
+async def _dispatch(bot_id: str, cdp: "_Cdp", session: str, events: list[dict]) -> None:
+    """Wyślij paczkę zdarzeń w JUŻ otwartej sesji CDP.
+
+    Zdarzenie myszy może wskazać element przez `ref` (ze snapshotu) zamiast
+    `x`/`y` — rozwiązanie refa idzie tą samą sesją, więc klik po refie to
+    dokładnie jedno żądanie HTTP do silnika, tak jak klik po współrzędnych.
+    """
+    color = _cursor_color(bot_id)
+    points = await _resolved_refs(cdp, session, events)
+    origin: dict = {}
+    if _can_warp() and any(e.get("kind") == "mouse" for e in events):
+        try:
+            got = await cdp.call(
+                "Runtime.evaluate",
+                {"expression": _VIEWPORT_ORIGIN_JS, "returnByValue": True},
+                session_id=session,
+            )
+            origin = got["result"].get("value") or {}
+        except Exception:  # noqa: BLE001 — podgląd, nie akcja
+            origin = {}
+    # Pierścień zamiast strzałki tylko wtedy, gdy PRAWDZIWY wskaźnik
+    # naprawdę pojedzie za agentem — inaczej user zostałby z samą obwódką
+    # w jednym miejscu i wskaźnikiem w drugim.
+    warp = bool(origin)
+    for event in events:
+        kind = event.get("kind")
+        if kind == "mouse":
+            ref = event.get("ref")
+            if ref:
+                x, y = points[str(ref)]
+                event = {**event, "x": x, "y": y}
+            # kursor PRZED zdarzeniem: klik może zabrać stronę gdzie indziej
+            await _show_cursor(cdp, session, event, color, warp)
+            await asyncio.to_thread(_warp_pointer, origin, event)
+            await cdp.call("Input.dispatchMouseEvent", _mouse_params(event), session_id=session)
+        elif kind == "key":
+            await cdp.call("Input.dispatchKeyEvent", _key_params(event), session_id=session)
+        elif kind == "text":  # wpisanie ciągu jednym zdarzeniem (bez VK per znak)
+            await cdp.call("Input.insertText", {"text": str(event.get("text") or "")}, session_id=session)
 
 
 async def navigate(bot_id: str, url: str) -> None:
@@ -688,21 +707,249 @@ async def navigate(bot_id: str, url: str) -> None:
             await cdp.call("Page.navigate", {"url": url}, session_id=session)
 
 
-# `innerText`, nie `innerHTML`: model dostaje to, co widzi człowiek, a nie znaczniki.
-_PAGE_JS = (
-    "({url: location.href, title: document.title, "
-    "text: ((document.body && document.body.innerText) || '').slice(0, 20000)})"
+# ── snapshot strony z numerowanymi refami ─────────────────────────────────────
+#
+# Sam `innerText` (poprzednia wersja `read_page`) nie daje modelowi ŻADNEGO
+# sposobu na kliknięcie: bez pozycji, bez pól, bez linków. Jedyną drogą był
+# zrzut ekranu i zgadywanie pikseli — 0,24 s kodowania JPEG i ~1,7 tys. tokenów
+# obrazu na każdy klik. Snapshot z refami kosztuje zmierzone 3–6 ms
+# `Runtime.evaluate` i jest tekstem, więc model klika `ref`, nie piksel.
+#
+# GDZIE ŻYJE MAPA REFÓW: w samej stronie (`window.__multibot_refs__`), nie po
+# stronie silnika. To nie jest skrót — to unieważnianie za darmo: nawigacja i
+# każda zmiana dokumentu kasują globalne JS-y, więc nieaktualny ref rozpoznaje
+# się sam ("stale") zamiast trafić w przypadkowy element na nowej stronie.
+_SNAPSHOT_MAX_CHARS = 8000
+_SNAPSHOT_MAX_ELEMENTS = 300
+_TEXT_MAX_CHARS = 4000
+
+_SNAPSHOT_JS = r"""(function(query, limit) {
+  var ROLES = {button:1, link:1, checkbox:1, radio:1, textbox:1, searchbox:1, combobox:1,
+               menuitem:1, menuitemcheckbox:1, menuitemradio:1, tab:1, 'switch':1,
+               slider:1, option:1, treeitem:1, heading:1};
+  var SKIP = {SCRIPT:1, STYLE:1, NOSCRIPT:1, SVG:1, TEMPLATE:1, HEAD:1};
+
+  function role(el) {
+    var explicit = (el.getAttribute('role') || '').toLowerCase();
+    if (explicit) return ROLES[explicit] ? explicit : '';
+    var tag = el.tagName.toUpperCase();
+    if (tag === 'A') return el.hasAttribute('href') ? 'link' : '';
+    if (tag === 'BUTTON' || tag === 'SUMMARY') return 'button';
+    if (tag === 'SELECT') return 'combobox';
+    if (tag === 'TEXTAREA') return 'textbox';
+    if (/^H[1-6]$/.test(tag)) return 'heading';
+    if (tag === 'INPUT') {
+      var t = (el.type || 'text').toLowerCase();
+      if (t === 'hidden') return '';
+      if (t === 'checkbox') return 'checkbox';
+      if (t === 'radio') return 'radio';
+      if (t === 'search') return 'searchbox';
+      if (t === 'submit' || t === 'button' || t === 'reset' || t === 'image') return 'button';
+      return 'textbox';
+    }
+    if (el.isContentEditable) return 'textbox';
+    if (el.hasAttribute('onclick')) return 'button';
+    var ti = el.getAttribute('tabindex');
+    if (ti !== null && ti !== '-1') return 'button';
+    return '';
+  }
+
+  function visible(el) {
+    if (el.hidden) return false;
+    var r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    var s = window.getComputedStyle(el);
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
+  }
+
+  function name(el) {
+    var n = el.getAttribute('aria-label') || el.getAttribute('alt') || '';
+    if (!n && el.labels && el.labels.length) n = el.labels[0].innerText || '';
+    if (!n) n = (el.innerText || el.textContent || '');
+    if (!n) n = el.getAttribute('title') || el.getAttribute('name') || '';
+    return String(n).replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+
+  var items = [], refs = [], truncated = false;
+
+  function walk(node, depth) {
+    var kids = node.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var el = kids[i];
+      if (SKIP[el.tagName.toUpperCase()]) continue;
+      var next = depth, r = role(el);
+      if (r && visible(el)) {
+        if (refs.length >= limit) { truncated = true; return; }
+        refs.push(el);
+        var item = {ref: 'e' + refs.length, role: r, name: name(el), depth: depth, attrs: {}};
+        var ph = el.getAttribute('placeholder');
+        if (ph) item.attrs.placeholder = String(ph).slice(0, 60);
+        if (typeof el.value === 'string' && el.value && r !== 'button') {
+          item.attrs.value = el.value.slice(0, 60);
+        }
+        if (el.checked === true) item.attrs.checked = 'true';
+        if (el.disabled === true) item.attrs.disabled = 'true';
+        items.push(item);
+        next = depth + 1;
+      }
+      walk(el, next);
+    }
+  }
+
+  walk(document.body || document.documentElement, 0);
+  window.__multibot_refs__ = refs;
+
+  var matched = items;
+  if (query) {
+    var q = String(query).toLowerCase();
+    matched = items.filter(function(it) {
+      return (it.name || '').toLowerCase().indexOf(q) >= 0
+        || it.role.indexOf(q) >= 0
+        || (it.attrs.placeholder || '').toLowerCase().indexOf(q) >= 0
+        || (it.attrs.value || '').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+  return {
+    url: location.href,
+    title: document.title,
+    text: ((document.body && document.body.innerText) || ''),
+    items: matched,
+    total: items.length,
+    truncated: truncated
+  };
+})"""
+
+# Ref → punkt kliknięcia. `isConnected` łapie element, który wypadł z DOM-u bez
+# nawigacji (re-render Reacta); brak `__multibot_refs__` = po prostu inny dokument.
+_REF_JS = r"""(function(ref) {
+  var refs = window.__multibot_refs__;
+  if (!refs || !refs.length) return {error: 'stale'};
+  var i = parseInt(String(ref).replace(/^e/i, ''), 10);
+  var el = refs[i - 1];
+  if (!el || !el.isConnected) return {error: 'missing'};
+  try { el.scrollIntoView({block: 'center', inline: 'center'}); } catch (e) {}
+  var r = el.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return {error: 'hidden'};
+  return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+})"""
+
+_REF_ERRORS = {
+    "stale": "ref {ref} jest nieaktualny: strona zmieniła dokument od ostatniego read_page/find — zawołaj read_page jeszcze raz",
+    "missing": "ref {ref} nie istnieje w tym snapshocie (albo element zniknął ze strony) — zawołaj read_page jeszcze raz",
+    "hidden": "ref {ref} wskazuje element o zerowym rozmiarze — nie da się w niego kliknąć",
+}
+
+# Pusty `innerText` i zero elementów to na ogół wbudowany podgląd PDF albo canvas
+# (zmierzone na telefonie: `read_page` na karcie z PDF-em = 115 B pustki). Model
+# musi to usłyszeć wprost, bo inaczej wywoła read_page jeszcze raz.
+_NO_TEXT_NOTE = (
+    "Ta karta nie udostępnia tekstu ani elementów (wbudowany podgląd PDF, canvas albo "
+    "cross-origin iframe). Jedyną drogą jest tu `screenshot`."
 )
 
 
-async def page_text(bot_id: str) -> dict:
-    """Adres, tytuł i tekst karty na wierzchu — czytanie strony dla agenta."""
+def _render_tree(items: list[dict], truncated: bool, total: int) -> tuple[str, bool]:
+    """Płaska lista z JS → wcięte linie `[e12] button "Zaloguj"`, przycięte do limitu.
+
+    Renderujemy w Pythonie, nie w JS: format da się wtedy sprawdzić testem bez
+    przeglądarki, a `Runtime.evaluate` zostaje przy jednej robocie (chodzenie po DOM).
+    """
+    lines: list[str] = []
+    used = 0
+    cut = truncated
+    for index, item in enumerate(items):
+        parts = [f"[{item.get('ref')}] {item.get('role')}"]
+        if item.get("name"):
+            parts.append(f'"{item["name"]}"')
+        for key, value in (item.get("attrs") or {}).items():
+            parts.append(f'{key}="{value}"' if key not in ("checked", "disabled") else key)
+        line = "  " * int(item.get("depth") or 0) + " ".join(parts)
+        if used + len(line) + 1 > _SNAPSHOT_MAX_CHARS:
+            cut = True
+            lines.append(
+                f"… obcięto: pokazano {index} z {total} elementów "
+                f"(zawęź przez find(query) zamiast czytać całość)"
+            )
+            break
+        lines.append(line)
+        used += len(line) + 1
+    else:
+        if truncated:
+            lines.append(
+                f"… obcięto: strona ma więcej niż {_SNAPSHOT_MAX_ELEMENTS} elementów "
+                f"(zawęź przez find(query))"
+            )
+    return "\n".join(lines), cut
+
+
+async def _snapshot(cdp: "_Cdp", session: str, query: str | None = None) -> dict:
+    """Snapshot w JUŻ otwartej sesji CDP — używa go i `page_text`, i batch akcji."""
+    result = await cdp.call(
+        "Runtime.evaluate",
+        {
+            "expression": f"{_SNAPSHOT_JS}({json.dumps(query)}, {_SNAPSHOT_MAX_ELEMENTS})",
+            "returnByValue": True,
+        },
+        session_id=session,
+    )
+    raw = result["result"].get("value") or {}
+    items = raw.get("items") or []
+    tree, cut = _render_tree(items, bool(raw.get("truncated")), int(raw.get("total") or 0))
+    text = str(raw.get("text") or "")
+    out = {
+        "url": raw.get("url"),
+        "title": raw.get("title"),
+        "elements": tree,
+        "elements_total": int(raw.get("total") or 0),
+        "truncated": cut,
+    }
+    if query is None:
+        out["text"] = text[:_TEXT_MAX_CHARS]
+        out["text_truncated"] = len(text) > _TEXT_MAX_CHARS
+        if not text.strip() and not items:
+            out["note"] = _NO_TEXT_NOTE
+    else:
+        out["query"] = query
+        out["matches"] = len(items)
+        if not items:
+            out["note"] = f"nic nie pasuje do {query!r} — spróbuj read_page albo innego słowa"
+    return out
+
+
+async def page_text(bot_id: str, query: str | None = None) -> dict:
+    """Snapshot karty na wierzchu: adres, tytuł, drzewo refów i tekst.
+
+    `query` zawęża wynik do pasujących elementów (narzędzie `find`) — refy są te
+    same, co w pełnym `read_page`, bo mapa i tak powstaje z całego przejścia DOM.
+    """
     async with _operation(bot_id):
         async with _attached(bot_id) as (cdp, session):
-            result = await cdp.call(
-                "Runtime.evaluate", {"expression": _PAGE_JS, "returnByValue": True}, session_id=session
-            )
-            return result["result"].get("value") or {}
+            return await _snapshot(cdp, session, query)
+
+
+async def _ref_point(cdp: "_Cdp", session: str, ref: str) -> tuple[float, float]:
+    """Ref → (x, y) środka elementu; przewija go do widoku. Rzuca `ValueError` z
+    komunikatem dla modelu, gdy refy są nieaktualne."""
+    result = await cdp.call(
+        "Runtime.evaluate",
+        {"expression": f"{_REF_JS}({json.dumps(str(ref))})", "returnByValue": True},
+        session_id=session,
+    )
+    value = result["result"].get("value") or {"error": "stale"}
+    if value.get("error"):
+        raise ValueError(_REF_ERRORS[value["error"]].format(ref=ref))
+    return float(value["x"]), float(value["y"])
+
+
+async def _resolved_refs(cdp: "_Cdp", session: str, events: list[dict]) -> dict[str, tuple[float, float]]:
+    """Każdy ref użyty w tej paczce zdarzeń rozwiązany RAZ — klik to trzy zdarzenia
+    na tym samym elemencie, a trzy `scrollIntoView` z rzędu tylko mylą pozycję."""
+    points: dict[str, tuple[float, float]] = {}
+    for event in events:
+        ref = event.get("ref")
+        if ref and str(ref) not in points:
+            points[str(ref)] = await _ref_point(cdp, session, str(ref))
+    return points
 
 
 _start_lock = asyncio.Lock()

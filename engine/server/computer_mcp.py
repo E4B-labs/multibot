@@ -74,6 +74,18 @@ async def _input(events: list[dict]) -> str:
     return "ok"
 
 
+def _click_events(where: dict, button: str = "left") -> list[dict]:
+    """Trzy zdarzenia myszy jednego kliknięcia. `where` to `{"ref": …}` albo
+    `{"x": …, "y": …}` — silnik rozwiązuje ref w tej samej sesji CDP, więc klik
+    po refie kosztuje dokładnie tyle samo żądań, co klik po współrzędnych."""
+    hit = {"kind": "mouse", **where, "button": button, "clickCount": 1}
+    return [
+        {"kind": "mouse", "type": "mouseMoved", **where},
+        {**hit, "type": "mousePressed"},
+        {**hit, "type": "mouseReleased"},
+    ]
+
+
 @mcp.tool()
 async def screenshot() -> Image:
     """Zrzut aktywnej karty przeglądarki bota (JPEG). Zrób go przed każdą akcją
@@ -93,18 +105,65 @@ async def navigate(url: str) -> str:
 
 @mcp.tool()
 async def read_page() -> dict:
-    """Adres, tytuł i widoczny tekst aktywnej karty — czytaj to zamiast zgadywać
-    ze zrzutu, gdy potrzebna jest treść, a nie układ."""
+    """PIERWSZE narzędzie na każdej stronie — tańsze od zrzutu ~40× i wystarcza
+    do klikania. Zwraca `elements`: drzewo interaktywnych elementów i nagłówków z
+    numerowanymi refami, np. `[e12] button "Zaloguj"`, `[e13] textbox "Email"
+    placeholder="jan@..."`; wcięcie = zagnieżdżenie w stronie. Refy podajesz do
+    `click(ref=...)`, `type_text(ref=...)` i `actions` — nie musisz znać pikseli.
+
+    Zwraca też `text` (widoczny `innerText`, obcięte do 4000 znaków — `text_truncated`
+    mówi, czy uciął) oraz `url`/`title`.
+
+    Refy są ważne DO NAJBLIŻSZEJ ZMIANY DOKUMENTU: po `navigate`, po kliknięciu,
+    które przeładowało stronę, i po odświeżeniu trzeba zawołać `read_page` (albo
+    `find`) jeszcze raz — stary ref odpowie wtedy błędem, nie kliknie na oślep.
+
+    Czego NIE zwraca: treści `<iframe>` z innego origin, elementów niewidocznych,
+    i niczego na karcie z PDF-em (wbudowany podglądacz nie daje `innerText` — wtedy
+    w odpowiedzi jest `note` i jedyną drogą jest `screenshot`). Przy ponad 300
+    elementach lista jest ucinana — zawężaj wtedy przez `find`."""
     await _ensure()
     return await _call("GET", f"/api/bots/{_bot}/computer/page")
 
 
 @mcp.tool()
-async def click(x: float, y: float, button: str = "left") -> str:
-    """Klik w punkt (x, y) w pikselach CSS aktywnej karty."""
-    move = {"kind": "mouse", "type": "mouseMoved", "x": x, "y": y}
-    hit = {"kind": "mouse", "x": x, "y": y, "button": button, "clickCount": 1}
-    return await _input([move, {**hit, "type": "mousePressed"}, {**hit, "type": "mouseReleased"}])
+async def find(query: str) -> dict:
+    """Znajdź na stronie elementy pasujące do `query` i zwróć ich refy — tańsze
+    niż całe `read_page`, gdy wiesz, czego szukasz („Zaloguj", „email", „koszyk").
+
+    Szuka bez rozróżniania wielkości liter w: widocznym tekście elementu,
+    `aria-label`, `placeholder`, wpisanej wartości pola i nazwie roli (`button`,
+    `link`, `textbox`, `checkbox`, `combobox`, `heading`…) — więc `find("textbox")`
+    wylistuje same pola do wpisywania.
+
+    Refy są dokładnie te same, co z `read_page` (mapa powstaje z całej strony) i
+    tak samo tracą ważność przy zmianie dokumentu. Pusty wynik = `matches: 0`,
+    wtedy spróbuj innego słowa albo `read_page`."""
+    await _ensure()
+    return await _call("GET", f"/api/bots/{_bot}/computer/page", params={"find": query})
+
+
+@mcp.tool()
+async def click(
+    ref: str | None = None,
+    x: float | None = None,
+    y: float | None = None,
+    button: str = "left",
+) -> str:
+    """Kliknij element. PREFERUJ `ref` ze `read_page`/`find` — trafia w element
+    niezależnie od przewijania i układu; silnik sam przewinie go do widoku.
+    `x`/`y` (piksele CSS ze `screenshot`) są wyjściem awaryjnym, gdy refu nie ma.
+
+    `button`: `left` (domyślnie), `middle`, `right`. Zawsze pojedynczy klik —
+    podwójnego i modyfikatorów (Ctrl+klik) to narzędzie nie umie.
+
+    NIE czeka na skutek i nic nie zwraca poza `ok`: po kliknięciu, które mogło
+    zmienić stronę, zawołaj `read_page`. Jeśli zaraz po kliku wpisujesz tekst i
+    naciskasz Enter, zrób to jednym `actions` zamiast trzech osobnych wywołań."""
+    if ref is None and (x is None or y is None):
+        raise ValueError("podaj `ref` (z read_page/find) albo oba `x` i `y`")
+    where = {"ref": ref} if ref is not None else {"x": float(x), "y": float(y)}  # type: ignore[arg-type]
+    return await _input(_click_events(where, button))
 
 
 @mcp.tool()
@@ -124,9 +183,19 @@ async def move(points: list[list[float]]) -> str:
 
 
 @mcp.tool()
-async def type_text(text: str) -> str:
-    """Wpisz tekst tam, gdzie stoi kursor (najpierw kliknij w pole)."""
-    return await _input([{"kind": "text", "text": text}])
+async def type_text(text: str, ref: str | None = None) -> str:
+    """Wpisz tekst. Z `ref` (ze `read_page`/`find`) narzędzie samo kliknie w to
+    pole i dopiero wpisze — bez `ref` tekst idzie tam, gdzie AKTUALNIE stoi fokus.
+
+    Czego NIE robi: **nie czyści pola** (dopisuje do tego, co już w nim jest — do
+    wyczyszczenia użyj `key("a", modifiers=["ctrl"])` i `key("Delete")`) i **nie
+    naciska Enter** (to osobne `key("Enter")`).
+
+    Tekst wchodzi jednym `Input.insertText`, więc nie generuje zdarzeń klawiatury
+    per znak: pola reagujące dopiero na `keydown` (autouzupełnianie, maski, część
+    edytorów) mogą go nie zauważyć — tam wpisuj znak po znaku przez `key`."""
+    focus = _click_events({"ref": ref}) if ref else []
+    return await _input([*focus, {"kind": "text", "text": text}])
 
 
 @mcp.tool()

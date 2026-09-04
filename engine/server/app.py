@@ -429,9 +429,12 @@ async def computer_navigate(bot_id: str, body: NavigateIn) -> dict:
 
 
 @app.get("/api/bots/{bot_id}/computer/page")
-async def computer_page(bot_id: str) -> dict:
+async def computer_page(bot_id: str, find: str | None = None) -> dict:
+    """Snapshot karty: drzewo refów + tekst. `find` zawęża wynik do pasujących
+    elementów (narzędzie `find` serwera MCP) — refy są te same, co w pełnym
+    snapshocie, bo mapa i tak powstaje z całego przejścia DOM."""
     _require(bot_id)
-    return await computer.page_text(bot_id)
+    return await computer.page_text(bot_id, find)
 
 
 @app.get("/health")

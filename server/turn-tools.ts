@@ -16,6 +16,7 @@ export const COMPUTER_MCP_TOOLS = [
   "screenshot",
   "navigate",
   "read_page",
+  "find",
   "click",
   "move",
   "type_text",
