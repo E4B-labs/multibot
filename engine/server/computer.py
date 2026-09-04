@@ -53,6 +53,21 @@ _CALL_TIMEOUT = 20.0
 _POLL_INTERVAL = 1.0
 _DEFAULT_FPS = 5
 _JPEG_QUALITY = 60
+# Zrzut DLA AGENTA to nie to samo, co klatka live view: model płaci za obraz
+# tokenami. Zmierzone na telefonie: q60 = 77,8 kB / 0,268 s, q40 = 66,4 kB /
+# 0,229 s. Live view zostaje na `_JPEG_QUALITY` — tam obraz ogląda człowiek.
+#
+# SKALOWANIA TU CELOWO NIE MA, choć kusi (zmierzone: dałoby 53 % mniej bajtów
+# przy viewporcie 1920×973). Dwa powody, oba sprawdzone na żywym chromium:
+#   1. `clip` w `Page.captureScreenshot` liczy się od DOKUMENTU, nie od viewportu —
+#      `{x: 0, y: 0}` na stronie przewiniętej o 2480 px zwraca górę dokumentu,
+#      a nie to, co widać. Dałoby się to naprawić `scrollX`/`scrollY`, ale…
+#   2. …skala rozjeżdża piksele obrazu z pikselami CSS, w których klika
+#      `/computer/input`. Model czytający przycisk z obrazu 1280 px wysłałby
+#      `click(x=640)` tam, gdzie w CSS jest 960 — cicho, o 1,5× obok.
+# Skalowanie wróci razem z przeliczaniem współrzędnych z powrotem (albo
+# z `Emulation.setDeviceMetricsOverride`, które zmienia viewport NAPRAWDĘ).
+_SHOT_QUALITY = 40
 
 # Klawisze niedrukowalne nie wejdą do strony bez `windowsVirtualKeyCode` — UI
 # (Task 3) wysyła tylko `key`/`code`, więc VK wyliczamy tutaj.
@@ -351,13 +366,38 @@ async def _show_cursor(cdp, session, event: dict, color: str, ring: bool) -> Non
         pass
 
 
+# Maska modyfikatorów CDP (`Input.dispatchKeyEvent.modifiers`). Bez niej skróty
+# typu Ctrl+A w ogóle nie działały: modyfikator szedł na sztywno jako 0.
+_MODIFIERS = {"alt": 1, "ctrl": 2, "control": 2, "meta": 4, "cmd": 4, "command": 4, "shift": 8}
+
+
+def modifier_bits(value) -> int:
+    """`["ctrl", "shift"]` albo gotowa maska → maska CDP. Nieznana nazwa = 0, nie błąd:
+    lepiej wysłać goły klawisz niż wywrócić turę na literówce w nazwie modyfikatora."""
+    if isinstance(value, (list, tuple, set)):
+        bits = 0
+        for name in value:
+            bits |= _MODIFIERS.get(str(name).strip().lower(), 0)
+        return bits
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _key_params(event: dict) -> dict:
     key, code = str(event.get("key") or ""), str(event.get("code") or "")
+    modifiers = modifier_bits(event.get("modifiers"))
     text = event.get("text")
     if text is None:
         # Enter bez `text` nie zatwierdzi formularza; znak drukowalny bez `text`
-        # wygeneruje samo zdarzenie klawisza, bez wpisania litery.
-        text = "\r" if key == "Enter" else (key if len(key) == 1 else "")
+        # wygeneruje samo zdarzenie klawisza, bez wpisania litery. `Space` pisane
+        # nazwą (a tak podaje je opis narzędzia) też musi wstawić spację.
+        text = "\r" if key == "Enter" else (" " if key in ("Space", " ") else (key if len(key) == 1 else ""))
+    # …ale przy Ctrl/Alt/Meta `text` WPISAŁBY literę zamiast wykonać skrót:
+    # Ctrl+A z tekstem "a" wstawia "a" i nie zaznacza niczego.
+    if modifiers & 0b111:
+        text = ""
     vk = _VK.get(key) or _VK.get(code) or (ord(key.upper()) if len(key) == 1 else 0)
     kind = str(event.get("type") or "keyDown")
     params = {
@@ -366,7 +406,7 @@ def _key_params(event: dict) -> dict:
         "code": code,
         "windowsVirtualKeyCode": vk,
         "nativeVirtualKeyCode": vk,
-        "modifiers": int(event.get("modifiers") or 0),
+        "modifiers": modifiers,
     }
     if text and kind == "keyDown":
         params["text"] = text
@@ -601,7 +641,7 @@ async def status(bot_id: str) -> dict:
 
 
 @asynccontextmanager
-async def _attached(bot_id: str):
+async def _attached(bot_id: str, on_event=None):
     """Krótkie połączenie CDP + sesja na karcie na wierzchu.
 
     Osobne od mostka `_Bridge`, żeby operacje bezstanowe (zrzut, input z MCP,
@@ -615,7 +655,7 @@ async def _attached(bot_id: str):
         targets = []
     if not targets:
         raise KeyError(f"bot {bot_id} nie ma uruchomionej przeglądarki")
-    cdp = await _Cdp.open(url)
+    cdp = await _Cdp.open(url, on_event)
     try:
         yield cdp, await cdp.attach(targets[0]["id"])
     finally:
@@ -631,12 +671,15 @@ async def screenshot(bot_id: str) -> str:
     słabym telefonie (s10e) potrafi wisieć dziesiątki sekund — a do tego taki
     obraz nie pokrywa się ze współrzędnymi CSS viewportu, w których agent
     klika. Robimy dokładnie to, co widzi użytkownik, i tylko tyle.
+
+    Bez `clip` — dlaczego, patrz komentarz przy `_SHOT_QUALITY`: `clip` liczy się
+    od dokumentu, a skala rozjechałaby piksele obrazu ze współrzędnymi klikania.
     """
     async with _operation(bot_id):
         async with _attached(bot_id) as (cdp, session):
             result = await cdp.call(
                 "Page.captureScreenshot",
-                {"format": "jpeg", "quality": _JPEG_QUALITY, "captureBeyondViewport": False},
+                {"format": "jpeg", "quality": _SHOT_QUALITY, "captureBeyondViewport": False},
                 session_id=session,
             )
             return result["data"]
@@ -650,59 +693,519 @@ async def send_input(bot_id: str, events: list[dict]) -> None:
     `call`, nie `send`: połączenie zamyka się zaraz po żądaniu, więc odpowiedź
     CDP jest jedynym dowodem, że przeglądarka zdążyła zdarzenie przetworzyć.
     """
-    color = _browser_state(bot_id).get("cursor_color")
-    color = color if isinstance(color, str) and _HEX_RE.match(color) else _CURSOR_DEFAULT
     async with _operation(bot_id):
         async with _attached(bot_id) as (cdp, session):
-            origin: dict = {}
-            if _can_warp() and any(e.get("kind") == "mouse" for e in events):
+            await _dispatch(bot_id, cdp, session, events)
+
+
+def _cursor_color(bot_id: str) -> str:
+    color = _browser_state(bot_id).get("cursor_color")
+    return color if isinstance(color, str) and _HEX_RE.match(color) else _CURSOR_DEFAULT
+
+
+async def _dispatch(bot_id: str, cdp: "_Cdp", session: str, events: list[dict]) -> None:
+    """Wyślij paczkę zdarzeń w JUŻ otwartej sesji CDP.
+
+    Zdarzenie myszy może wskazać element przez `ref` (ze snapshotu) zamiast
+    `x`/`y` — rozwiązanie refa idzie tą samą sesją, więc klik po refie to
+    dokładnie jedno żądanie HTTP do silnika, tak jak klik po współrzędnych.
+    """
+    color = _cursor_color(bot_id)
+    points = _RefPoints(cdp, session)
+    origin: dict = {}
+    if _can_warp() and any(e.get("kind") == "mouse" for e in events):
+        try:
+            got = await cdp.call(
+                "Runtime.evaluate",
+                {"expression": _VIEWPORT_ORIGIN_JS, "returnByValue": True},
+                session_id=session,
+            )
+            origin = got["result"].get("value") or {}
+        except Exception:  # noqa: BLE001 — podgląd, nie akcja
+            origin = {}
+    # Pierścień zamiast strzałki tylko wtedy, gdy PRAWDZIWY wskaźnik
+    # naprawdę pojedzie za agentem — inaczej user zostałby z samą obwódką
+    # w jednym miejscu i wskaźnikiem w drugim.
+    warp = bool(origin)
+    for event in events:
+        kind = event.get("kind")
+        if kind == "mouse":
+            ref = event.get("ref")
+            if ref:
+                x, y = await points.point(str(ref))
+                event = {**event, "x": x, "y": y}
+            # kursor PRZED zdarzeniem: klik może zabrać stronę gdzie indziej
+            await _show_cursor(cdp, session, event, color, warp)
+            await asyncio.to_thread(_warp_pointer, origin, event)
+            await cdp.call("Input.dispatchMouseEvent", _mouse_params(event), session_id=session)
+        elif kind == "key":
+            await cdp.call("Input.dispatchKeyEvent", _key_params(event), session_id=session)
+        elif kind == "text":  # wpisanie ciągu jednym zdarzeniem (bez VK per znak)
+            await cdp.call("Input.insertText", {"text": str(event.get("text") or "")}, session_id=session)
+
+
+# ── batch akcji w jednym wywołaniu ────────────────────────────────────────────
+#
+# Sekwencja `click → type_text → key Enter` to dziś CZTERY rundy modelu i cztery
+# razy narzut MCP (~0,2 s) plus `_attached` (~0,05–0,10 s). Batch robi to jedną
+# rundą i jedną sesją CDP.
+#
+# KONTRAKT NA PRZERWANIE jest ten sam, co u Anthropica, w browser-use i OpenClaw:
+#   * błąd kroku zatrzymuje resztę („Not executed: an earlier action failed"),
+#   * krok, który zmienił dokument (nawigacja, przeładowanie), też zatrzymuje —
+#     bo dalsze refy i współrzędne odnoszą się do strony, której już nie ma
+#     (browser-use: „Page changed after {action} — skipping N remaining actions").
+# Nawigacji w batchu nie ma z tego samego powodu, dla którego zabrania jej
+# OpenClaw: to zawsze byłby ostatni krok.
+_MAX_ACTIONS = 20
+_MAX_WAIT_MS = 10_000
+
+# Losowy znacznik przeżywa w oknie tak długo, jak sam dokument — nowy dokument
+# (nawigacja, reload, submit formularza) dostaje nowy, więc porównanie
+# `url|token` wykrywa też powrót pod ten sam adres.
+_DOC_JS = "(function(){ if(!window.__multibot_doc__) window.__multibot_doc__ = String(Math.random()); return location.href + '|' + window.__multibot_doc__; })()"
+
+
+async def _doc_state(cdp: "_Cdp", session: str) -> str:
+    """Tożsamość bieżącego dokumentu. W trakcie nawigacji `Runtime.evaluate` rzuca
+    („Execution context was destroyed") — to też jest zmiana dokumentu, nie błąd."""
+    try:
+        result = await cdp.call(
+            "Runtime.evaluate", {"expression": _DOC_JS, "returnByValue": True}, session_id=session
+        )
+        return str(result["result"].get("value") or "")
+    except Exception:  # noqa: BLE001
+        return f"__zmiana__{time.monotonic()}"
+
+
+async def _wait_load(cdp: "_Cdp", session: str, timeout: float = 10.0) -> None:
+    """Poczekaj na `document.readyState === 'complete'`. `Page.navigate` wraca po
+    commicie, nie po wczytaniu — bez tego snapshot pokazywałby starą stronę."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            result = await cdp.call(
+                "Runtime.evaluate",
+                {"expression": "document.readyState", "returnByValue": True},
+                session_id=session,
+            )
+            if result["result"].get("value") == "complete":
+                return
+        except Exception:  # noqa: BLE001 — kontekst zniknął w trakcie nawigacji
+            pass
+        await asyncio.sleep(0.1)
+
+
+def _action_events(action: dict) -> list[dict]:
+    """Krok batcha → zdarzenia wejścia. `ValueError` = zły krok, czyli stop."""
+    kind = str(action.get("type") or "")
+    if kind == "click":
+        ref, x, y = action.get("ref"), action.get("x"), action.get("y")
+        if ref is None and (x is None or y is None):
+            raise ValueError("click potrzebuje `ref` albo pary `x`/`y`")
+        where = {"ref": str(ref)} if ref is not None else {"x": float(x), "y": float(y)}
+        hit = {"kind": "mouse", **where, "button": str(action.get("button") or "left"), "clickCount": 1}
+        return [
+            {"kind": "mouse", "type": "mouseMoved", **where},
+            {**hit, "type": "mousePressed"},
+            {**hit, "type": "mouseReleased"},
+        ]
+    if kind == "type_text":
+        ref = action.get("ref")
+        focus: list[dict] = []
+        if ref is not None:
+            focus = _action_events({"type": "click", "ref": ref})
+        return [*focus, {"kind": "text", "text": str(action.get("text") or "")}]
+    if kind == "key":
+        name = str(action.get("name") or action.get("key") or "")
+        if not name:
+            raise ValueError("key potrzebuje `name`")
+        base = {"kind": "key", "key": name, "modifiers": action.get("modifiers") or 0}
+        return [{**base, "type": "keyDown"}, {**base, "type": "keyUp"}]
+    if kind == "scroll":
+        return [{
+            "kind": "mouse", "type": "mouseWheel",
+            "x": float(action.get("x") or 0), "y": float(action.get("y") or 0),
+            "deltaX": float(action.get("dx") or 0), "deltaY": float(action.get("dy") or 400),
+        }]
+    if kind == "wait":
+        return []
+    raise ValueError(f"nieznany krok {kind!r}; dozwolone: click, type_text, key, scroll, wait")
+
+
+def _describe(action: dict) -> str:
+    kind = str(action.get("type") or "?")
+    detail = action.get("ref") or action.get("name") or action.get("text") or action.get("ms") or action.get("dy")
+    return f"{kind} {detail}" if detail is not None else kind
+
+
+# Zdarzenia CDP, które znaczą "ta strona już nie jest tą stroną".
+#
+# ZMIERZONE (chromium, klik w link i `location.reload()`), bo intuicja tu myli:
+#   * `Page.frameStartedNavigating` leci 7–17 ms po kliknięciu, PRZED siecią, i
+#     przychodzi jeszcze zanim `_dispatch` wróci. `Page.frameNavigated` dopiero
+#     po ~0,42 s — na nim nie da się oprzeć kroku batcha.
+#   * `location.reload()` NIE zmienia znacznika dokumentu (Chromium potrafi
+#     zachować kontekst JS), więc reload łapie WYŁĄCZNIE zdarzenie.
+#   * odwrotnie przy nawigacji cross-document: kontekst wykonania ginie, więc
+#     `_doc_state` zwraca sentinel od razu — to jest siatka bezpieczeństwa na
+#     wypadek, gdyby zdarzenia `Page.*` nie doszły.
+# Stąd OBA źródła: żadne samo nie pokrywa obu przypadków.
+_NAV_EVENTS = {"Page.frameStartedNavigating", "Page.frameNavigated", "Page.navigatedWithinDocument"}
+
+
+class _NavWatch:
+    """Flaga „główna ramka nawigowała". Ramki podrzędne (reklamy, widżety)
+    NIE liczą się: na żywej stronie iframe przeładowuje się bez końca, a refy
+    ramki głównej są wtedy dalej dobre."""
+
+    def __init__(self) -> None:
+        self.frame_id: str | None = None
+        self.hit = False
+
+    async def __call__(self, msg: dict) -> None:
+        if msg.get("method") not in _NAV_EVENTS:
+            return
+        params = msg.get("params") or {}
+        frame = params.get("frame") or params
+        if frame.get("frameId", frame.get("id")) == self.frame_id:
+            self.hit = True
+
+
+async def run_actions(bot_id: str, actions: list[dict]) -> dict:
+    """Wykonaj listę kroków sekwencyjnie w JEDNEJ sesji CDP i zwróć świeży snapshot."""
+    if len(actions) > _MAX_ACTIONS:
+        raise ValueError(f"za dużo kroków: {len(actions)} (limit {_MAX_ACTIONS})")
+    watch = _NavWatch()
+    async with _operation(bot_id):
+        async with _attached(bot_id, watch) as (cdp, session):
+            await cdp.call("Page.enable", session_id=session)
+            tree = await cdp.call("Page.getFrameTree", session_id=session)
+            watch.frame_id = ((tree.get("frameTree") or {}).get("frame") or {}).get("id")
+            # Nawigacja z POPRZEDNIEJ tury mogła się jeszcze commitować, gdy
+            # otwieraliśmy sesję — bez tego zerowania krok 0 dostałby cudzy alarm.
+            watch.hit = False
+
+            executed: list[str] = []
+            stopped: dict | None = None
+            for index, action in enumerate(actions):
+                before = await _doc_state(cdp, session)
                 try:
-                    got = await cdp.call(
-                        "Runtime.evaluate",
-                        {"expression": _VIEWPORT_ORIGIN_JS, "returnByValue": True},
-                        session_id=session,
-                    )
-                    origin = got["result"].get("value") or {}
-                except Exception:  # noqa: BLE001 — podgląd, nie akcja
-                    origin = {}
-            # Pierścień zamiast strzałki tylko wtedy, gdy PRAWDZIWY wskaźnik
-            # naprawdę pojedzie za agentem — inaczej user zostałby z samą obwódką
-            # w jednym miejscu i wskaźnikiem w drugim.
-            warp = bool(origin)
-            for event in events:
-                kind = event.get("kind")
-                if kind == "mouse":
-                    # kursor PRZED zdarzeniem: klik może zabrać stronę gdzie indziej
-                    await _show_cursor(cdp, session, event, color, warp)
-                    await asyncio.to_thread(_warp_pointer, origin, event)
-                    await cdp.call("Input.dispatchMouseEvent", _mouse_params(event), session_id=session)
-                elif kind == "key":
-                    await cdp.call("Input.dispatchKeyEvent", _key_params(event), session_id=session)
-                elif kind == "text":  # wpisanie ciągu jednym zdarzeniem (bez VK per znak)
-                    await cdp.call("Input.insertText", {"text": str(event.get("text") or "")}, session_id=session)
+                    events = _action_events(action)
+                    if events:
+                        await _dispatch(bot_id, cdp, session, events)
+                    if str(action.get("type")) == "wait":
+                        await asyncio.sleep(min(float(action.get("ms") or 0), _MAX_WAIT_MS) / 1000)
+                except Exception as err:  # noqa: BLE001 — błąd kroku kończy batch, nie turę
+                    stopped = {"index": index, "step": _describe(action), "reason": f"błąd: {err}"}
+                    break
+                executed.append(_describe(action))
+                # Zdarzenie łapie reload (znacznik przeżywa) i nawigację jeszcze
+                # niezatwierdzoną; `_doc_state` łapie zniszczony kontekst wykonania.
+                # Zmierzone: 8/8 poprawnych zatrzymań na reloadzie i 0/8 fałszywych
+                # alarmów na kliknięciu bez nawigacji.
+                if watch.hit or await _doc_state(cdp, session) != before:
+                    stopped = {
+                        "index": index,
+                        "step": _describe(action),
+                        "reason": "dokument się zmienił (nawigacja/przeładowanie) — dalsze kroki pominięte, "
+                                  "bo refy i współrzędne dotyczyły poprzedniej strony",
+                    }
+                    await _wait_load(cdp, session)
+                    break
+            out = {
+                "executed": executed,
+                # Krok, na którym batch stanął, NIE liczy się ani do `executed`,
+                # ani do `skipped` — jest opisany w `stopped`.
+                "skipped": 0 if stopped is None else len(actions) - int(stopped["index"]) - 1,
+                "stopped": stopped,
+            }
+            try:
+                out["page"] = await _snapshot(cdp, session)
+            except Exception as err:  # noqa: BLE001
+                # Strona mogła być w połowie nawigacji ("Execution context was
+                # destroyed"). Raport z tego, co się wykonało, jest wtedy WAŻNIEJSZY
+                # niż snapshot — bez tego cały batch wracał jako 500 i model tracił
+                # informację, które kroki poszły.
+                out["page"] = None
+                out["page_error"] = f"snapshot niedostępny po batchu: {err}; zawołaj read_page"
+            return out
 
 
 async def navigate(bot_id: str, url: str) -> None:
+    """`Page.navigate` wraca po COMMICIE, nie po wczytaniu — bez czekania `read_page`
+    zaraz po nawigacji potrafił zwrócić jeszcze starą stronę (i stare refy).
+    Czekamy więc na `readyState === "complete"`, z limitem: strona, która wisi na
+    jednym trackerze, nie może zablokować tury."""
     async with _operation(bot_id):
         async with _attached(bot_id) as (cdp, session):
             await cdp.call("Page.navigate", {"url": url}, session_id=session)
+            await _wait_load(cdp, session)
 
 
-# `innerText`, nie `innerHTML`: model dostaje to, co widzi człowiek, a nie znaczniki.
-_PAGE_JS = (
-    "({url: location.href, title: document.title, "
-    "text: ((document.body && document.body.innerText) || '').slice(0, 20000)})"
+# ── snapshot strony z numerowanymi refami ─────────────────────────────────────
+#
+# Sam `innerText` (poprzednia wersja `read_page`) nie daje modelowi ŻADNEGO
+# sposobu na kliknięcie: bez pozycji, bez pól, bez linków. Jedyną drogą był
+# zrzut ekranu i zgadywanie pikseli — 0,24 s kodowania JPEG i ~1,7 tys. tokenów
+# obrazu na każdy klik. Snapshot z refami kosztuje zmierzone 3–6 ms
+# `Runtime.evaluate` i jest tekstem, więc model klika `ref`, nie piksel.
+#
+# GDZIE ŻYJE MAPA REFÓW: w samej stronie (`window.__multibot_refs__`), nie po
+# stronie silnika. To nie jest skrót — to unieważnianie za darmo: nawigacja i
+# każda zmiana dokumentu kasują globalne JS-y, więc nieaktualny ref rozpoznaje
+# się sam ("stale") zamiast trafić w przypadkowy element na nowej stronie.
+_SNAPSHOT_MAX_CHARS = 8000
+_SNAPSHOT_MAX_ELEMENTS = 300
+_TEXT_MAX_CHARS = 4000
+
+_SNAPSHOT_JS = r"""(function(query, limit) {
+  var ROLES = {button:1, link:1, checkbox:1, radio:1, textbox:1, searchbox:1, combobox:1,
+               menuitem:1, menuitemcheckbox:1, menuitemradio:1, tab:1, 'switch':1,
+               slider:1, option:1, treeitem:1, heading:1};
+  var SKIP = {SCRIPT:1, STYLE:1, NOSCRIPT:1, SVG:1, TEMPLATE:1, HEAD:1};
+
+  function role(el) {
+    var explicit = (el.getAttribute('role') || '').toLowerCase();
+    if (explicit) return ROLES[explicit] ? explicit : '';
+    var tag = el.tagName.toUpperCase();
+    if (tag === 'A') return el.hasAttribute('href') ? 'link' : '';
+    if (tag === 'BUTTON' || tag === 'SUMMARY') return 'button';
+    if (tag === 'SELECT') return 'combobox';
+    if (tag === 'TEXTAREA') return 'textbox';
+    if (/^H[1-6]$/.test(tag)) return 'heading';
+    if (tag === 'INPUT') {
+      var t = (el.type || 'text').toLowerCase();
+      if (t === 'hidden') return '';
+      if (t === 'checkbox') return 'checkbox';
+      if (t === 'radio') return 'radio';
+      if (t === 'search') return 'searchbox';
+      if (t === 'submit' || t === 'button' || t === 'reset' || t === 'image') return 'button';
+      return 'textbox';
+    }
+    if (el.isContentEditable) return 'textbox';
+    if (el.hasAttribute('onclick')) return 'button';
+    var ti = el.getAttribute('tabindex');
+    if (ti !== null && ti !== '-1') return 'button';
+    return '';
+  }
+
+  function visible(el) {
+    if (el.hidden) return false;
+    var r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    var s = window.getComputedStyle(el);
+    return s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
+  }
+
+  function name(el) {
+    var n = el.getAttribute('aria-label') || el.getAttribute('alt') || '';
+    if (!n && el.labels && el.labels.length) n = el.labels[0].innerText || '';
+    if (!n) n = (el.innerText || el.textContent || '');
+    if (!n) n = el.getAttribute('title') || el.getAttribute('name') || '';
+    return String(n).replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+
+  var items = [], refs = [], truncated = false;
+
+  function walk(node, depth) {
+    // Sprawdzenie limitu NA WEJŚCIU, nie tylko przy dopisywaniu: `return` z
+    // głębokiej ramki nie zatrzymuje pętli rodzica, więc bez tego chodziliśmy
+    // po całym DOM-ie długo po zapełnieniu listy.
+    if (refs.length >= limit) { truncated = true; return; }
+    var kids = node.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var el = kids[i];
+      if (SKIP[el.tagName.toUpperCase()]) continue;
+      var next = depth, r = role(el);
+      if (r && visible(el)) {
+        if (refs.length >= limit) { truncated = true; return; }
+        refs.push(el);
+        var item = {ref: 'e' + refs.length, role: r, name: name(el), depth: depth, attrs: {}};
+        var ph = el.getAttribute('placeholder');
+        if (ph) item.attrs.placeholder = String(ph).slice(0, 60);
+        if (typeof el.value === 'string' && el.value && r !== 'button') {
+          item.attrs.value = el.value.slice(0, 60);
+        }
+        if (el.checked === true) item.attrs.checked = 'true';
+        if (el.disabled === true) item.attrs.disabled = 'true';
+        items.push(item);
+        next = depth + 1;
+      }
+      walk(el, next);
+    }
+  }
+
+  walk(document.body || document.documentElement, 0);
+  window.__multibot_refs__ = refs;
+
+  var matched = items;
+  if (query) {
+    var q = String(query).toLowerCase();
+    matched = items.filter(function(it) {
+      return (it.name || '').toLowerCase().indexOf(q) >= 0
+        || it.role.indexOf(q) >= 0
+        || (it.attrs.placeholder || '').toLowerCase().indexOf(q) >= 0
+        || (it.attrs.value || '').toLowerCase().indexOf(q) >= 0;
+    });
+  }
+  return {
+    url: location.href,
+    title: document.title,
+    text: ((document.body && document.body.innerText) || ''),
+    items: matched,
+    total: items.length,
+    truncated: truncated
+  };
+})"""
+
+# Ref → punkt kliknięcia. `isConnected` łapie element, który wypadł z DOM-u bez
+# nawigacji (re-render Reacta); brak `__multibot_refs__` = po prostu inny dokument.
+_REF_JS = r"""(function(ref) {
+  var refs = window.__multibot_refs__;
+  if (!refs || !refs.length) return {error: 'stale'};
+  var i = parseInt(String(ref).replace(/^e/i, ''), 10);
+  var el = refs[i - 1];
+  if (!el || !el.isConnected) return {error: 'missing'};
+  // `behavior: 'instant'` OBOWIĄZKOWO: bez niego strona z `scroll-behavior: smooth`
+  // przewija się animacją, a `getBoundingClientRect()` linijkę niżej czyta pozycję
+  // SPRZED przewinięcia — klik ląduje wtedy w cudzy element.
+  try { el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'}); } catch (e) {}
+  var r = el.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return {error: 'hidden'};
+  return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+})"""
+
+_REF_ERRORS = {
+    "stale": "ref {ref} jest nieaktualny: strona zmieniła dokument od ostatniego read_page/find — zawołaj read_page jeszcze raz",
+    "missing": "ref {ref} nie istnieje w tym snapshocie (albo element zniknął ze strony) — zawołaj read_page jeszcze raz",
+    "hidden": "ref {ref} wskazuje element o zerowym rozmiarze — nie da się w niego kliknąć",
+}
+
+# Pusty `innerText` i zero elementów to na ogół wbudowany podgląd PDF albo canvas
+# (zmierzone na telefonie: `read_page` na karcie z PDF-em = 115 B pustki). Model
+# musi to usłyszeć wprost, bo inaczej wywoła read_page jeszcze raz.
+_NO_TEXT_NOTE = (
+    "Ta karta nie udostępnia tekstu ani elementów (wbudowany podgląd PDF, canvas albo "
+    "cross-origin iframe). Jedyną drogą jest tu `screenshot`."
 )
 
 
-async def page_text(bot_id: str) -> dict:
-    """Adres, tytuł i tekst karty na wierzchu — czytanie strony dla agenta."""
+def _render_tree(items: list[dict], truncated: bool, total: int) -> tuple[str, bool]:
+    """Płaska lista z JS → wcięte linie `[e12] button "Zaloguj"`, przycięte do limitu.
+
+    Renderujemy w Pythonie, nie w JS: format da się wtedy sprawdzić testem bez
+    przeglądarki, a `Runtime.evaluate` zostaje przy jednej robocie (chodzenie po DOM).
+    """
+    lines: list[str] = []
+    used = 0
+    cut = truncated
+    # Mianownik to liczba WYPISYWANYCH pozycji, nie wszystkich na stronie —
+    # przy `find` „pokazano 3 z 250" mówiłoby o czymś, czego i tak nie wypisujemy.
+    shown_total = len(items)
+    for index, item in enumerate(items):
+        parts = [f"[{item.get('ref')}] {item.get('role')}"]
+        if item.get("name"):
+            parts.append(f'"{item["name"]}"')
+        for key, value in (item.get("attrs") or {}).items():
+            parts.append(f'{key}="{value}"' if key not in ("checked", "disabled") else key)
+        line = "  " * int(item.get("depth") or 0) + " ".join(parts)
+        if used + len(line) + 1 > _SNAPSHOT_MAX_CHARS:
+            cut = True
+            lines.append(
+                f"… obcięto: pokazano {index} z {shown_total} elementów "
+                f"(zawęź przez find(query) zamiast czytać całość)"
+            )
+            break
+        lines.append(line)
+        used += len(line) + 1
+    else:
+        if truncated:
+            lines.append(
+                f"… obcięto: strona ma więcej niż {_SNAPSHOT_MAX_ELEMENTS} elementów "
+                f"(zawęź przez find(query))"
+            )
+    return "\n".join(lines), cut
+
+
+async def _snapshot(cdp: "_Cdp", session: str, query: str | None = None) -> dict:
+    """Snapshot w JUŻ otwartej sesji CDP — używa go i `page_text`, i batch akcji."""
+    result = await cdp.call(
+        "Runtime.evaluate",
+        {
+            "expression": f"{_SNAPSHOT_JS}({json.dumps(query)}, {_SNAPSHOT_MAX_ELEMENTS})",
+            "returnByValue": True,
+        },
+        session_id=session,
+    )
+    raw = result["result"].get("value") or {}
+    items = raw.get("items") or []
+    tree, cut = _render_tree(items, bool(raw.get("truncated")), int(raw.get("total") or 0))
+    text = str(raw.get("text") or "")
+    out = {
+        "url": raw.get("url"),
+        "title": raw.get("title"),
+        "elements": tree,
+        "elements_total": int(raw.get("total") or 0),
+        "truncated": cut,
+    }
+    if query is None:
+        out["text"] = text[:_TEXT_MAX_CHARS]
+        out["text_truncated"] = len(text) > _TEXT_MAX_CHARS
+        if not text.strip() and not items:
+            out["note"] = _NO_TEXT_NOTE
+    else:
+        out["query"] = query
+        out["matches"] = len(items)
+        if not items:
+            out["note"] = f"nic nie pasuje do {query!r} — spróbuj read_page albo innego słowa"
+    return out
+
+
+async def page_text(bot_id: str, query: str | None = None) -> dict:
+    """Snapshot karty na wierzchu: adres, tytuł, drzewo refów i tekst.
+
+    `query` zawęża wynik do pasujących elementów (narzędzie `find`) — refy są te
+    same, co w pełnym `read_page`, bo mapa i tak powstaje z całego przejścia DOM.
+    """
     async with _operation(bot_id):
         async with _attached(bot_id) as (cdp, session):
-            result = await cdp.call(
-                "Runtime.evaluate", {"expression": _PAGE_JS, "returnByValue": True}, session_id=session
-            )
-            return result["result"].get("value") or {}
+            return await _snapshot(cdp, session, query)
+
+
+async def _ref_point(cdp: "_Cdp", session: str, ref: str) -> tuple[float, float]:
+    """Ref → (x, y) środka elementu; przewija go do widoku. Rzuca `ValueError` z
+    komunikatem dla modelu, gdy refy są nieaktualne."""
+    result = await cdp.call(
+        "Runtime.evaluate",
+        {"expression": f"{_REF_JS}({json.dumps(str(ref))})", "returnByValue": True},
+        session_id=session,
+    )
+    value = result["result"].get("value") or {"error": "stale"}
+    if value.get("error"):
+        raise ValueError(_REF_ERRORS[value["error"]].format(ref=ref))
+    return float(value["x"]), float(value["y"])
+
+
+class _RefPoints:
+    """Ref → punkt, rozwiązywany LENIWIE, tuż przed zdarzeniem, z cache'em na
+    ciąg zdarzeń o tym samym refie.
+
+    Rozwiązanie wszystkich refów z góry byłoby błędem: `_ref_point` przewija
+    element do widoku, więc rozwiązanie refa B przesuwa stronę i unieważnia
+    współrzędne refa A, wyliczone chwilę wcześniej. Klik (trzy zdarzenia na tym
+    samym refie) i tak płaci za rozwiązanie raz.
+    """
+
+    def __init__(self, cdp: "_Cdp", session: str):
+        self._cdp, self._session = cdp, session
+        self._ref: str | None = None
+        self._point: tuple[float, float] = (0.0, 0.0)
+
+    async def point(self, ref: str) -> tuple[float, float]:
+        if ref != self._ref:
+            self._ref, self._point = ref, await _ref_point(self._cdp, self._session, ref)
+        return self._point
 
 
 _start_lock = asyncio.Lock()
