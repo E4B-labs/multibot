@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowUp, Brain, CalendarClock, File as FileIcon, Loader2, Mic, Plus, Puzzle, Shield, SlidersHorizontal, Wand2, Wrench, X } from "lucide-react";
+import { ArrowUp, Brain, CalendarClock, File as FileIcon, Loader2, Mic, Plus, Puzzle, Shield, SlidersHorizontal, Wand2, Wrench, X, Zap } from "lucide-react";
 import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch } from "@/lib/auth";
@@ -230,6 +230,15 @@ const REASONING_LEVELS: Array<{ id: ReasoningLevel; label: string }> = [
 // Mirrors supportsMaxReasoning in server/drivers/codex.ts — front and server
 // live in separate tsconfig projects, so the one line stays duplicated.
 const supportsMaxReasoning = (model: string) => model === "gpt-6-astra" || model.startsWith("gpt-5.6-");
+
+/** multibot: „Fast mode" = service tier `priority` codeksa („Fast", 1.5x speed,
+ * increased usage). Ma go tylko driver `codex`, i tam każdy model poza
+ * `gpt-5.4-mini` (pusta lista `serviceTiers` w `model/list`). Mirror
+ * supportsFastMode z server/drivers/codex.ts — front i serwer to osobne
+ * projekty tsconfig, więc ta jedna linia zostaje zduplikowana. */
+export function fastModeAvailable(driverKind: string | undefined, model: string): boolean {
+  return driverKind === "codex" && model !== "gpt-5.4-mini";
+}
 
 export function reasoningLevels(model: string) {
   // Claude Code does not expose adaptive effort for Haiku; leave provider
@@ -567,6 +576,10 @@ export function Composer({ bot }: { bot: Bot }) {
   };
 
   const availableReasoning = reasoningLevels(bot.modelSelection.model);
+  const fastAvailable = fastModeAvailable(
+    state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.driverKind,
+    bot.modelSelection.model,
+  );
   useEffect(() => {
     setReasoning((current) => availableReasoning.some((item) => item.id === current) ? current : availableReasoning[0].id);
     setReasoningOpen(false);
@@ -1021,6 +1034,28 @@ export function Composer({ bot }: { bot: Bot }) {
             </div>
           )}
         </div>
+        {/* multibot: „Fast mode" — ustawienie bota (przeżywa restart), nie wybór
+            na turę jak poziom rozumowania. Tylko codex: to jego service tier
+            `priority`, w subskrypcji ChatGPT bez dopłaty, ale szybciej zjada limit. */}
+        {fastAvailable && (
+          <button
+            onClick={() => dispatch({ type: "updateBot", botId: bot.id, patch: { fastMode: !bot.fastMode } })}
+            aria-pressed={bot.fastMode === true}
+            aria-label={polish ? "Tryb szybki" : "Fast mode"}
+            className={cn(
+              "flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium",
+              bot.fastMode ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink",
+            )}
+            title={
+              polish
+                ? `Tryb szybki: ${bot.fastMode ? "włączony" : "wyłączony"} — 1,5x szybciej, szybciej zjada limit`
+                : `Fast mode: ${bot.fastMode ? "on" : "off"} — 1.5x speed, increased usage`
+            }
+          >
+            <Zap size={15} />
+            {!state.settingsOpen && <span>{polish ? "Szybko" : "Fast"}</span>}
+          </button>
+        )}
         {/* multibot: szybki przełącznik dostępu bota, obok poziomu rozumowania */}
         <ComposerAccessPill bot={bot} />
         <button

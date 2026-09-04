@@ -110,6 +110,10 @@ export interface BotRecord {
   /** Per-bot Composio account selection, keyed by toolkit slug. */
   composioAccounts?: Record<string, string>;
   modelSelection: ModelSelection;
+  /** multibot: „Fast mode" — bot woli szybszą odpowiedź od głębszej. Brak/false
+   *  = zachowanie dotychczasowe, więc stare bots.json czyta się bez migracji.
+   *  Znaczenie zależy od drivera; dziś czyta je tylko codex. */
+  fastMode?: boolean;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
   /** multibot (H1): NIE MA wyboru źródła komputera. Każdy bot ma jeden własny

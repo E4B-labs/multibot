@@ -2082,7 +2082,10 @@ opts?: {
         system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: visibleRoster, currentUser: promptUser, timeZone: cfg.timeZone }),
         integrations,
         ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
-      } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel });
+        // multibot: „Fast mode" jest USTAWIENIEM bota (przeżywa restart), nie
+        // wyborem na turę jak poziom rozumowania — stąd czytamy je z rekordu.
+        ...(bot.fastMode ? { fastMode: true } : {}),
+      } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel; fastMode?: boolean });
       if (integrations.computer) startScreenPoller(bot.id);
     } catch (e) {
       releaseTurnSlot(bot.id);
@@ -3487,8 +3490,11 @@ const server = createServer(async (req, res) => {
         if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
       }
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "color", "mascotExpression", "mascotShape", "pinned", "hidden", "composioAccounts", "avatarUrl"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "color", "mascotExpression", "mascotShape", "pinned", "hidden", "composioAccounts", "avatarUrl", "fastMode"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (patch.fastMode !== undefined && typeof patch.fastMode !== "boolean") {
+        return json(res, 400, { error: "fastMode must be boolean" });
       }
       // avatarUrl validation — allow data: URL or /api/bots/:id/avatar path, max 500KB string (covers 512x512 webp base64 ~100KB)
       if (patch.avatarUrl !== undefined) {

@@ -343,6 +343,36 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(astra.params.effort).toBe("max");
   });
 
+  // multibot: „Fast mode" to service tier `priority` codeksa. Test pilnuje, że
+  // flaga DOCIERA do `turn/start` jako `serviceTierForTurn` (a nie `serviceTier`,
+  // które zapisałoby tier w wątku i przeżyło wyłączenie przełącznika) i że przy
+  // wyłączonym przełączniku oraz na `gpt-5.4-mini` (pusta lista `serviceTiers`)
+  // w żądaniu nie ma jej wcale.
+  it("wysyła service tier priority tylko przy włączonym fast mode", async () => {
+    await create();
+    const onDump = join(scratch, "fast-on.json");
+    process.env.FAKE_CODEX_DUMP = onDump;
+    await instance.adapter.sendTurn({ threadId: "t-fast-on", text: "go", model: "gpt-5.6-sol", fastMode: true } as any);
+    await recorder.until((event) => event.type === "turn.completed");
+    const on = JSON.parse(readFileSync(onDump, "utf8")).calls.find((call: any) => call.method === "turn/start");
+    expect(on.params.serviceTierForTurn).toBe("priority");
+    expect(on.params.serviceTier).toBeUndefined();
+
+    const offDump = join(scratch, "fast-off.json");
+    process.env.FAKE_CODEX_DUMP = offDump;
+    await instance.adapter.sendTurn({ threadId: "t-fast-off", text: "go", model: "gpt-5.6-sol" } as any);
+    await recorder.until((event) => event.type === "turn.completed" && recorder.events.filter((item) => item.type === "turn.completed").length === 2);
+    const off = JSON.parse(readFileSync(offDump, "utf8")).calls.find((call: any) => call.method === "turn/start");
+    expect(off.params.serviceTierForTurn).toBeUndefined();
+
+    const miniDump = join(scratch, "fast-mini.json");
+    process.env.FAKE_CODEX_DUMP = miniDump;
+    await instance.adapter.sendTurn({ threadId: "t-fast-mini", text: "go", model: "gpt-5.4-mini", fastMode: true } as any);
+    await recorder.until((event) => event.type === "turn.completed" && recorder.events.filter((item) => item.type === "turn.completed").length === 3);
+    const mini = JSON.parse(readFileSync(miniDump, "utf8")).calls.find((call: any) => call.method === "turn/start");
+    expect(mini.params.serviceTierForTurn).toBeUndefined();
+  });
+
   it("denies a disabled workspace tool even when legacy fullAuto is on", async () => {
     await create({ mode: "approval", fullAuto: true });
     const dump = join(scratch, "policy-dump.json");
