@@ -351,8 +351,13 @@ const IDLE_ROUNDS_LIMIT = 30;
 const ROOM_IDLE_ROUNDS_LIMIT = 30;
 // multibot: ile rund wymiany dostaje pokoj otwarty przez ask_bot, zanim
 // zamknie sie sam. Rozmowa ma trwac (zadanie → praca → ocena → poprawka), ale
-// nie w nieskonczonosc, gdy zaden bot nie wystawi [TASK COMPLETE].
-const ASK_BOT_ROOM_ROUNDS = 4;
+// nie w nieskonczonosc, gdy zaden bot nie wystawi [TASK COMPLETE]. Cztery rundy
+// gasily rozmowe, zanim boty zdazyly sobie cokolwiek poprawic — stad 12 i env.
+const DEFAULT_COLLAB_MAX_ROUNDS = 12;
+function collabMaxRounds(): number {
+  const raw = Number(process.env.OMB_COLLAB_MAX_ROUNDS);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : DEFAULT_COLLAB_MAX_ROUNDS;
+}
 
 /** Clickable "X texted Y" pill on the owner's thread pointing at the room. */
 function postRoomChip(ownerBotId: string, room: RoomRecord) {
@@ -421,7 +426,7 @@ function collabRoundPrompt(freshFromPeers: string): string {
  * main chat turn (the owner is commonly busy while an ask_bot call is open). */
 async function runCollab(
   roomId: string,
-  opts?: { seen?: Map<string, number>; maxRounds?: number },
+  opts?: { maxRounds?: number },
 ): Promise<void> {
   const started = Date.now();
   // multibot: 2 h, nie 20 min — zadanie z prawdziwego świata (komputer,
@@ -430,7 +435,13 @@ async function runCollab(
   let idleRounds = 0;
   // multibot: ile transkryptu każdy bot już dostał w prompcie — kolejne rundy
   // wysyłają sam przyrost (sesja CLI pamięta swoje wcześniejsze tury).
-  const seen = opts?.seen ?? new Map<string, number>();
+  const seen = new Map<string, number>();
+  // multibot: kto dostal juz PELNY brief pokoju (naglowek, sklad, zadanie,
+  // reguly, marker). Pokoj z ask_bot podawal tu `seen` wypelnione dla bota
+  // odpowiadajacego, wiec brano go za "juz byl w pokoju" i dostawal sam
+  // przyrost transkryptu — nie wiedzac ani o zadaniu, ani o regulach, ani o
+  // tym, ze rozmowa ma trwac wiele rund. Brief nalezy sie kazdemu raz.
+  const briefed = new Set<string>();
   let rounds = 0;
   for (;;) {
     const room = rooms.get(roomId);
@@ -447,7 +458,10 @@ async function runCollab(
       // wkładek botów, które właśnie skończyły w tej samej rundzie
       const live = rooms.get(roomId);
       if (!live || live.status !== "running") break;
-      const since = seen.get(botId) ?? 0;
+      // pierwsza tura bota W POKOJU dostaje CALY dotychczasowy transkrypt —
+      // dopiero kolejne jada samym przyrostem (sesja CLI pamieta swoje tury)
+      const first = !briefed.has(botId);
+      const since = first ? 0 : (seen.get(botId) ?? 0);
       // multibot: prywatne doręczanie — wiadomość z @wzmianką widzi TYLKO
       // adresat (i nie dostaje jej nawet w późniejszych rundach, bo wskaźnik
       // `seen` przeszedł obok niej); bez wzmianki trafia do wszystkich.
@@ -466,7 +480,8 @@ async function runCollab(
         .map((m) => `@${store.bot(m.from)?.name ?? m.from}: ${m.text}`)
         .join("\n\n");
       seen.set(botId, live.transcript.length);
-      const prompt = since === 0 ? collabPrompt(live, bot, fresh) : collabRoundPrompt(fresh);
+      briefed.add(botId);
+      const prompt = first ? collabPrompt(live, bot, fresh) : collabRoundPrompt(fresh);
       // multibot: kawałki tury lecą do pokoju na bieżąco — bez tego transkrypt
       // stał pusty przez całą turę (do 20 min) i pokój wyglądał na zacięty.
       // Cała tura to JEDNA rosnąca wiadomość; ogon mogący być początkiem
@@ -521,8 +536,13 @@ async function runCollab(
       // 0.1.62: jesli zadanie mowi "5 tur" nie koncz przed 5 wiadomosciami - zapobiega halucynacji "5 tur" gdy atlas skip
       const needFive = current && /5\s*tur/i.test(current.task) && (current.transcript.length + (visible ? 1 : 0) < 5);
       if (markerAt >= 0 && !needFive) {
+        // multibot: [TASK COMPLETE] z PIERWSZEJ rundy nie ucina pokoju w pol
+        // slowa. W pokoju z ask_bot wolajacy ma juz odpowiedz kolegi w rece,
+        // wiec jego pierwsza wkladka to niemal zawsze "gotowe" — a kolega nie
+        // widzial jeszcze ani zadania, ani regul pokoju. Domykamy dopiero po
+        // pelnej rundzie, zeby kazdy uczestnik mial swoja ture.
         finished = true;
-        break;
+        if (rounds > 1) break;
       }
     }
     if (finished) break;
@@ -3134,11 +3154,10 @@ const server = createServer(async (req, res) => {
         // rundy, ten sam marker [TASK COMPLETE], ten sam sufit), wiec A moze
         // ocenic prace B, B poprawic, i tak dalej. Wolajacy widzi pierwsza
         // odpowiedz synchronicznie jak dotad; reszta leci w tle, w pokoju.
-        const seen = new Map<string, number>([[toBotId, rooms.get(room.id)?.transcript.length ?? 0]]);
         void (async () => {
           // The room uses isolated threads, so the caller's main turn does not
           // block the next room round.
-          await runCollab(room.id, { seen, maxRounds: ASK_BOT_ROOM_ROUNDS });
+          await runCollab(room.id, { maxRounds: collabMaxRounds() });
         })();
         return json(res, 200, { botName: target.name, text: reply });
       }
