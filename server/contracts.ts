@@ -150,8 +150,14 @@ export interface ProviderAdapter {
     agentsMcp?: boolean;
     /** How this driver receives MultiBot web tools. */
     webTools?: "native" | "mcp" | "functions" | "none";
+    /** Driver can feed text into a turn that is already running. */
+    steering?: "same-turn";
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
+  /** Deliver text into the RUNNING turn without starting a new one. Never
+   * throws: no active turn, a finished one, or a provider refusal all come
+   * back as "unavailable" so the caller falls back to the queue. */
+  steerTurn?(threadId: ThreadId, text: string): Promise<"accepted" | "unavailable">;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
   respondToRequest(
     threadId: ThreadId,

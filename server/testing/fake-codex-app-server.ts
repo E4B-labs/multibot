@@ -8,6 +8,10 @@
 //                     | question (item/tool/requestUserInput — jedyny sposób,
 //                       w jaki ten dostawca prosi CZŁOWIEKA o decyzję zamiast
 //                       o zgodę na narzędzie)
+//                     | steer (tura WISI po turn/start i kończy się dopiero po
+//                       udanym turn/steer — jak długa tura GPT-6 Astra)
+//                     | steer-refused (turn/steer wraca błędem
+//                       `activeTurnNotSteerable`, tura wisi dalej)
 //   FAKE_CODEX_DUMP   path to write {argv, env, calls, decision} as JSON
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
@@ -119,7 +123,24 @@ process.stdin.on("data", (chunk) => {
               requestedSchema: { type: "object", properties: {} },
             },
           });
+        } else if (mode === "steer" || mode === "steer-refused") {
+          // tura zostaje otwarta — kończy ją dopiero turn/steer (albo interrupt)
         } else {
+          finishTurn();
+        }
+        break;
+      case "turn/steer":
+        // `expectedTurnId` to warunek: nie ta tura = błąd, nie ciche przyjęcie
+        if (mode === "steer-refused") {
+          out({
+            jsonrpc: "2.0",
+            id: msg.id,
+            error: { code: -32_004, message: "active turn is not steerable", data: { activeTurnNotSteerable: { turnKind: "review" } } },
+          });
+        } else if (msg.params?.expectedTurnId !== "codex-turn-1") {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32_602, message: "expectedTurnId does not match the active turn" } });
+        } else {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turnId: "codex-turn-1" } });
           finishTurn();
         }
         break;

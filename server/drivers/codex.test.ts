@@ -156,6 +156,68 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
+  // multibot (0.3.31): korekta wysłana w trakcie pracy ma wejść do TEJ tury.
+  // Dowód jest w zrzucie atrapy: jedno `turn/start`, po nim `turn/steer` z
+  // `expectedTurnId` żywej tury — i jedno `turn.completed` na końcu.
+  it("steers the running turn instead of starting a second one", async () => {
+    await create({ mode: "steer" });
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-steer", text: "read the repo" });
+    await recorder.until((e) => e.type === "item.started"); // turn/start doleciał
+
+    expect(await instance.adapter.steerTurn!("t-steer", "actually use ripgrep")).toBe("accepted");
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{ method: string; params: any }>;
+    expect(calls.map((c) => c.method)).toEqual(["initialize", "initialized", "thread/start", "turn/start", "turn/steer"]);
+    expect(calls.at(-1)!.params).toEqual({
+      threadId: "codex-thread-1",
+      expectedTurnId: "codex-turn-1",
+      input: [{ type: "text", text: "actually use ripgrep" }],
+    });
+    // jedna tura od początku do końca: jedno turn.completed, to samo turnId
+    const completed = recorder.events.filter((e) => e.type === "turn.completed");
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ ok: true, turnId });
+    expect(recorder.events.every((e) => e.turnId === turnId)).toBe(true);
+  });
+
+  it("reports unavailable when the provider refuses to steer, and keeps the turn", async () => {
+    await create({ mode: "steer-refused" }); // activeTurnNotSteerable (/review, /compact)
+    await instance.adapter.sendTurn({ threadId: "t-steer-no", text: "review this" });
+    await recorder.until((e) => e.type === "item.started");
+
+    expect(await instance.adapter.steerTurn!("t-steer-no", "and also lint")).toBe("unavailable");
+    // odmowa nie kończy tury — dostarczenie idzie kolejką, a tura pracuje dalej
+    expect(recorder.events.some((e) => e.type === "turn.completed")).toBe(false);
+    expect(instance.adapter.hasSession("t-steer-no")).toBe(true);
+  });
+
+  // Wyścig: tura kończy się w chwili, w której harness próbuje wepchnąć tekst.
+  // Steering MUSI wtedy powiedzieć "unavailable" — inaczej tekst zniknąłby
+  // między turą, która już nie słucha, a kolejką, do której nie trafił.
+  it("reports unavailable when the turn finished first (no double delivery)", async () => {
+    await create(); // happy: tura kończy się sama
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-race", text: "quick one" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(await instance.adapter.steerTurn!("t-race", "too late")).toBe("unavailable");
+    // ani steeringu, ani drugiej tury — nic nie poszło do dostawcy po fakcie
+    const methods = JSON.parse(readFileSync(dump, "utf8")).calls.map((c: { method: string }) => c.method);
+    expect(methods).not.toContain("turn/steer");
+    expect(methods.filter((m: string) => m === "turn/start")).toHaveLength(1);
+  });
+
+  it("reports unavailable for a thread with no turn at all", async () => {
+    await create();
+    expect(await instance.adapter.steerTurn!("t-never-started", "hello?")).toBe("unavailable");
+  });
+
   // multibot: "bot nie pamięta, co było wcześniej". Sesja codeksa przepada przy
   // każdym nowym wątku (aktualizacja CLI, skasowany rollout, bump
   // AGENTS_TOOLS_VERSION), a wtedy CLI startuje z pustym kontekstem. Harness ma

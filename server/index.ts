@@ -201,6 +201,29 @@ function releaseTurnSlot(botId: string): void {
 const isolatedTurnBots = new Map<string, string>();
 // watchdog: busy stuck >70s -> auto clear (provider zawiesił się, brak turn.completed)
 const busyWatchdog = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * Zbrojenie (i przezbrajanie) watchdoga: brak `turn.completed` przez 70 s
+ * znaczy zawieszonego dostawcę, więc bot wraca do wolnych. Wołane przy starcie
+ * tury ORAZ po przyjętym steeringu — tura, do której właśnie dopisano zadanie,
+ * z definicji trwa dłużej i nie może zostać zwolniona za plecami użytkownika.
+ */
+function armBusyWatchdog(botId: string): void {
+  const pending = busyWatchdog.get(botId);
+  if (pending) clearTimeout(pending);
+  const wd = setTimeout(() => {
+    const b = store.bot(botId);
+    if (b?.busy) {
+      console.warn(`[multibot] watchdog: ${botId} busy 70s no completed, force clear`);
+      store.patchBot(botId, { busy: false });
+      activeCommsDepth.delete(botId);
+      busyWatchdog.delete(botId);
+      releaseTurnSlot(botId); // zawieszony dostawca nie trzyma slotu całej floty
+      broadcast({ kind: "bot", bot: store.bot(botId) });
+    }
+  }, 70_000);
+  wd.unref?.();
+  busyWatchdog.set(botId, wd);
+}
 // proxy entry: .ts in dev (node type-strips), .js in the packaged dist-server
 const agentsProxyPath = (() => {
   const ts = join(dirname(fileURLToPath(import.meta.url)), "drivers", "agents-proxy.ts");
@@ -808,6 +831,52 @@ function queueUserTurn(botId: string, turnText: string, opts: QueuedTurnOptions)
   }, turnDebounceMs());
   timer.unref?.();
   turnDebounce.set(botId, timer);
+}
+
+/** Jedyny model, któremu doklejamy tekst do trwającej tury (spec 0.3.31). */
+const STEERABLE_MODEL = "gpt-6-astra";
+
+/**
+ * multibot (0.3.31): wepchnij tekst do TRWAJĄCEJ tury bota zamiast czekać na
+ * jej koniec. Udaje się tylko wtedy, gdy tura naprawdę żyje (`activeCommsDepth`
+ * — samo `busy` zapala już przyjęcie wiadomości), model to GPT-6 Astra i driver
+ * pod nim umie `turn/steer`. Każda inna odpowiedź drivera (brak aktywnej tury,
+ * `activeTurnNotSteerable`, wyścig z zakończeniem) to `false` i wołający idzie
+ * kolejką — dostarczenie jest dokładnie jedno.
+ */
+async function steerActiveTurn(botId: string, text: string, source: string): Promise<boolean> {
+  const bot = store.bot(botId);
+  if (!bot?.busy || !activeCommsDepth.has(botId)) return false;
+  if (bot.modelSelection.model !== STEERABLE_MODEL) return false;
+  const adapter = registry.get(bot.modelSelection.instanceId)?.adapter;
+  if (!adapter?.steerTurn || adapter.capabilities.steering !== "same-turn") return false;
+  let outcome: "accepted" | "unavailable";
+  try {
+    outcome = await adapter.steerTurn(bot.threadId, text);
+  } catch {
+    return false;
+  }
+  if (outcome !== "accepted") return false;
+  armBusyWatchdog(botId); // dopisane zadanie wydłuża turę — nie zwalniaj jej za 70 s
+  broadcast({ kind: "turn.steered", botId, threadId: bot.threadId, source });
+  return true;
+}
+
+/**
+ * Dostarcz tekst botowi: do żywej tury (steering), a gdy się nie da — do
+ * istniejącej kolejki. Wspólne wejście dla wiadomości użytkownika i wyników
+ * asynchronicznych jobów, żeby obie ścieżki miały tę samą regułę i ten sam
+ * fallback.
+ */
+async function deliverToActiveTurnOrQueue(
+  botId: string,
+  text: string,
+  source: string,
+  queueOpts: QueuedTurnOptions,
+): Promise<"steered" | "queued"> {
+  if (await steerActiveTurn(botId, text, source)) return "steered";
+  queueUserTurn(botId, text, queueOpts);
+  return "queued";
 }
 
 function drainQueuedUserMessages(botId: string) {
@@ -1931,20 +2000,7 @@ opts?: {
     else if (origin === "user") scheduleStartedPush(bot.id, `zaczyna pracę: ${text.slice(0, 80)}`);
     broadcast({ kind: "bot", bot: store.bot(bot.id) });
     // watchdog 70s - jesli brak turn.completed (provider zawiesil sie) zwolnij busy
-    if (busyWatchdog.has(bot.id)) clearTimeout(busyWatchdog.get(bot.id)!);
-    const wd = setTimeout(() => {
-      const b = store.bot(bot.id);
-      if (b?.busy) {
-        console.warn(`[multibot] watchdog: ${bot.id} busy 70s no completed, force clear`);
-        store.patchBot(bot.id, { busy: false });
-        activeCommsDepth.delete(bot.id);
-        busyWatchdog.delete(bot.id);
-        releaseTurnSlot(bot.id); // zawieszony dostawca nie trzyma slotu całej floty
-        broadcast({ kind: "bot", bot: store.bot(bot.id) });
-      }
-    }, 70_000);
-    wd.unref?.();
-    busyWatchdog.set(bot.id, wd);
+    armBusyWatchdog(bot.id);
   }
 
   void (async () => {
@@ -3895,8 +3951,20 @@ const server = createServer(async (req, res) => {
           : {}),
       });
       broadcast({ kind: "message", threadId: target.threadId, message: userMessage });
-      queueUserTurn(target.id, turnText, { attachments: turnAttachments, reasoning, actor });
-      return json(res, 202, { ok: true, queued: Boolean(target.busy) });
+      // multibot (0.3.31): zwykły tekst wysłany w trakcie tury GPT-6 Astra idzie
+      // PROSTO do niej (`turn/steer`) — korekta trafia do bota, gdy jeszcze ma
+      // znaczenie, zamiast czekać na koniec pracy. Załącznik, reply i cokolwiek
+      // z ukośnikiem zostają przy kolejce: tylko goły tekst da się dopisać do
+      // promptu trwającej tury bez zmiany jej kontraktu.
+      const queueOpts = { attachments: turnAttachments, reasoning, actor };
+      const plainText = !turnAttachments.length && !replyTarget && !text.startsWith("/");
+      let delivery: "steered" | "queued" = "queued";
+      if (plainText) {
+        delivery = await deliverToActiveTurnOrQueue(target.id, turnText, "user", queueOpts);
+      } else {
+        queueUserTurn(target.id, turnText, queueOpts);
+      }
+      return json(res, 202, { ok: true, queued: delivery === "queued" && Boolean(target.busy), delivery });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/respond$/);
     if (m && method === "POST") {
