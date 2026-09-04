@@ -87,7 +87,7 @@ import { BotMailQueue, BotMailStore, botMailThreadId, type PendingBotMail } from
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
-import { chainDepth, managedBotPatch, mentionedBots, Store, type BotRecord, type ConnectorTarget, type Message, type OptionCardData } from "./store.ts";
+import { BOT_COLORS, chainDepth, managedBotPatch, mentionedBots, Store, type BotRecord, type ConnectorTarget, type Message, type OptionCardData } from "./store.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, isCredentialTargetId, type CredentialTargetId } from "./credential-request.ts";
 import { inspectorEvents, recordInspectorEvent, replayInspectorEvents } from "./inspector.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
@@ -3698,6 +3698,13 @@ const server = createServer(async (req, res) => {
       }
       if (patch.fastMode !== undefined && typeof patch.fastMode !== "boolean") {
         return json(res, 400, { error: "fastMode must be boolean" });
+      }
+      // multibot: kolor spoza allowlisty szedl dotad prosto do bazy i wracal do
+      // klienta, ktory rysowal bota domyslna zielenia — bot z zapisanym
+      // "pink2" wygladal jak bez koloru. Ta sama lista, ktora waliduje
+      // `managedBotPatch` (bot zmieniajacy bota).
+      if (patch.color !== undefined && !BOT_COLORS.includes(patch.color as never)) {
+        return json(res, 400, { error: `unknown color: must be one of ${BOT_COLORS.join(", ")}` });
       }
       // avatarUrl validation — allow data: URL or /api/bots/:id/avatar path, max 500KB string (covers 512x512 webp base64 ~100KB)
       if (patch.avatarUrl !== undefined) {

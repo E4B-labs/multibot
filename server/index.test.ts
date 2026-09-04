@@ -489,6 +489,20 @@ describe("harness HTTP API", () => {
     expect(after.body.bots.find((b: { id: string }) => b.id === bot.id)).toBeUndefined();
   });
 
+  // multibot: kolor spoza allowlisty zapisywal sie cicho, a klient rysowal
+  // takiego bota domyslna zielenia — wygladalo to jak „bot bez koloru".
+  it("rejects an unknown bot colour and accepts black", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+
+    const bad = await api("PATCH", `/api/bots/${bot.id}`, { color: "pink2" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toContain("unknown color");
+
+    const black = await api("PATCH", `/api/bots/${bot.id}`, { color: "black" });
+    expect(black.status).toBe(200);
+    expect(black.body.bot.color).toBe("black");
+  });
+
   it("patches a bot section with validation and clearing (multibot port OMB #296)", async () => {
     const created = await api("POST", "/api/bots");
     expect(created.status).toBe(201);

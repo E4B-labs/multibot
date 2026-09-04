@@ -57,6 +57,9 @@ export const MAUS_COLOR_NAMES = [
   "yellow",
   "teal",
   "coral",
+  // multibot: czarny jest wybieralny, ale nie wchodzi do rotacji nowych botow
+  // (serwerowe COLORS) — bot dostaje go tylko wtedy, gdy ktos go ustawi.
+  "black",
 ] as const;
 
 export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
@@ -72,6 +75,7 @@ export const MAUS_COLORS: Record<MausColor, string> = {
   yellow: "#D8A729",
   teal: "#01A492",
   coral: "#E5634E",
+  black: "#1A1A1A",
 };
 
 export const MAUS_MOTIONS = [
