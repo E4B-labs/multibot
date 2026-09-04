@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   botNotificationIcon,
   notificationTag,
+  notifyFrame,
   readDesktopNotifications,
   shouldNotify,
   shouldNotifyRoomDone,
@@ -107,5 +108,29 @@ describe("readDesktopNotifications", () => {
     expect(readDesktopNotifications({ getItem: () => "on" })).toBe(true);
     expect(readDesktopNotifications({ getItem: () => "off" })).toBe(false);
     expect(readDesktopNotifications(undefined)).toBe(true);
+  });
+});
+
+// multibot: ramka `notify` z serwera — przypomnienie i `notify_user`. Bot
+// poprosił o banerkę wprost, więc reguła jest inna niż przy `shouldNotify`.
+describe("notifyFrame", () => {
+  it("turns a server frame into a banner payload", () => {
+    expect(notifyFrame({ botId: "bot-1", title: "Kawa", body: "za 2 minuty" }, { enabled: true })).toEqual({
+      title: "Kawa",
+      body: "za 2 minuty",
+      botId: "bot-1",
+    });
+  });
+
+  it("fires even when that bot is the one on screen", () => {
+    // brak `ctx.focused`/`selectedBotId` jest celowy: o banerkę poprosił bot,
+    // nie zgadujemy jej z przejścia stanu
+    expect(notifyFrame({ botId: "bot-1", title: "Kawa" }, { enabled: true })).toMatchObject({ title: "Kawa", body: "" });
+  });
+
+  it("stays silent when banners are off or the title is empty", () => {
+    expect(notifyFrame({ title: "Kawa" }, { enabled: false })).toBeNull();
+    expect(notifyFrame({ title: "   ", body: "coś" }, { enabled: true })).toBeNull();
+    expect(notifyFrame({}, { enabled: true })).toBeNull();
   });
 });

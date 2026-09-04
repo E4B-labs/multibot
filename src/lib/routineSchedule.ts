@@ -17,6 +17,10 @@ export interface ScheduleFields {
 
 export interface ParsedSchedule extends ScheduleFields {
   preset: PresetOrUnknown;
+  /** Przypomnienie: harmonogram jest konkretną datą ISO i odpala RAZ — tu jej
+   * moment w ms. Osobne pole, a nie kolejny wariant `preset`, bo `preset` jest
+   * zbiorem powtarzalnych trybów formularza i mapy podpisów. */
+  once?: number;
 }
 
 export const PRESETS: Preset[] = ["hourly", "daily", "weekly", "monthly"];
@@ -28,11 +32,20 @@ export function isKnownPreset(preset: PresetOrUnknown): preset is Preset {
 const DEFAULT_FIELDS: ScheduleFields = { minute: 0, hour: 9, weekday: 1, monthDay: 1 };
 const isInt = (field: string) => /^\d+$/.test(field);
 const EVERY = /^every\s+(\d+)\s*([mhd])$/i;
+// Ta sama forma, którą przyjmuje serwer (`oneShotAt` w server/routines.ts).
+const ONE_SHOT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
 
 /** null/empty schedule = manual routine (no automatic run). */
 export function parseSchedule(schedule: string | null | undefined): ParsedSchedule {
   if (!schedule || !schedule.trim()) return { preset: "manual", ...DEFAULT_FIELDS };
   const s = schedule.trim();
+
+  if (ONE_SHOT.test(s)) {
+    const at = Date.parse(s.replace(" ", "T"));
+    return Number.isFinite(at)
+      ? { preset: "unknown", ...DEFAULT_FIELDS, once: at }
+      : { preset: "unknown", ...DEFAULT_FIELDS };
+  }
 
   const interval = EVERY.exec(s);
   if (interval) {

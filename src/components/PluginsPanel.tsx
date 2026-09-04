@@ -364,7 +364,7 @@ function GoogleWorkspaceSection() {
 }
 
 export function PluginsPanel() {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
@@ -378,6 +378,14 @@ export function PluginsPanel() {
   // multibot (F7): otwarty formularz konektora — null = zamknięty,
   // locked = edycja istniejącego (id nie do zmiany)
   const [draft, setDraft] = useState<CustomDraft | null>(null);
+
+  // multibot: prośba bota („Podłącz Google Workspace") stawia panel od razu na
+  // zakładce, na której ten konektor w ogóle stoi — obie żyją pod „Twoje".
+  // Efekt, a nie wartość początkowa: panel bywa już otwarty, gdy klikasz kartę.
+  const connector = state.pluginsConnector;
+  useEffect(() => {
+    if (connector === "google-workspace" || connector === "mcp") setTab("yours");
+  }, [connector]);
 
   const refreshStatus = useCallback((slugs: string[]) => {
     if (!slugs.length) return Promise.resolve();

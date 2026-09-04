@@ -27,13 +27,16 @@ describe("botSystemPrompt", () => {
     for (const heading of ["# Who you are", "# What you have and when to use it", "# How you work", "# Environment"]) {
       expect(text).toContain(heading);
     }
-    for (const tool of ["hand_over_computer", "ask_user", "create_routine", "COMPOSIO_SEARCH_TOOLS", "get_device_info", "send_file"]) {
+    for (const tool of ["hand_over_computer", "ask_user", "create_routine", "create_reminder", "notify_user", "request_connection", "COMPOSIO_SEARCH_TOOLS", "get_device_info", "send_file"]) {
       expect(text).toContain(tool);
     }
     // Stare asercje rund A2/A3/A4/H3 — reguły przeniesione, nie zgubione.
     expect(text).toContain("MultiBot Agent");
     expect(text).toContain("never call ToolSearch");
     expect(text).toContain("five-field cron");
+    // przypomnienie to jednorazowa data, nie cron raz na rok
+    expect(text).toContain("is a REMINDER, not a routine");
+    expect(text).toContain("never a yearly cron");
     expect(text).toContain("Persistence");
     expect(text).toContain("MultiBot Full Access");
     expect(text).toContain("user_has_control");
@@ -70,6 +73,10 @@ describe("botSystemPrompt", () => {
     // `get_device_info` też jest z serwera `agents` — sekcja Environment nie
     // może kazać go wołać, gdy go nie ma (ta sama klasa błędu co bc3d15ec).
     expect(text).not.toContain("get_device_info");
+    // przypomnienia, banerki i prośby o konektor też są narzędziami z `agents`
+    expect(text).not.toContain("create_reminder");
+    expect(text).not.toContain("notify_user");
+    expect(text).not.toContain("request_connection");
   });
 
   it("bez Composio nie mówi o konektorach", () => {

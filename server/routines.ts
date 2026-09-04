@@ -43,13 +43,14 @@ export interface HarnessRoutine {
 }
 
 type Dispatch = (
-  job: Pick<HarnessRoutine, "id" | "botId" | "name" | "prompt">,
+  job: Pick<HarnessRoutine, "id" | "botId" | "name" | "prompt" | "schedule">,
   payload?: string | null,
 ) => Promise<void>;
 type Clock = () => number;
 
 const EVERY = /^every\s+(\d+)\s*([mhd])$/i;
 const FIELD = /^(?:\*|\*\/\d+|\d+(?:-\d+)?)(?:,(?:\*|\*\/\d+|\d+(?:-\d+)?))*$/;
+const ONE_SHOT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
 
 function privateFile(path: string): void {
   if (process.platform !== "win32" && existsSync(path)) chmodSync(path, 0o600);
@@ -106,8 +107,27 @@ function nextCron(schedule: string, after: number): number {
   throw new Error("schedule has no run time within one year");
 }
 
+/** Trzecia forma harmonogramu obok `every N[mhd]` i crona: konkretna data i
+ * godzina (ISO 8601) — czyli przypomnienie, które ma odpalić RAZ. Bez offsetu
+ * czytamy ją jako czas lokalny serwera, tak jak `Date.parse` traktuje formę
+ * date-time bez strefy; ze spacją zamiast `T` (co wpisuje człowiek) też.
+ * // ponytail: strefa hosta, nie użytkownika — do zmiany, gdy wejdą strefy per user. */
+export function oneShotAt(schedule: string | null | undefined): number | null {
+  if (!schedule) return null;
+  const raw = schedule.trim();
+  if (!ONE_SHOT.test(raw)) return null;
+  const at = Date.parse(raw.replace(" ", "T"));
+  return Number.isFinite(at) ? at : null;
+}
+
 export function nextRun(schedule: string | null, after: number): number | null {
   if (!schedule) return null;
+  // Data jednorazowa: minęła → null, czyli rutyna sama gaśnie po odpaleniu.
+  const once = oneShotAt(schedule);
+  if (once !== null) return once > after ? once : null;
+  // Wygląda jak data, ale nią nie jest ("2030-13-45T99:99") — powiedz to
+  // wprost, zamiast zrzucić model na komunikat o pięciu polach crona.
+  if (ONE_SHOT.test(schedule.trim())) throw new Error("invalid reminder datetime");
   const interval = EVERY.exec(schedule.trim());
   if (interval) {
     const amount = Number(interval[1]);
@@ -202,9 +222,10 @@ export class HarnessRoutines {
     const schedule = input.schedule?.trim() || null;
     if (!name || name.length > 100) throw new Error("name required (max 100)");
     if (!prompt || prompt.length > 20_000) throw new Error("prompt required (max 20000)");
+    const nextRunAt = this.scheduleAnchor(schedule);
     const job: HarnessRoutine = {
       id: newId(), botId, name, prompt, schedule, enabled: true, trigger: null,
-      last_runs: [], nextRunAt: nextRun(schedule, this.now()),
+      last_runs: [], nextRunAt,
     };
     this.jobs.push(job);
     this.persist();
@@ -225,8 +246,11 @@ export class HarnessRoutines {
       job.prompt = prompt;
     }
     if (patch.schedule !== undefined) {
-      job.schedule = String(patch.schedule).trim() || null;
-      job.nextRunAt = nextRun(job.schedule, this.now());
+      const schedule = String(patch.schedule).trim() || null;
+      // ta sama bramka co przy create: przestawienie przypomnienia w przeszłość
+      // po cichu by je zabiło, a `update_routine` zameldowałby sukces
+      job.nextRunAt = this.scheduleAnchor(schedule);
+      job.schedule = schedule;
     }
     if (patch.enabled !== undefined) {
       job.enabled = Boolean(patch.enabled);
@@ -298,6 +322,16 @@ export class HarnessRoutines {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  /** Pierwszy termin dla harmonogramu. Przypomnienie na wczoraj nigdy nie
+   * odpali — mówimy to od razu, zamiast zapisywać martwą rutynę, którą bot
+   * zamelduje jako ustawioną. Rutyny powtarzalne zwracają termin albo null
+   * (ręczna) jak dotąd. */
+  private scheduleAnchor(schedule: string | null): number | null {
+    const nextRunAt = nextRun(schedule, this.now());
+    if (nextRunAt === null && oneShotAt(schedule) !== null) throw new Error("reminder time is in the past");
+    return nextRunAt;
   }
 
   private async run(job: HarnessRoutine, payload?: string | null): Promise<void> {

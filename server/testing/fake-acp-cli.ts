@@ -6,6 +6,8 @@
 // turn. Failure modes mirror how real ACP agents misbehave:
 //
 //   FAKE_ACP_MODE   happy (default) | exit-early | crash-mid-turn | hang | no-auth | permission
+//                   | notify-user/request-connection (call the matching agents tool once
+//                     and finish the turn — neither of them waits for the human)
 //                   | ask-peer/send-mail (spawn the injected "agents" MCP server from
 //                     session/new's mcpServers, call list_bots + ask_bot on a
 //                     peer, and reply with what the peer said — the comms e2e)
@@ -297,6 +299,24 @@ function handle(msg: any) {
           })
           .catch((e) => {
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `ask error: ${(e as Error).message}` } } } });
+            complete();
+          });
+        return;
+      }
+      // notify-user / request-connection: narzędzia, które NIE czekają na
+      // człowieka — bot woła jedno z nich i od razu kończy turę
+      if ((mode === "notify-user" || mode === "request-connection") && agentsMcp) {
+        const call =
+          mode === "notify-user"
+            ? { name: "notify_user", args: () => ({ title: "Raport gotowy", body: "Zebrałem dane z wczoraj." }) }
+            : { name: "request_connection", args: () => ({ connector: "google-workspace", why: "Muszę wysłać maila." }) };
+        void driveMcp(agentsMcp, [call])
+          .then((answer) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `${mode}: ${answer}` } } } });
+            complete();
+          })
+          .catch((e) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `${mode} error: ${(e as Error).message}` } } } });
             complete();
           });
         return;

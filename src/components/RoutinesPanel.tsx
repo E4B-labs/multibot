@@ -72,6 +72,8 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 // the cron; `null` = manual routine (webhook/Run now only).
 function scheduleSentence(schedule: string | null, polish: boolean): string {
   const parsed = parseSchedule(schedule);
+  // multibot: przypomnienie — jedna data, nie powtarzalny harmonogram
+  if (parsed.once) return `${polish ? "Przypomnienie" : "Reminder"} · ${formatNextRun(parsed.once, polish)}`;
   const at = `${pad2(parsed.hour)}:${pad2(parsed.minute)}`;
   switch (parsed.preset) {
     case "manual":
@@ -106,7 +108,12 @@ function formatNextRun(ts: number, polish: boolean): string {
 // Manual routines have no next-run concept — only scheduled ones get a line.
 function nextRunLine(r: Routine, polish: boolean): string | null {
   if (!r.schedule) return null;
-  if (!r.next_run_at) return polish ? "Jeszcze nie uruchomiono" : "Not run yet";
+  // przypomnienie bez następnego terminu już odpaliło — nie „jeszcze nie"
+  if (!r.next_run_at) {
+    return parseSchedule(r.schedule).once
+      ? (polish ? "Już odpaliło" : "Already fired")
+      : (polish ? "Jeszcze nie uruchomiono" : "Not run yet");
+  }
   return `${polish ? "Następne uruchomienie" : "Next run"}: ${formatNextRun(r.next_run_at, polish)}`;
 }
 
@@ -430,7 +437,7 @@ export function RoutinesPanel({ bot }: { bot: Bot }) {
             {/* multibot: dodawanie przeniesione do „+" w nagłówku sekcji */}
             {routines.map((r) => {
               return (
-                <div key={r.id} className="mt-3 rounded-xl bg-card p-4">
+                <div key={r.id} className={cn("mt-3 rounded-xl bg-card p-4", parseSchedule(r.schedule).once && !r.next_run_at && "opacity-60")}>
                   <div className="flex items-start justify-between gap-2">
                     {/* multibot: wiersz z ikoną zegara po lewej — ten sam znak,
                         którym oznaczona jest rutyna w transkrypcie */}
