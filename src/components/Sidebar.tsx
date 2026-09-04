@@ -27,7 +27,7 @@ import {
 import { useStore, formatTime, type Bot, type EngineGroup } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { ScoutTeamModal } from "./ScoutTeamModal";
-import { busyMascotMotion, stateForBot, type MausMotion, type MausState } from "@/lib/mascot";
+import { sidebarAvatarProps, stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { plainPreview } from "@/lib/plainPreview";
 import { authFetch } from "@/lib/auth";
@@ -58,18 +58,9 @@ export function sidebarWidthFromDrag(startWidth: number, deltaX: number): number
   return clampSidebarWidth(startWidth + deltaX);
 }
 
-/**
- * Awatar w pasku bocznym: bot, ktory nie pracuje, stoi calkiem nieruchomo
- * (neutralny stan "idle", zero beatow, `animated:false` -> `paused` w
- * CursorAvatar). Animacja tylko na czas `busy`.
- */
-export function sidebarAvatarProps(
-  bot: Bot,
-): { state: MausState; motion: MausMotion; animated: boolean; motionKey: number } {
-  if (!bot.busy) return { state: "idle", motion: "none", animated: false, motionKey: 0 };
-  const busy = busyMascotMotion(bot.id);
-  return { state: busy.state, motion: busy.motion, animated: true, motionKey: 1 };
-}
+/** Awatar w pasku bocznym — helper mieszka w `@/lib/mascot`, bo naglowek
+ * czatu trzyma sie tej samej zasady. Reeksport, zeby importy nie ruszaly. */
+export { sidebarAvatarProps };
 
 /**
  * Awatar czlonka grupy w stosie na wierszu grupy — dokladnie ta sama zasada

@@ -1,4 +1,5 @@
 import { CURSOR_STATES, type CursorState } from "@/components/CursorAvatar";
+import type { Bot } from "@/state/store";
 
 /** The mascot's behaviour vocabulary — CursorAvatar's 39 states, under the
  * app's historical names. */
@@ -98,6 +99,22 @@ export function busyMascotMotion(botId: string): { state: MausState; motion: Mau
   return (Math.abs(hash) % 2) === 0
     ? { state: "sending", motion: "sending" }
     : { state: "thinking", motion: "thinking-dots" };
+}
+
+/**
+ * Awatar bota: bot, ktory nie pracuje, stoi calkiem nieruchomo
+ * (neutralny stan "idle", zero beatow, `animated:false` -> `paused` w
+ * CursorAvatar). Animacja tylko na czas `busy`.
+ *
+ * Mieszkalo w Sidebar.tsx; naglowek czatu trzyma sie tej samej zasady,
+ * wiec helper stoi tu, a oba miejsca go importuja.
+ */
+export function sidebarAvatarProps(
+  bot: Bot,
+): { state: MausState; motion: MausMotion; animated: boolean; motionKey: number } {
+  if (!bot.busy) return { state: "idle", motion: "none", animated: false, motionKey: 0 };
+  const busy = busyMascotMotion(bot.id);
+  return { state: busy.state, motion: busy.motion, animated: true, motionKey: 1 };
 }
 
 /**
