@@ -53,6 +53,13 @@ _CALL_TIMEOUT = 20.0
 _POLL_INTERVAL = 1.0
 _DEFAULT_FPS = 5
 _JPEG_QUALITY = 60
+# Zrzut DLA AGENTA to nie to samo, co klatka live view: model i tak przeskaluje
+# obraz do 1568 px dłuższego boku, a płaci za każdy piksel tokenami (~1,7 tys. na
+# zrzut 1920×973). Zmierzone na telefonie: q60 = 77,8 kB / 0,268 s, q40 = 66,4 kB /
+# 0,229 s. Live view zostaje na `_JPEG_QUALITY` — tam obraz ogląda człowiek.
+_SHOT_QUALITY = 40
+_SHOT_MAX_WIDTH = 1280
+_VIEWPORT_SIZE_JS = "({w: window.innerWidth, h: window.innerHeight})"
 
 # Klawisze niedrukowalne nie wejdą do strony bez `windowsVirtualKeyCode` — UI
 # (Task 3) wysyła tylko `key`/`code`, więc VK wyliczamy tutaj.
@@ -655,14 +662,36 @@ async def screenshot(bot_id: str) -> str:
     słabym telefonie (s10e) potrafi wisieć dziesiątki sekund — a do tego taki
     obraz nie pokrywa się ze współrzędnymi CSS viewportu, w których agent
     klika. Robimy dokładnie to, co widzi użytkownik, i tylko tyle.
+
+    SKALA: `clip.scale` ścina dłuższy bok do `_SHOT_MAX_WIDTH`. Współrzędne CSS
+    dla agenta się przez to NIE zmieniają (clip jest w pikselach CSS, skalowanie
+    dotyczy tylko wyjściowego obrazu), a modelowi ubywa ~35–40 % tokenów obrazu,
+    bo i tak skalowałby go do 1568 px. Gdyby stare Chromium nie przyjęło `clip`,
+    lecimy bez niego — lepszy większy zrzut niż żaden.
     """
     async with _operation(bot_id):
         async with _attached(bot_id) as (cdp, session):
-            result = await cdp.call(
-                "Page.captureScreenshot",
-                {"format": "jpeg", "quality": _JPEG_QUALITY, "captureBeyondViewport": False},
-                session_id=session,
-            )
+            params: dict = {"format": "jpeg", "quality": _SHOT_QUALITY, "captureBeyondViewport": False}
+            try:
+                got = await cdp.call(
+                    "Runtime.evaluate",
+                    {"expression": _VIEWPORT_SIZE_JS, "returnByValue": True},
+                    session_id=session,
+                )
+                size = got["result"].get("value") or {}
+                width, height = float(size.get("w") or 0), float(size.get("h") or 0)
+                if width > _SHOT_MAX_WIDTH and height > 0:
+                    params["clip"] = {
+                        "x": 0, "y": 0, "width": width, "height": height,
+                        "scale": _SHOT_MAX_WIDTH / width,
+                    }
+            except Exception:  # noqa: BLE001 — bez rozmiaru po prostu nie skalujemy
+                pass
+            try:
+                result = await cdp.call("Page.captureScreenshot", params, session_id=session)
+            except RuntimeError:
+                params.pop("clip", None)
+                result = await cdp.call("Page.captureScreenshot", params, session_id=session)
             return result["data"]
 
 
@@ -891,9 +920,14 @@ async def run_actions(bot_id: str, actions: list[dict]) -> dict:
 
 
 async def navigate(bot_id: str, url: str) -> None:
+    """`Page.navigate` wraca po COMMICIE, nie po wczytaniu — bez czekania `read_page`
+    zaraz po nawigacji potrafił zwrócić jeszcze starą stronę (i stare refy).
+    Czekamy więc na `readyState === "complete"`, z limitem: strona, która wisi na
+    jednym trackerze, nie może zablokować tury."""
     async with _operation(bot_id):
         async with _attached(bot_id) as (cdp, session):
             await cdp.call("Page.navigate", {"url": url}, session_id=session)
+            await _wait_load(cdp, session)
 
 
 # ── snapshot strony z numerowanymi refami ─────────────────────────────────────

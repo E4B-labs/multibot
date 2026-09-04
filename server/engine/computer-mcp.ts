@@ -49,8 +49,12 @@ export function harnessBaseUrl(): string {
  *    `enabled_tools` (whitelist) i `startup_timeout_ms: 30000` (A4) — wątki
  *    z wersji 3 mają stary montaż (elicitation na każdy tool), więc muszą
  *    zacząć od nowa, żeby bot nie wisiał na aprobatach.
+ * 5: doszły `find` i `actions`, a `read_page` zwraca drzewo elementów z refami,
+ *    których `click`/`type_text` używają zamiast pikseli. Wątek z wersji 4 zna
+ *    tylko starą dziesiątkę narzędzi i klikałby dalej po zrzutach ekranu —
+ *    czyli dokładnie to, co ta zmiana usuwa.
  */
-export const COMPUTER_TOOLS_VERSION = 4;
+export const COMPUTER_TOOLS_VERSION = 5;
 
 export interface McpSpawn {
   command: string;

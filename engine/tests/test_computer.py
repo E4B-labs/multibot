@@ -211,9 +211,45 @@ def test_status_false_without_browser(client):
     }
 
 
+def _jpeg_size(raw: bytes) -> tuple[int, int]:
+    """(szerokość, wysokość) z ramki SOF — bez Pillow, żeby test nie ciągnął zależności."""
+    i = 2
+    while i < len(raw):
+        assert raw[i] == 0xFF, "to nie jest JPEG"
+        marker, length = raw[i + 1], int.from_bytes(raw[i + 2:i + 4], "big")
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            return (int.from_bytes(raw[i + 7:i + 9], "big"), int.from_bytes(raw[i + 5:i + 7], "big"))
+        i += 2 + length
+    raise AssertionError("brak ramki SOF")
+
+
 def test_screenshot_returns_jpeg(client, page):
     data = client.post(f"/api/bots/{_BOT}/computer/screenshot").json()["data"]
     assert base64.b64decode(data)[:2] == b"\xff\xd8"  # magic JPEG
+
+
+def test_screenshot_scales_a_wide_viewport_down(client, page):
+    """Model i tak skaluje obraz do 1568 px dłuższego boku, a płaci za każdy piksel
+    tokenami. Zmierzone przy viewporcie telefonu (1920x973): 177 716 B → 83 352 B."""
+    page.call(
+        "Emulation.setDeviceMetricsOverride",
+        {"width": 1920, "height": 973, "deviceScaleFactor": 1, "mobile": False},
+        page.session,
+    )
+    try:
+        raw = base64.b64decode(client.post(f"/api/bots/{_BOT}/computer/screenshot").json()["data"])
+        width, height = _jpeg_size(raw)
+        from server import computer as _computer
+
+        assert width == _computer._SHOT_MAX_WIDTH
+        assert abs(height - round(973 * _computer._SHOT_MAX_WIDTH / 1920)) <= 2
+    finally:
+        page.call("Emulation.clearDeviceMetricsOverride", {}, page.session)
+
+    # …a viewport węższy niż limit zostaje jeden do jednego: skalowanie w GÓRĘ
+    # tylko rozmyłoby tekst i kosztowało więcej tokenów
+    raw = base64.b64decode(client.post(f"/api/bots/{_BOT}/computer/screenshot").json()["data"])
+    assert _jpeg_size(raw)[0] == page.eval("window.innerWidth")
 
 
 def test_screencast_delivers_frames(client, page):
@@ -470,6 +506,17 @@ def test_http_navigate_and_read_page(client, page):
     body = client.get(f"/api/bots/{_BOT}/computer/page").json()
     assert body["url"] == _PAGE2
     assert body["text"].strip() == "y"  # innerText, nie znaczniki
+
+
+def test_navigate_waits_for_the_page_to_load(client, page):
+    """`Page.navigate` wraca po commicie, nie po wczytaniu — bez czekania `read_page`
+    tuż po nawigacji zwracał jeszcze starą stronę (i stare refy)."""
+    page.goto(_FORM, marker="go")
+    client.post(f"/api/bots/{_BOT}/computer/navigate", json={"url": _PAGE2})
+    # ZERO czekania po naszej stronie: jeśli navigate nie czeka, tu jest stara strona
+    body = client.get(f"/api/bots/{_BOT}/computer/page").json()
+    assert body["url"] == _PAGE2
+    assert "Zaloguj" not in body["elements"]
 
 
 # ── snapshot z refami: read_page / find / click(ref) ──────────────────────────

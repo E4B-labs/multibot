@@ -88,8 +88,17 @@ def _click_events(where: dict, button: str = "left") -> list[dict]:
 
 @mcp.tool()
 async def screenshot() -> Image:
-    """Zrzut aktywnej karty przeglądarki bota (JPEG). Zrób go przed każdą akcją
-    na współrzędnych — one liczą się w pikselach CSS tego obrazu."""
+    """Zrzut WIDOCZNEJ CZĘŚCI aktywnej karty (JPEG) — sam viewport, nie cała
+    przewijalna strona, nie inne karty i nie pulpit poza przeglądarką.
+
+    NAJDROŻSZE narzędzie tego zestawu: ~0,4 s i ok. 1,5–2 tys. tokenów obrazu na
+    wywołanie. Do treści i do klikania używaj `read_page`/`find` — są ~40× tańsze
+    i dają refy. Po zrzut sięgaj, gdy naprawdę potrzebujesz UKŁADU: strona bez
+    tekstu (PDF, canvas, mapa), sprawdzenie, jak coś wygląda, albo klikanie po
+    współrzędnych, gdy nie ma refa.
+
+    Współrzędne dla `click(x, y)` czytaj z tego obrazu — są w pikselach CSS
+    viewportu, niezależnych od skali samego pliku."""
     await _ensure()
     data = (await _call("POST", f"/api/bots/{_bot}/computer/screenshot"))["data"]
     return Image(data=base64.b64decode(data), format="jpeg")
@@ -97,7 +106,14 @@ async def screenshot() -> Image:
 
 @mcp.tool()
 async def navigate(url: str) -> str:
-    """Otwórz adres w aktywnej karcie przeglądarki bota."""
+    """Otwórz adres w aktywnej karcie (nie otwiera nowej karty — zastępuje bieżącą).
+
+    Adres musi mieć schemat `http://` albo `https://`. Narzędzie CZEKA na wczytanie
+    strony (`readyState: complete`, limit 10 s), więc `read_page` zaraz potem widzi
+    już nową stronę; przy przekierowaniu wynik pokazuje adres docelowy.
+
+    Po nawigacji WSZYSTKIE wcześniejsze refy tracą ważność — zacznij od `read_page`
+    albo `find`."""
     await _ensure()
     state = await _call("POST", f"/api/bots/{_bot}/computer/navigate", json={"url": url})
     return f"otwarte: {state.get('url') or url}"
@@ -199,14 +215,33 @@ async def type_text(text: str, ref: str | None = None) -> str:
 
 
 @mcp.tool()
-async def key(name: str) -> str:
-    """Naciśnij pojedynczy klawisz, np. `Enter`, `Tab`, `Escape`, `ArrowDown`."""
-    return await _input([{"kind": "key", "type": "keyDown", "key": name}, {"kind": "key", "type": "keyUp", "key": name}])
+async def key(name: str, modifiers: list[str] | None = None) -> str:
+    """Naciśnij i puść klawisz tam, gdzie stoi fokus.
+
+    `name`: pojedynczy znak albo nazwa — `Enter`, `Tab`, `Escape`, `Backspace`,
+    `Delete`, `Home`, `End`, `PageUp`, `PageDown`, `ArrowUp`/`ArrowDown`/
+    `ArrowLeft`/`ArrowRight`, `F1`–`F12`, `Space`.
+
+    `modifiers`: lista z `ctrl`, `shift`, `alt`, `meta` — skróty działają:
+    `key("a", ["ctrl"])` zaznacza wszystko, `key("Tab", ["shift"])` cofa fokus.
+    Nie da się przytrzymać klawisza dłużej ani wysłać dwóch zwykłych klawiszy
+    naraz — tylko klawisz plus modyfikatory."""
+    press = {"kind": "key", "key": name, "modifiers": modifiers or []}
+    return await _input([{**press, "type": "keyDown"}, {**press, "type": "keyUp"}])
 
 
 @mcp.tool()
 async def scroll(x: float, y: float, dy: float = 400, dx: float = 0) -> str:
-    """Przewiń stronę o `dy` pikseli (dodatnie = w dół) z kursorem nad (x, y)."""
+    """Przewiń o `dy` pikseli (dodatnie = w dół) z kursorem nad punktem (x, y).
+
+    (x, y) MUSI leżeć nad obszarem, który da się przewijać — kółko trafia w
+    element pod kursorem, więc punkt nad nieprzewijalnym panelem nie zrobi nic.
+    Środek okna to bezpieczny wybór; jeden "ekran" to wysokość viewportu.
+
+    Nie zwraca nowego widoku: po przewinięciu zawołaj `read_page` (refy sprzed
+    przewinięcia zostają ważne, bo dokument się nie zmienił). Żeby dojechać do
+    konkretnego elementu, nie przewijaj wcale — `click(ref=…)` sam go przewija
+    do widoku."""
     return await _input(
         [{"kind": "mouse", "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy}]
     )
@@ -239,16 +274,36 @@ async def actions(steps: list[dict]) -> dict:
 
 @mcp.tool()
 async def status() -> dict:
-    """Czy przeglądarka bota stoi i na jakim adresie."""
+    """Czy przeglądarka komputera stoi i na jakim adresie. Rzadko potrzebne: każde
+    inne narzędzie samo podnosi przeglądarkę, jeśli jeszcze nie stoi.
+
+    Pola: `running` (przeglądarka odpowiada), `url` (adres karty na wierzchu),
+    `mode` (`own`/`shared`), `concurrency`, `busy` (inna operacja trzyma kolejkę
+    trybu `shared`), `external` (przeglądarka stoi w komputerze bota, nie w
+    silniku). UWAGA: wszystkie boty tego workspace'u dzielą JEDNĄ przeglądarkę i
+    jedną kartę na wierzchu — otwarcie nowej karty przestawia widok pozostałym."""
     await _ensure()
     return await _call("GET", f"/api/bots/{_bot}/computer/status")
 
 
 @mcp.tool()
 async def computer_exec(command: str) -> str:
-    """Uruchom polecenie shell WEWNĄTRZ komputera bota (kontener H2) — NIE na
-    hoście, na którym stoi silnik. Terminal ten sam, co widzi użytkownik w
-    live view; wynik to połączone stdout/stderr polecenia."""
+    """Uruchom polecenie shell na komputerze bota — TEN SAM system plików, który
+    widzi przeglądarka. Gdzie dokładnie, zależy od backendu: przy `native` (tak
+    stoi produkcja na telefonie) to `bash -lc` na tej samej maszynie co harness,
+    na koncie użytkownika harnessu; przy `docker` — w kontenerze komputera.
+    Nie zakładaj izolacji, której nie sprawdziłeś.
+
+    NAJTAŃSZE narzędzie tego zestawu (~0,3 s, mniej niż jeden klik). Pobranie
+    pliku, sprawdzenie adresu przez `curl`, przejrzenie katalogu, przeliczenie
+    czegoś — rób TU, zamiast klikać w przeglądarce.
+
+    Czego nie robi: **nie ma stanu między wywołaniami** (każde to nowy `bash -lc`,
+    więc `cd` i zmienne nie przenoszą się dalej — sklej polecenia przez `&&`);
+    **timeout 60 s**; wynik to sklejone stdout+stderr **bez kodu wyjścia**;
+    **niezerowy kod wyjścia = błąd narzędzia i utrata stdout**, więc `grep`, który
+    nic nie znalazł, wygląda jak awaria — dopisz `|| true`, gdy pusty wynik jest
+    poprawnym wynikiem. Limit bufora 8 MB."""
     if not _harness:
         raise RuntimeError(
             "terminal niedostępny: brak MULTIBOT_HARNESS_URL / --harness-url — "
