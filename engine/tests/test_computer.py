@@ -14,6 +14,7 @@ mostek celowo nie umie nawigować (przeglądaniem steruje Hermes, nie my).
 
 import base64
 import asyncio
+import io
 import json
 import os
 import shutil
@@ -24,6 +25,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from PIL import Image
 from fastapi.testclient import TestClient
 from websockets.sync.client import connect
 
@@ -228,28 +230,51 @@ def test_screenshot_returns_jpeg(client, page):
     assert base64.b64decode(data)[:2] == b"\xff\xd8"  # magic JPEG
 
 
-def test_screenshot_scales_a_wide_viewport_down(client, page):
-    """Model i tak skaluje obraz do 1568 px dłuższego boku, a płaci za każdy piksel
-    tokenami. Zmierzone przy viewporcie telefonu (1920x973): 177 716 B → 83 352 B."""
-    page.call(
-        "Emulation.setDeviceMetricsOverride",
-        {"width": 1920, "height": 973, "deviceScaleFactor": 1, "mobile": False},
-        page.session,
+def test_screenshot_keeps_image_pixels_equal_to_css_pixels(client, page):
+    """Zrzut MUSI mieć tyle pikseli, ile viewport ma pikseli CSS — bo dokładnie w tej
+    przestrzeni model podaje `click(x, y)`. Skalowanie zrzutu (kuszące: dałoby 53 %
+    mniej bajtów) rozjechałoby jedno z drugim o 1,5× i kliknięcia lądowałyby obok."""
+    for width, height in ((1920, 973), (1024, 640)):
+        page.call(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False},
+            page.session,
+        )
+        try:
+            raw = base64.b64decode(client.post(f"/api/bots/{_BOT}/computer/screenshot").json()["data"])
+            assert _jpeg_size(raw) == (width, height)
+        finally:
+            page.call("Emulation.clearDeviceMetricsOverride", {}, page.session)
+
+
+def test_screenshot_shows_the_viewport_not_the_top_of_a_scrolled_page(client, page):
+    """Regresja: `clip` w `Page.captureScreenshot` liczy się od DOKUMENTU, nie od
+    viewportu — zmierzone, że `clip={x:0,y:0}` na stronie przewiniętej o 2480 px
+    zwraca GÓRĘ dokumentu zamiast tego, co widać. Ten test trzyma zrzut przy tym,
+    co użytkownik ma na ekranie."""
+    # bez hexa: w `data:` URL `#` zaczyna fragment i ucina dokument
+    page.goto(
+        "data:text/html,<body style='margin:0'>"
+        "<div id=b style='height:600px;background:rgb(255,0,0)'>gora</div>"
+        "<div style='height:2000px;background:rgb(0,0,255)'></div>"
+        "<div style='height:600px;background:rgb(0,255,0)'>dol</div></body>"
     )
-    try:
-        raw = base64.b64decode(client.post(f"/api/bots/{_BOT}/computer/screenshot").json()["data"])
-        width, height = _jpeg_size(raw)
-        from server import computer as _computer
+    page.eval("window.scrollTo(0, document.body.scrollHeight)")
+    assert page.wait_for("window.scrollY > 1000") is not None
 
-        assert width == _computer._SHOT_MAX_WIDTH
-        assert abs(height - round(973 * _computer._SHOT_MAX_WIDTH / 1920)) <= 2
-    finally:
-        page.call("Emulation.clearDeviceMetricsOverride", {}, page.session)
+    # środek viewportu jest teraz zielony — gdyby zrzut brał górę dokumentu,
+    # byłby czerwony
+    assert page.eval(
+        "(function(){var r=document.elementFromPoint(innerWidth/2, innerHeight/2);"
+        "return getComputedStyle(r).backgroundColor})()"
+    ) == "rgb(0, 255, 0)", "test sam się nie przewinął — zrzut nic by nie dowiódł"
 
-    # …a viewport węższy niż limit zostaje jeden do jednego: skalowanie w GÓRĘ
-    # tylko rozmyłoby tekst i kosztowało więcej tokenów
     raw = base64.b64decode(client.post(f"/api/bots/{_BOT}/computer/screenshot").json()["data"])
-    assert _jpeg_size(raw)[0] == page.eval("window.innerWidth")
+    assert _jpeg_size(raw) == (page.eval("window.innerWidth"), page.eval("window.innerHeight"))
+
+    image = Image.open(io.BytesIO(raw)).convert("RGB")
+    red, green, blue = image.getpixel((image.width // 2, image.height // 2))
+    assert green > 200 and red < 80, f"zrzut nie pokazuje viewportu, tylko górę strony: RGB({red},{green},{blue})"
 
 
 def test_screencast_delivers_frames(client, page):
@@ -677,7 +702,12 @@ def test_actions_stop_on_the_first_error_and_report_what_was_skipped(client, pag
 
 def test_actions_stop_after_a_step_that_changed_the_document(client, page):
     """browser-use: „Page changed after {action} — skipping N remaining actions".
-    Po nawigacji refy i współrzędne dotyczą strony, której już nie ma."""
+    Po nawigacji refy i współrzędne dotyczą strony, której już nie ma.
+
+    Reload jest tu przypadkiem TRUDNIEJSZYM niż nawigacja na inny adres: zmierzone,
+    że `location.reload()` nie zmienia znacznika dokumentu (Chromium zachowuje
+    kontekst JS), więc wyłapuje go dopiero zdarzenie `Page.frameStartedNavigating`.
+    Ten test pilnuje właśnie tej ścieżki."""
     # Chromium blokuje nawigację ramki głównej na `data:` z kliknięcia w link, więc
     # dokument podmieniamy przeładowaniem — z punktu widzenia refów to ta sama
     # katastrofa: mapa `window.__multibot_refs__` znika razem ze starym dokumentem.

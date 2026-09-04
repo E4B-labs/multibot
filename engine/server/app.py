@@ -143,8 +143,9 @@ class NavigateIn(BaseModel):
 
 class ActionsIn(BaseModel):
     # Kroki batcha: `{"type": "click"|"type_text"|"key"|"scroll"|"wait", ...}`.
-    # Walidację robi `computer._action_events` (ValueError → 422), żeby błąd kroku
-    # brzmiał tak samo w batchu, jak w pojedynczym narzędziu.
+    # Kształt kroku sprawdza `computer._action_events` już W PĘTLI, więc zły krok
+    # wraca jako 200 z `stopped.reason` (razem z listą tego, co zdążyło pójść), a
+    # nie jako 422. Twardym 422 jest tylko przekroczony limit liczby kroków.
     actions: list[dict]
 
 

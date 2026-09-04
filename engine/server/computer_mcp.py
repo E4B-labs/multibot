@@ -220,7 +220,7 @@ async def key(name: str, modifiers: list[str] | None = None) -> str:
 
     `name`: pojedynczy znak albo nazwa — `Enter`, `Tab`, `Escape`, `Backspace`,
     `Delete`, `Home`, `End`, `PageUp`, `PageDown`, `ArrowUp`/`ArrowDown`/
-    `ArrowLeft`/`ArrowRight`, `F1`–`F12`, `Space`.
+    `ArrowLeft`/`ArrowRight`, `F1`–`F12`, `Space` (albo po prostu `" "`).
 
     `modifiers`: lista z `ctrl`, `shift`, `alt`, `meta` — skróty działają:
     `key("a", ["ctrl"])` zaznacza wszystko, `key("Tab", ["shift"])` cofa fokus.
@@ -300,7 +300,9 @@ async def computer_exec(command: str) -> str:
 
     Czego nie robi: **nie ma stanu między wywołaniami** (każde to nowy `bash -lc`,
     więc `cd` i zmienne nie przenoszą się dalej — sklej polecenia przez `&&`);
-    **timeout 60 s**; wynik to sklejone stdout+stderr **bez kodu wyjścia**;
+    **timeout 60 s**; wynik to **bez kodu wyjścia** sklejone stdout+stderr przy
+    backendzie `native`, a samo stdout przy `docker` (czyli przy dockerze komunikat
+    o błędzie potrafi zniknąć — przekieruj `2>&1`, gdy go potrzebujesz);
     **niezerowy kod wyjścia = błąd narzędzia i utrata stdout**, więc `grep`, który
     nic nie znalazł, wygląda jak awaria — dopisz `|| true`, gdy pusty wynik jest
     poprawnym wynikiem. Limit bufora 8 MB."""

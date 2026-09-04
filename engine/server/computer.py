@@ -53,13 +53,21 @@ _CALL_TIMEOUT = 20.0
 _POLL_INTERVAL = 1.0
 _DEFAULT_FPS = 5
 _JPEG_QUALITY = 60
-# Zrzut DLA AGENTA to nie to samo, co klatka live view: model i tak przeskaluje
-# obraz do 1568 px dłuższego boku, a płaci za każdy piksel tokenami (~1,7 tys. na
-# zrzut 1920×973). Zmierzone na telefonie: q60 = 77,8 kB / 0,268 s, q40 = 66,4 kB /
+# Zrzut DLA AGENTA to nie to samo, co klatka live view: model płaci za obraz
+# tokenami. Zmierzone na telefonie: q60 = 77,8 kB / 0,268 s, q40 = 66,4 kB /
 # 0,229 s. Live view zostaje na `_JPEG_QUALITY` — tam obraz ogląda człowiek.
+#
+# SKALOWANIA TU CELOWO NIE MA, choć kusi (zmierzone: dałoby 53 % mniej bajtów
+# przy viewporcie 1920×973). Dwa powody, oba sprawdzone na żywym chromium:
+#   1. `clip` w `Page.captureScreenshot` liczy się od DOKUMENTU, nie od viewportu —
+#      `{x: 0, y: 0}` na stronie przewiniętej o 2480 px zwraca górę dokumentu,
+#      a nie to, co widać. Dałoby się to naprawić `scrollX`/`scrollY`, ale…
+#   2. …skala rozjeżdża piksele obrazu z pikselami CSS, w których klika
+#      `/computer/input`. Model czytający przycisk z obrazu 1280 px wysłałby
+#      `click(x=640)` tam, gdzie w CSS jest 960 — cicho, o 1,5× obok.
+# Skalowanie wróci razem z przeliczaniem współrzędnych z powrotem (albo
+# z `Emulation.setDeviceMetricsOverride`, które zmienia viewport NAPRAWDĘ).
 _SHOT_QUALITY = 40
-_SHOT_MAX_WIDTH = 1280
-_VIEWPORT_SIZE_JS = "({w: window.innerWidth, h: window.innerHeight})"
 
 # Klawisze niedrukowalne nie wejdą do strony bez `windowsVirtualKeyCode` — UI
 # (Task 3) wysyła tylko `key`/`code`, więc VK wyliczamy tutaj.
@@ -383,8 +391,9 @@ def _key_params(event: dict) -> dict:
     text = event.get("text")
     if text is None:
         # Enter bez `text` nie zatwierdzi formularza; znak drukowalny bez `text`
-        # wygeneruje samo zdarzenie klawisza, bez wpisania litery.
-        text = "\r" if key == "Enter" else (key if len(key) == 1 else "")
+        # wygeneruje samo zdarzenie klawisza, bez wpisania litery. `Space` pisane
+        # nazwą (a tak podaje je opis narzędzia) też musi wstawić spację.
+        text = "\r" if key == "Enter" else (" " if key in ("Space", " ") else (key if len(key) == 1 else ""))
     # …ale przy Ctrl/Alt/Meta `text` WPISAŁBY literę zamiast wykonać skrót:
     # Ctrl+A z tekstem "a" wstawia "a" i nie zaznacza niczego.
     if modifiers & 0b111:
@@ -663,35 +672,16 @@ async def screenshot(bot_id: str) -> str:
     obraz nie pokrywa się ze współrzędnymi CSS viewportu, w których agent
     klika. Robimy dokładnie to, co widzi użytkownik, i tylko tyle.
 
-    SKALA: `clip.scale` ścina dłuższy bok do `_SHOT_MAX_WIDTH`. Współrzędne CSS
-    dla agenta się przez to NIE zmieniają (clip jest w pikselach CSS, skalowanie
-    dotyczy tylko wyjściowego obrazu), a modelowi ubywa ~35–40 % tokenów obrazu,
-    bo i tak skalowałby go do 1568 px. Gdyby stare Chromium nie przyjęło `clip`,
-    lecimy bez niego — lepszy większy zrzut niż żaden.
+    Bez `clip` — dlaczego, patrz komentarz przy `_SHOT_QUALITY`: `clip` liczy się
+    od dokumentu, a skala rozjechałaby piksele obrazu ze współrzędnymi klikania.
     """
     async with _operation(bot_id):
         async with _attached(bot_id) as (cdp, session):
-            params: dict = {"format": "jpeg", "quality": _SHOT_QUALITY, "captureBeyondViewport": False}
-            try:
-                got = await cdp.call(
-                    "Runtime.evaluate",
-                    {"expression": _VIEWPORT_SIZE_JS, "returnByValue": True},
-                    session_id=session,
-                )
-                size = got["result"].get("value") or {}
-                width, height = float(size.get("w") or 0), float(size.get("h") or 0)
-                if width > _SHOT_MAX_WIDTH and height > 0:
-                    params["clip"] = {
-                        "x": 0, "y": 0, "width": width, "height": height,
-                        "scale": _SHOT_MAX_WIDTH / width,
-                    }
-            except Exception:  # noqa: BLE001 — bez rozmiaru po prostu nie skalujemy
-                pass
-            try:
-                result = await cdp.call("Page.captureScreenshot", params, session_id=session)
-            except RuntimeError:
-                params.pop("clip", None)
-                result = await cdp.call("Page.captureScreenshot", params, session_id=session)
+            result = await cdp.call(
+                "Page.captureScreenshot",
+                {"format": "jpeg", "quality": _SHOT_QUALITY, "captureBeyondViewport": False},
+                session_id=session,
+            )
             return result["data"]
 
 
@@ -721,7 +711,7 @@ async def _dispatch(bot_id: str, cdp: "_Cdp", session: str, events: list[dict]) 
     dokładnie jedno żądanie HTTP do silnika, tak jak klik po współrzędnych.
     """
     color = _cursor_color(bot_id)
-    points = await _resolved_refs(cdp, session, events)
+    points = _RefPoints(cdp, session)
     origin: dict = {}
     if _can_warp() and any(e.get("kind") == "mouse" for e in events):
         try:
@@ -742,7 +732,7 @@ async def _dispatch(bot_id: str, cdp: "_Cdp", session: str, events: list[dict]) 
         if kind == "mouse":
             ref = event.get("ref")
             if ref:
-                x, y = points[str(ref)]
+                x, y = await points.point(str(ref))
                 event = {**event, "x": x, "y": y}
             # kursor PRZED zdarzeniem: klik może zabrać stronę gdzie indziej
             await _show_cursor(cdp, session, event, color, warp)
@@ -849,10 +839,18 @@ def _describe(action: dict) -> str:
     return f"{kind} {detail}" if detail is not None else kind
 
 
-# Zdarzenia CDP, które znaczą "ta strona już nie jest tą stroną". Sam pomiar
-# `location.href` po kroku ich NIE zastąpi: klik na link wraca zanim nawigacja się
-# zatwierdzi, więc porównanie adresu tuż po kliknięciu pokazuje jeszcze starą
-# stronę. `frameStartedNavigating` leci od razu, przed siecią.
+# Zdarzenia CDP, które znaczą "ta strona już nie jest tą stroną".
+#
+# ZMIERZONE (chromium, klik w link i `location.reload()`), bo intuicja tu myli:
+#   * `Page.frameStartedNavigating` leci 7–17 ms po kliknięciu, PRZED siecią, i
+#     przychodzi jeszcze zanim `_dispatch` wróci. `Page.frameNavigated` dopiero
+#     po ~0,42 s — na nim nie da się oprzeć kroku batcha.
+#   * `location.reload()` NIE zmienia znacznika dokumentu (Chromium potrafi
+#     zachować kontekst JS), więc reload łapie WYŁĄCZNIE zdarzenie.
+#   * odwrotnie przy nawigacji cross-document: kontekst wykonania ginie, więc
+#     `_doc_state` zwraca sentinel od razu — to jest siatka bezpieczeństwa na
+#     wypadek, gdyby zdarzenia `Page.*` nie doszły.
+# Stąd OBA źródła: żadne samo nie pokrywa obu przypadków.
 _NAV_EVENTS = {"Page.frameStartedNavigating", "Page.frameNavigated", "Page.navigatedWithinDocument"}
 
 
@@ -884,6 +882,9 @@ async def run_actions(bot_id: str, actions: list[dict]) -> dict:
             await cdp.call("Page.enable", session_id=session)
             tree = await cdp.call("Page.getFrameTree", session_id=session)
             watch.frame_id = ((tree.get("frameTree") or {}).get("frame") or {}).get("id")
+            # Nawigacja z POPRZEDNIEJ tury mogła się jeszcze commitować, gdy
+            # otwieraliśmy sesję — bez tego zerowania krok 0 dostałby cudzy alarm.
+            watch.hit = False
 
             executed: list[str] = []
             stopped: dict | None = None
@@ -899,9 +900,10 @@ async def run_actions(bot_id: str, actions: list[dict]) -> dict:
                     stopped = {"index": index, "step": _describe(action), "reason": f"błąd: {err}"}
                     break
                 executed.append(_describe(action))
-                # `_doc_state` łapie to, czego zdarzenie nie pokaże (podmieniony
-                # dokument pod tym samym adresem), zdarzenie łapie to, czego nie
-                # pokaże `_doc_state` (nawigacja jeszcze niezatwierdzona).
+                # Zdarzenie łapie reload (znacznik przeżywa) i nawigację jeszcze
+                # niezatwierdzoną; `_doc_state` łapie zniszczony kontekst wykonania.
+                # Zmierzone: 8/8 poprawnych zatrzymań na reloadzie i 0/8 fałszywych
+                # alarmów na kliknięciu bez nawigacji.
                 if watch.hit or await _doc_state(cdp, session) != before:
                     stopped = {
                         "index": index,
@@ -911,12 +913,23 @@ async def run_actions(bot_id: str, actions: list[dict]) -> dict:
                     }
                     await _wait_load(cdp, session)
                     break
-            return {
+            out = {
                 "executed": executed,
+                # Krok, na którym batch stanął, NIE liczy się ani do `executed`,
+                # ani do `skipped` — jest opisany w `stopped`.
                 "skipped": 0 if stopped is None else len(actions) - int(stopped["index"]) - 1,
                 "stopped": stopped,
-                "page": await _snapshot(cdp, session),
             }
+            try:
+                out["page"] = await _snapshot(cdp, session)
+            except Exception as err:  # noqa: BLE001
+                # Strona mogła być w połowie nawigacji ("Execution context was
+                # destroyed"). Raport z tego, co się wykonało, jest wtedy WAŻNIEJSZY
+                # niż snapshot — bez tego cały batch wracał jako 500 i model tracił
+                # informację, które kroki poszły.
+                out["page"] = None
+                out["page_error"] = f"snapshot niedostępny po batchu: {err}; zawołaj read_page"
+            return out
 
 
 async def navigate(bot_id: str, url: str) -> None:
@@ -996,6 +1009,10 @@ _SNAPSHOT_JS = r"""(function(query, limit) {
   var items = [], refs = [], truncated = false;
 
   function walk(node, depth) {
+    // Sprawdzenie limitu NA WEJŚCIU, nie tylko przy dopisywaniu: `return` z
+    // głębokiej ramki nie zatrzymuje pętli rodzica, więc bez tego chodziliśmy
+    // po całym DOM-ie długo po zapełnieniu listy.
+    if (refs.length >= limit) { truncated = true; return; }
     var kids = node.children || [];
     for (var i = 0; i < kids.length; i++) {
       var el = kids[i];
@@ -1050,7 +1067,10 @@ _REF_JS = r"""(function(ref) {
   var i = parseInt(String(ref).replace(/^e/i, ''), 10);
   var el = refs[i - 1];
   if (!el || !el.isConnected) return {error: 'missing'};
-  try { el.scrollIntoView({block: 'center', inline: 'center'}); } catch (e) {}
+  // `behavior: 'instant'` OBOWIĄZKOWO: bez niego strona z `scroll-behavior: smooth`
+  // przewija się animacją, a `getBoundingClientRect()` linijkę niżej czyta pozycję
+  // SPRZED przewinięcia — klik ląduje wtedy w cudzy element.
+  try { el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'}); } catch (e) {}
   var r = el.getBoundingClientRect();
   if (r.width <= 0 || r.height <= 0) return {error: 'hidden'};
   return {x: r.left + r.width / 2, y: r.top + r.height / 2};
@@ -1080,6 +1100,9 @@ def _render_tree(items: list[dict], truncated: bool, total: int) -> tuple[str, b
     lines: list[str] = []
     used = 0
     cut = truncated
+    # Mianownik to liczba WYPISYWANYCH pozycji, nie wszystkich na stronie —
+    # przy `find` „pokazano 3 z 250" mówiłoby o czymś, czego i tak nie wypisujemy.
+    shown_total = len(items)
     for index, item in enumerate(items):
         parts = [f"[{item.get('ref')}] {item.get('role')}"]
         if item.get("name"):
@@ -1090,7 +1113,7 @@ def _render_tree(items: list[dict], truncated: bool, total: int) -> tuple[str, b
         if used + len(line) + 1 > _SNAPSHOT_MAX_CHARS:
             cut = True
             lines.append(
-                f"… obcięto: pokazano {index} z {total} elementów "
+                f"… obcięto: pokazano {index} z {shown_total} elementów "
                 f"(zawęź przez find(query) zamiast czytać całość)"
             )
             break
@@ -1164,15 +1187,25 @@ async def _ref_point(cdp: "_Cdp", session: str, ref: str) -> tuple[float, float]
     return float(value["x"]), float(value["y"])
 
 
-async def _resolved_refs(cdp: "_Cdp", session: str, events: list[dict]) -> dict[str, tuple[float, float]]:
-    """Każdy ref użyty w tej paczce zdarzeń rozwiązany RAZ — klik to trzy zdarzenia
-    na tym samym elemencie, a trzy `scrollIntoView` z rzędu tylko mylą pozycję."""
-    points: dict[str, tuple[float, float]] = {}
-    for event in events:
-        ref = event.get("ref")
-        if ref and str(ref) not in points:
-            points[str(ref)] = await _ref_point(cdp, session, str(ref))
-    return points
+class _RefPoints:
+    """Ref → punkt, rozwiązywany LENIWIE, tuż przed zdarzeniem, z cache'em na
+    ciąg zdarzeń o tym samym refie.
+
+    Rozwiązanie wszystkich refów z góry byłoby błędem: `_ref_point` przewija
+    element do widoku, więc rozwiązanie refa B przesuwa stronę i unieważnia
+    współrzędne refa A, wyliczone chwilę wcześniej. Klik (trzy zdarzenia na tym
+    samym refie) i tak płaci za rozwiązanie raz.
+    """
+
+    def __init__(self, cdp: "_Cdp", session: str):
+        self._cdp, self._session = cdp, session
+        self._ref: str | None = None
+        self._point: tuple[float, float] = (0.0, 0.0)
+
+    async def point(self, ref: str) -> tuple[float, float]:
+        if ref != self._ref:
+            self._ref, self._point = ref, await _ref_point(self._cdp, self._session, ref)
+        return self._point
 
 
 _start_lock = asyncio.Lock()
