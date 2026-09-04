@@ -35,7 +35,9 @@ interface OpenCodeCatalogCache {
 }
 
 const FALLBACK_GO = [
+  // [0] stays the preferred default (see modelsFor) — Astra goes after it.
   "gpt-5.6-luna",
+  "gpt-6-astra",
   "grok-4.6",
   "kimi-k2.5",
 ];

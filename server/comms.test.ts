@@ -150,6 +150,11 @@ describe("comms e2e (fake ACP fleet)", () => {
       // reach it — without this the server would provision REAL containers for
       // every throwaway test bot.
       MULTIBOT_COMPUTER: "off",
+        // multibot: atrapy nigdy nie wystawiają [TASK COMPLETE], więc pokój
+        // ask_bot dobija do sufitu rund. Produkcyjne 12 to w teście 24 tury —
+        // trzy rundy wystarczą, żeby pokazać, że rozmowa idzie dalej, i przy
+        // okazji przypinają samo nadpisanie sufitu z env.
+        OMB_COLLAB_MAX_ROUNDS: "3",
         FAKE_CODEX_DUMP: join(home, "codex-dump.json"),
         // multibot: każdy prompt, jaki fake ACP dostało, ląduje w tym pliku —
         // jedyna droga, by w teście przypiąć treść WEJŚCIA tury bota (drivery
@@ -399,9 +404,10 @@ stderr: ${stderr.slice(-2000)}`,
       }
 
       const room = await roomOf();
-      // co najmniej jedna tura PO pierwszej odpowiedzi — na starym kodzie
-      // transkrypt zatrzymywał się na dwóch wpisach i statusie "done"
-      expect(room.transcript.length).toBeGreaterThan(2);
+      // pełna wymiana PO pierwszej odpowiedzi: pytanie, odpowiedź, wkładka
+      // wołającego i wkładka wołanego — na starym kodzie transkrypt kończył
+      // się na dwóch (albo trzech) wpisach i statusie "done"
+      expect(room.transcript.length).toBeGreaterThanOrEqual(4);
       // wołający wraca do rozmowy, nie tylko odbiorca
       expect(room.transcript.slice(2).some((m: any) => m.from === askerId)).toBe(true);
       // i pętla ma dno: pokój kończy się sam, więc wskaźnik "myśli" w UI gaśnie

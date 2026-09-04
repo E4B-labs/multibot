@@ -47,7 +47,7 @@ const MODELS = {
   options: [
     { id: "claude-opus-5", label: "Opus 5" },
     { id: "claude-sonnet-5", label: "Sonnet 5" },
-    { id: "claude-fable-5", label: "Fable 5" },
+    { id: "claude-fable-5-1", label: "Fable 5.1" },
     { id: "claude-haiku-4-5", label: "Haiku 4.5" },
   ],
 };
@@ -57,7 +57,7 @@ const canonicalModel = (model: string | undefined) => {
   if (!model || model === "sonnet" || model.startsWith("claude-sonnet-")) return "claude-sonnet-5";
   if (model === "opus" || model.startsWith("claude-opus-")) return "claude-opus-5";
   if (model === "haiku" || model.startsWith("claude-haiku-")) return "claude-haiku-4-5";
-  if (model === "fable" || model.startsWith("claude-fable-")) return "claude-fable-5";
+  if (model === "fable" || model.startsWith("claude-fable-")) return "claude-fable-5-1";
   return model;
 };
 const cliModel = (model: string | undefined) => {
