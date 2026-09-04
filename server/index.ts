@@ -87,7 +87,7 @@ import { BotMailQueue, BotMailStore, botMailThreadId, type PendingBotMail } from
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
-import { chainDepth, managedBotPatch, mentionedBots, Store, type BotRecord, type Message, type OptionCardData } from "./store.ts";
+import { chainDepth, managedBotPatch, mentionedBots, Store, type BotRecord, type ConnectorTarget, type Message, type OptionCardData } from "./store.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, isCredentialTargetId, type CredentialTargetId } from "./credential-request.ts";
 import { inspectorEvents, recordInspectorEvent, replayInspectorEvents } from "./inspector.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
@@ -987,6 +987,9 @@ function eventVisible(payload: unknown, actor: WorkspaceActor | null): boolean {
     const bot = store.botByThread(threadId) ?? store.bot(isolatedTurnBots.get(threadId) ?? "");
     return bot ? canAccessBot(bot, actor) : true;
   }
+  // multibot: banerka niesie tytuł i treść od bota — prywatny bot nie może jej
+  // rozesłać całemu workspace'owi. Ten sam zasięg co push (`pushForBot`).
+  if (event.kind === "notify") return canAccessBot(botFor(event.botId), actor);
   if (event.kind === "screen" || event.kind === "workspace" || event.kind === "computer") {
     if (event.kind === "screen") return canAccessBot(botFor(event.botId), actor);
     return event.kind === "workspace" && event.botId === undefined
@@ -1092,6 +1095,9 @@ function pushForBot(botId: string, kind: PushKind, body: string): void {
  * (Electron rysuje banerkę systemową). Nie zapisuje wiadomości w czacie: tekst
  * pisze sam bot w swojej turze. */
 function notifyUser(botId: string, title: string, body: string, kind: "reminder" | "notify"): void {
+  // Wyciszony bot milczy na OBU drogach — push bramkuje `pushForBot`, banerkę
+  // trzeba tu, bo `notifyFrame` zna tylko globalny przełącznik powłoki.
+  if (store.bot(botId)?.notifications === false) return;
   pushForBot(botId, kind, body || title);
   broadcast({ kind: "notify", botId, title, body });
 }
@@ -1099,12 +1105,14 @@ function notifyUser(botId: string, title: string, body: string, kind: "reminder"
 /** Konektory, o których podłączenie bot może poprosić kartą (`request_connection`).
  * Enum jest zamknięty: karta prowadzi do konkretnego miejsca w interfejsie, a
  * nie do dowolnego stringa od modelu. */
-const CONNECTION_TARGETS: Record<string, { pl: string; en: string }> = {
+const CONNECTION_TARGETS: Record<ConnectorTarget, { pl: string; en: string }> = {
   composio: { pl: "Aplikacje (Composio)", en: "Apps (Composio)" },
-  "google-workspace": { pl: "Google Workspace", en: "Google Workspace" },
+  "google-workspace": { pl: googleWorkspace.GOOGLE_WORKSPACE_NAME, en: googleWorkspace.GOOGLE_WORKSPACE_NAME },
   mcp: { pl: "Własny serwer MCP", en: "Your own MCP server" },
   computer: { pl: "Komputer", en: "Computer" },
 };
+const isConnectorTarget = (value: string): value is ConnectorTarget =>
+  Object.prototype.hasOwnProperty.call(CONNECTION_TARGETS, value);
 
 // Kto zaczął turę: tury bot-bot (`ask_bot`, runda grupy, cel) nie pushują
 // startu ani końca — rozmowa trzech botów dałaby sześć powiadomień. Rozgrzewka
@@ -2275,7 +2283,9 @@ const setupJobs = new SetupJobs(join(DATA_DIR, "setup-jobs.json"), (job) =>
 const harnessRoutines = new HarnessRoutines(join(DATA_DIR, "routines.json"), async (routine, payload) => {
   // Rutyna z konkretną datą to przypomnienie: człowiek ma dostać banerkę i push
   // w zaplanowanej chwili, a nie dopiero wtedy, gdy bot skończy myśleć.
-  if (oneShotAt(routine.schedule) !== null) notifyUser(routine.botId, routine.name, routine.name, "reminder");
+  // tytułem banerki jest sama treść przypomnienia — powtórzona w body dałaby
+  // „kawa / kawa"; push i tak bierze nazwę bota jako tytuł
+  if (oneShotAt(routine.schedule) !== null) notifyUser(routine.botId, routine.name, "", "reminder");
   await startTurn(routine.botId, routineTurnText(routine.name, routine.prompt, payload), { origin: "routine", routineName: routine.name });
 });
 
@@ -2981,8 +2991,8 @@ const server = createServer(async (req, res) => {
           // a następna tura widzi konektor w `connectionsBlock`.
           case "connection.request": {
             const connector = String(body.connector ?? "").trim();
+            if (!isConnectorTarget(connector)) return json(res, 422, { error: "unknown connector" });
             const label = CONNECTION_TARGETS[connector];
-            if (!label) return json(res, 422, { error: "unknown connector" });
             const why = String(body.why ?? "").trim().slice(0, 300);
             const message = store.appendMessage(caller.threadId, {
               role: "bot",

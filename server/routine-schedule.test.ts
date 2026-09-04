@@ -47,3 +47,16 @@ describe("routine schedule preset parser", () => {
     expect(parseSchedule("not a schedule").preset).toBe("unknown");
   });
 });
+
+// multibot: przypomnienie — harmonogram jest konkretną datą ISO, więc niesie
+// moment odpalenia obok presetów, a nie zamiast nich.
+describe("one-off reminder schedule", () => {
+  it("parses an ISO schedule into a moment, leaving the recurring presets alone", () => {
+    const parsed = parseSchedule("2030-01-02T09:30");
+    expect(parsed.once).toBe(new Date(2030, 0, 2, 9, 30).getTime());
+    expect(parseSchedule("2030-01-02 09:30").once).toBe(parsed.once);
+    expect(parseSchedule("15 9 * * 1").once).toBeUndefined();
+    expect(parseSchedule("every 1h").once).toBeUndefined();
+    expect(parseSchedule(null).once).toBeUndefined();
+  });
+});

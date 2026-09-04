@@ -222,10 +222,7 @@ export class HarnessRoutines {
     const schedule = input.schedule?.trim() || null;
     if (!name || name.length > 100) throw new Error("name required (max 100)");
     if (!prompt || prompt.length > 20_000) throw new Error("prompt required (max 20000)");
-    const nextRunAt = nextRun(schedule, this.now());
-    // Przypomnienie na wczoraj nigdy nie odpali — powiedz to od razu, zamiast
-    // zapisywać martwą rutynę, którą bot zamelduje jako ustawioną.
-    if (nextRunAt === null && oneShotAt(schedule) !== null) throw new Error("reminder time is in the past");
+    const nextRunAt = this.scheduleAnchor(schedule);
     const job: HarnessRoutine = {
       id: newId(), botId, name, prompt, schedule, enabled: true, trigger: null,
       last_runs: [], nextRunAt,
@@ -249,8 +246,11 @@ export class HarnessRoutines {
       job.prompt = prompt;
     }
     if (patch.schedule !== undefined) {
-      job.schedule = String(patch.schedule).trim() || null;
-      job.nextRunAt = nextRun(job.schedule, this.now());
+      const schedule = String(patch.schedule).trim() || null;
+      // ta sama bramka co przy create: przestawienie przypomnienia w przeszłość
+      // po cichu by je zabiło, a `update_routine` zameldowałby sukces
+      job.nextRunAt = this.scheduleAnchor(schedule);
+      job.schedule = schedule;
     }
     if (patch.enabled !== undefined) {
       job.enabled = Boolean(patch.enabled);
@@ -322,6 +322,16 @@ export class HarnessRoutines {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+  }
+
+  /** Pierwszy termin dla harmonogramu. Przypomnienie na wczoraj nigdy nie
+   * odpali — mówimy to od razu, zamiast zapisywać martwą rutynę, którą bot
+   * zamelduje jako ustawioną. Rutyny powtarzalne zwracają termin albo null
+   * (ręczna) jak dotąd. */
+  private scheduleAnchor(schedule: string | null): number | null {
+    const nextRunAt = nextRun(schedule, this.now());
+    if (nextRunAt === null && oneShotAt(schedule) !== null) throw new Error("reminder time is in the past");
+    return nextRunAt;
   }
 
   private async run(job: HarnessRoutine, payload?: string | null): Promise<void> {

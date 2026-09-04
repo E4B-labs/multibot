@@ -9,7 +9,6 @@ import {
   type NotifyContext,
   type NotifySnapshot,
 } from "./notifications";
-import { parseSchedule } from "./routineSchedule";
 
 function snapshot(patch: Partial<NotifySnapshot> = {}): NotifySnapshot {
   return { id: "bot-1", busy: false, unread: false, needsAttention: null, notifications: true, ...patch };
@@ -133,17 +132,5 @@ describe("notifyFrame", () => {
     expect(notifyFrame({ title: "Kawa" }, { enabled: false })).toBeNull();
     expect(notifyFrame({ title: "   ", body: "coś" }, { enabled: true })).toBeNull();
     expect(notifyFrame({}, { enabled: true })).toBeNull();
-  });
-});
-
-// multibot: przypomnienie w panelu rutyn — jedno zdanie z datą, nie cron.
-describe("one-off reminder schedule", () => {
-  it("parses an ISO schedule into a moment, leaving the recurring presets alone", () => {
-    const parsed = parseSchedule("2030-01-02T09:30");
-    expect(parsed.once).toBe(new Date(2030, 0, 2, 9, 30).getTime());
-    expect(parseSchedule("2030-01-02 09:30").once).toBe(parsed.once);
-    expect(parseSchedule("15 9 * * 1").once).toBeUndefined();
-    expect(parseSchedule("every 1h").once).toBeUndefined();
-    expect(parseSchedule(null).once).toBeUndefined();
   });
 });

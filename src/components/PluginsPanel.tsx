@@ -374,14 +374,18 @@ export function PluginsPanel() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  // multibot: prośba bota („Podłącz Google Workspace") otwiera panel od razu na
-  // zakładce, na której ten konektor w ogóle stoi — obie żyją pod „Twoje".
-  const [tab, setTab] = useState<"marketplace" | "yours">(
-    state.pluginsConnector === "google-workspace" || state.pluginsConnector === "mcp" ? "yours" : "marketplace",
-  );
+  const [tab, setTab] = useState<"marketplace" | "yours">("marketplace");
   // multibot (F7): otwarty formularz konektora — null = zamknięty,
   // locked = edycja istniejącego (id nie do zmiany)
   const [draft, setDraft] = useState<CustomDraft | null>(null);
+
+  // multibot: prośba bota („Podłącz Google Workspace") stawia panel od razu na
+  // zakładce, na której ten konektor w ogóle stoi — obie żyją pod „Twoje".
+  // Efekt, a nie wartość początkowa: panel bywa już otwarty, gdy klikasz kartę.
+  const connector = state.pluginsConnector;
+  useEffect(() => {
+    if (connector === "google-workspace" || connector === "mcp") setTab("yours");
+  }, [connector]);
 
   const refreshStatus = useCallback((slugs: string[]) => {
     if (!slugs.length) return Promise.resolve();

@@ -28,6 +28,10 @@ export type MausColor =
 export type MausExpression = string;
 export type MascotShape = string;
 
+/** Konektory, o które bot może poprosić kartą — zamknięty zbiór, bo każdy
+ * prowadzi w konkretne miejsce w interfejsie. */
+export type ConnectorTarget = "composio" | "google-workspace" | "mcp" | "computer";
+
 export interface OptionCardData {
   title: string;
   subtitle: string;
@@ -43,7 +47,7 @@ export interface OptionCardData {
    *  tury, człowiek podłącza go wtedy, kiedy chce. */
   kind?: "computer-handoff" | "connect";
   /** karty `connect`: który konektor otworzyć w panelu wtyczek. */
-  connector?: string;
+  connector?: ConnectorTarget;
 }
 
 export interface SecretRequestCardData {

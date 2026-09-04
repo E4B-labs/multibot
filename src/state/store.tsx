@@ -36,6 +36,9 @@ const SELECTED_BOT_KEY = "multibot.selectedBot";
 // pełne transkrypty serwer trzyma na dysku, ten sufit ogranicza tylko pamięć UI.
 const MAX_KNOWN_ROOMS = 40;
 
+/** Zamknięty zbiór konektorów kart `connect` — mirror server/store.ts. */
+export type ConnectorTarget = "composio" | "google-workspace" | "mcp" | "computer";
+
 export interface OptionCardData {
   title: string;
   subtitle: string;
@@ -49,7 +52,7 @@ export interface OptionCardData {
    *  podłączenie konektora i NIE czeka. Brak = zwykła karta. */
   kind?: "computer-handoff" | "connect";
   /** karty `connect`: konektor, który otwiera przycisk „Podłącz". */
-  connector?: string;
+  connector?: ConnectorTarget;
 }
 
 export interface Message {
@@ -211,7 +214,7 @@ interface AppState {
   pluginsOpen: boolean;
   /** multibot: konektor, o który poprosił bot kartą „Podłącz" — panel wtyczek
    *  otwiera się od razu na właściwej zakładce. */
-  pluginsConnector?: string;
+  pluginsConnector?: ConnectorTarget;
   computerOpen: boolean;
   appSettingsOpen: boolean;
   // multibot: F6 — panel rutyn silnika slafy, ten sam prawy slot co settings/computer
@@ -278,7 +281,7 @@ type Action =
   | { type: "workspaceChanged"; botId: string; resource: string }
   | { type: "error"; message: string | null }
   | { type: "toggleSettings"; open?: boolean }
-  | { type: "togglePlugins"; open?: boolean; connector?: string }
+  | { type: "togglePlugins"; open?: boolean; connector?: ConnectorTarget }
   | { type: "toggleComputer"; open?: boolean }
   | { type: "toggleAppSettings"; open?: boolean }
   // multibot: F6 — otwarcie/zamknięcie panelu rutyn
