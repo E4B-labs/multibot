@@ -113,6 +113,7 @@ export const CURSOR_COLORS: Record<string, string> = {
   yellow: "#D8A729",
   teal: "#01A492",
   coral: "#E5634E",
+  black: "#1A1A1A",
 };
 
 export async function attachExternalBrowser(threadId: string, cdpPort: number, color?: string): Promise<void> {
