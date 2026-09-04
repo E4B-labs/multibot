@@ -43,6 +43,25 @@ describe("OpenCode model catalog", () => {
     expect(catalog.zen.options.map((option) => option.id)).not.toContain("opencode/paid-model");
   });
 
+  it("default falls back to first option when preferred id missing", () => {
+    const catalog = parseOpenCodeCatalog(
+      { data: [{ id: "grok-4.6" }, { id: "kimi-k2.5" }] },
+      { data: [{ id: "big-pickle" }] },
+      "2026-09-05T00:00:00.000Z",
+    );
+
+    // Luna zniknęła z katalogu — default schodzi na kolejny znany model Go,
+    // a nigdy na id Zen (na tym stoi bramka klucza w ModelPickerze).
+    expect(catalog.go.default).toBe("opencode-go/grok-4.6");
+
+    const unknownOnly = parseOpenCodeCatalog(
+      { data: [{ id: "brand-new-model" }] },
+      { data: [{ id: "big-pickle" }] },
+      "2026-09-05T00:00:00.000Z",
+    );
+    expect(unknownOnly.go.default).toBe("opencode-go/brand-new-model");
+  });
+
   it("uses cache within 12 hours and keeps it after fetch failure", async () => {
     scratch = mkdtempSync(join(tmpdir(), "omb-opencode-catalog-"));
     const cachePath = join(scratch, "opencode-models.json");

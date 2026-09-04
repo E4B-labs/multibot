@@ -2,16 +2,18 @@
 // Routing is by exact instanceId only — an entry is never inferred from a
 // driver kind, and unavailable instances render disabled with the reason.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, KeyRound, Loader2 } from "lucide-react";
 import { useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { ProviderMark } from "./ProviderIcons";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 import { useLanguage } from "@/lib/language";
-import { groupOpenCodeModels } from "@/lib/opencodeModels";
+import { groupOpenCodeModels, isFreeModel, modelLabel } from "@/lib/opencodeModels";
 
-function modelLabel(instance: InstanceInfo | undefined, model: string): string {
-  return instance?.models.options.find((o) => o.id === model)?.label ?? model;
+// Nagłówkowa pigułka nigdy nie pokazuje surowego id: gdy katalog nie podał
+// `name` (fallbacki go nie mają), zostaje czytelny człon po ukośniku.
+function instanceModelLabel(instance: InstanceInfo | undefined, model: string): string {
+  return modelLabel(model, instance?.models.options.find((o) => o.id === model)?.label);
 }
 
 // The Python/Hermes sidecar is runtime infrastructure, not a user-facing
@@ -37,10 +39,11 @@ export function ModelPicker({ bot, className, compact }: { bot: Bot; className?:
   const railInstance =
     visibleInstances.find((i) => i.instanceId === (railId ?? selection.instanceId)) ?? visibleInstances[0];
   const activeLabel = active?.instanceId === "local"
-    ? `Automatic · ${modelLabel(active, selection.model)}`
+    ? `Automatic · ${instanceModelLabel(active, selection.model)}`
     : active
-      ? `${active.displayName} · ${modelLabel(active, selection.model)}`
-      : modelLabel(active, selection.model);
+      ? `${active.displayName} · ${instanceModelLabel(active, selection.model)}`
+      : instanceModelLabel(active, selection.model);
+  const opencodeKeyMissing = state.config?.opencode?.configured !== true;
 
   useEffect(() => {
     if (!open) return;
@@ -57,7 +60,7 @@ export function ModelPicker({ bot, className, compact }: { bot: Bot; className?:
   }, [open]);
 
   const pick = (instance: InstanceInfo, model: string) => {
-    if (instance.instanceId === "opencode" && model.startsWith("opencode-go/") && state.config?.opencode?.configured !== true) {
+    if (instance.instanceId === "opencode" && model.startsWith("opencode-go/") && opencodeKeyMissing) {
       setPendingGoModel(model);
       setExpandedOpenCodeGroups((current) => ({ ...current, go: true }));
       return;
@@ -65,6 +68,52 @@ export function ModelPicker({ bot, className, compact }: { bot: Bot; className?:
     dispatch({ type: "setModel", botId: bot.id, selection: { instanceId: instance.instanceId, model } });
     setPendingGoModel(null);
     setOpen(false);
+  };
+
+  const badge = (text: string) => (
+    <span className="shrink-0 rounded bg-inset px-1 py-px text-[10px] text-ink-secondary">{text}</span>
+  );
+
+  // Jeden kształt wiersza dla obu gałęzi (OpenCode w grupach i reszta), żeby
+  // odznaki i powód niedostępności nie rozjechały się między nimi.
+  const modelRow = (
+    instance: InstanceInfo,
+    option: { id: string; label: string },
+    opts: { indent?: boolean; needsKey?: boolean } = {},
+  ) => {
+    const current = selection.instanceId === instance.instanceId && selection.model === option.id;
+    const disabled = instance.snapshot.state !== "available";
+    const keyHint = polish ? "wymaga wspólnego klucza OpenCode Go" : "needs the shared OpenCode Go key";
+    return (
+      <button
+        key={option.id}
+        disabled={disabled}
+        // Powód siedzi na całym wierszu, nie tylko na ikonce — 12 px kłódki to
+        // za mały cel dla myszy i nic dla klawiatury.
+        title={disabled ? (instance.snapshot.reason ?? undefined) : opts.needsKey ? keyHint : undefined}
+        onClick={() => pick(instance, option.id)}
+        className={cn(
+          "flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[13px]",
+          opts.indent && "pl-6",
+          disabled ? "cursor-not-allowed text-ink-secondary/50" : "text-ink hover:bg-raised/60",
+          // brak klucza nie blokuje wiersza, tylko go przygasza — klik otwiera pole klucza
+          !disabled && opts.needsKey && "opacity-60",
+          current && "bg-raised",
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{modelLabel(option.id, option.label)}</span>
+          {option.id === instance.models.default && badge(polish ? "domyślny" : "default")}
+          {isFreeModel(option.id) && badge(polish ? "darmowy" : "free")}
+          {opts.needsKey && (
+            <span className="shrink-0 text-ink-secondary" role="img" aria-label={keyHint} title={keyHint}>
+              <KeyRound size={12} aria-hidden />
+            </span>
+          )}
+        </span>
+        {current && <Check size={14} className="shrink-0 text-accent" />}
+      </button>
+    );
   };
 
   return (
@@ -153,34 +202,15 @@ export function ModelPicker({ bot, className, compact }: { bot: Bot; className?:
                         >
                           <ChevronRight size={13} className={cn("transition-transform", expandedOpenCodeGroups[group.id] && "rotate-90")} />
                           <span>{group.label}</span>
-                          <span className="ml-auto text-[10px]">{group.options.length}</span>
+                          <span className="ml-auto text-[10px]">
+                            {group.options.length} {polish ? "modeli" : "models"}
+                          </span>
                         </button>
-                        {expandedOpenCodeGroups[group.id] && group.options.map((option) => {
-                          const current = selection.instanceId === railInstance.instanceId && selection.model === option.id;
-                          const disabled = railInstance.snapshot.state !== "available";
-                          return (
-                            <button
-                              key={option.id}
-                              disabled={disabled}
-                              onClick={() => pick(railInstance, option.id)}
-                              className={cn(
-                                "flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 pl-6 text-left text-[13px]",
-                                disabled ? "cursor-not-allowed text-ink-secondary/50" : "text-ink hover:bg-raised/60",
-                                current && "bg-raised",
-                              )}
-                            >
-                              <span className="flex min-w-0 items-center gap-2">
-                                <span className="truncate">{option.label}</span>
-                                {option.id === railInstance.models.default && (
-                                  <span className="shrink-0 rounded bg-inset px-1 py-px text-[10px] text-ink-secondary">
-                                    {polish ? "domyślny" : "default"}
-                                  </span>
-                                )}
-                              </span>
-                              {current && <Check size={14} className="shrink-0 text-accent" />}
-                            </button>
-                          );
-                        })}
+                        {expandedOpenCodeGroups[group.id] && group.options.map((option) =>
+                          modelRow(railInstance, option, {
+                            indent: true,
+                            needsKey: group.id === "go" && opencodeKeyMissing,
+                          }))}
                       </div>
                     ))}
                     {pendingGoModel && (
@@ -202,33 +232,7 @@ export function ModelPicker({ bot, className, compact }: { bot: Bot; className?:
                       </div>
                     )}
                   </>
-                ) : railInstance.models.options.map((option) => {
-                  const current =
-                    selection.instanceId === railInstance.instanceId && selection.model === option.id;
-                  const disabled = railInstance.snapshot.state !== "available";
-                  return (
-                    <button
-                      key={option.id}
-                      disabled={disabled}
-                      onClick={() => pick(railInstance, option.id)}
-                      className={cn(
-                        "flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[13px]",
-                        disabled ? "cursor-not-allowed text-ink-secondary/50" : "text-ink hover:bg-raised/60",
-                        current && "bg-raised",
-                      )}
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate">{option.label}</span>
-                        {option.id === railInstance.models.default && (
-                          <span className="shrink-0 rounded bg-inset px-1 py-px text-[10px] text-ink-secondary">
-                            {polish ? "domyślny" : "default"}
-                          </span>
-                        )}
-                      </span>
-                      {current && <Check size={14} className="shrink-0 text-accent" />}
-                    </button>
-                  );
-                })}
+                ) : railInstance.models.options.map((option) => modelRow(railInstance, option))}
               </>
             ) : (
               <div className="flex items-center gap-2 px-2 py-3 text-[13px] text-ink-secondary">
