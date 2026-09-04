@@ -351,13 +351,37 @@ async def _show_cursor(cdp, session, event: dict, color: str, ring: bool) -> Non
         pass
 
 
+# Maska modyfikatorów CDP (`Input.dispatchKeyEvent.modifiers`). Bez niej skróty
+# typu Ctrl+A w ogóle nie działały: modyfikator szedł na sztywno jako 0.
+_MODIFIERS = {"alt": 1, "ctrl": 2, "control": 2, "meta": 4, "cmd": 4, "command": 4, "shift": 8}
+
+
+def modifier_bits(value) -> int:
+    """`["ctrl", "shift"]` albo gotowa maska → maska CDP. Nieznana nazwa = 0, nie błąd:
+    lepiej wysłać goły klawisz niż wywrócić turę na literówce w nazwie modyfikatora."""
+    if isinstance(value, (list, tuple, set)):
+        bits = 0
+        for name in value:
+            bits |= _MODIFIERS.get(str(name).strip().lower(), 0)
+        return bits
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _key_params(event: dict) -> dict:
     key, code = str(event.get("key") or ""), str(event.get("code") or "")
+    modifiers = modifier_bits(event.get("modifiers"))
     text = event.get("text")
     if text is None:
         # Enter bez `text` nie zatwierdzi formularza; znak drukowalny bez `text`
         # wygeneruje samo zdarzenie klawisza, bez wpisania litery.
         text = "\r" if key == "Enter" else (key if len(key) == 1 else "")
+    # …ale przy Ctrl/Alt/Meta `text` WPISAŁBY literę zamiast wykonać skrót:
+    # Ctrl+A z tekstem "a" wstawia "a" i nie zaznacza niczego.
+    if modifiers & 0b111:
+        text = ""
     vk = _VK.get(key) or _VK.get(code) or (ord(key.upper()) if len(key) == 1 else 0)
     kind = str(event.get("type") or "keyDown")
     params = {
@@ -366,7 +390,7 @@ def _key_params(event: dict) -> dict:
         "code": code,
         "windowsVirtualKeyCode": vk,
         "nativeVirtualKeyCode": vk,
-        "modifiers": int(event.get("modifiers") or 0),
+        "modifiers": modifiers,
     }
     if text and kind == "keyDown":
         params["text"] = text
@@ -601,7 +625,7 @@ async def status(bot_id: str) -> dict:
 
 
 @asynccontextmanager
-async def _attached(bot_id: str):
+async def _attached(bot_id: str, on_event=None):
     """Krótkie połączenie CDP + sesja na karcie na wierzchu.
 
     Osobne od mostka `_Bridge`, żeby operacje bezstanowe (zrzut, input z MCP,
@@ -615,7 +639,7 @@ async def _attached(bot_id: str):
         targets = []
     if not targets:
         raise KeyError(f"bot {bot_id} nie ma uruchomionej przeglądarki")
-    cdp = await _Cdp.open(url)
+    cdp = await _Cdp.open(url, on_event)
     try:
         yield cdp, await cdp.attach(targets[0]["id"])
     finally:
@@ -699,6 +723,171 @@ async def _dispatch(bot_id: str, cdp: "_Cdp", session: str, events: list[dict]) 
             await cdp.call("Input.dispatchKeyEvent", _key_params(event), session_id=session)
         elif kind == "text":  # wpisanie ciągu jednym zdarzeniem (bez VK per znak)
             await cdp.call("Input.insertText", {"text": str(event.get("text") or "")}, session_id=session)
+
+
+# ── batch akcji w jednym wywołaniu ────────────────────────────────────────────
+#
+# Sekwencja `click → type_text → key Enter` to dziś CZTERY rundy modelu i cztery
+# razy narzut MCP (~0,2 s) plus `_attached` (~0,05–0,10 s). Batch robi to jedną
+# rundą i jedną sesją CDP.
+#
+# KONTRAKT NA PRZERWANIE jest ten sam, co u Anthropica, w browser-use i OpenClaw:
+#   * błąd kroku zatrzymuje resztę („Not executed: an earlier action failed"),
+#   * krok, który zmienił dokument (nawigacja, przeładowanie), też zatrzymuje —
+#     bo dalsze refy i współrzędne odnoszą się do strony, której już nie ma
+#     (browser-use: „Page changed after {action} — skipping N remaining actions").
+# Nawigacji w batchu nie ma z tego samego powodu, dla którego zabrania jej
+# OpenClaw: to zawsze byłby ostatni krok.
+_MAX_ACTIONS = 20
+_MAX_WAIT_MS = 10_000
+
+# Losowy znacznik przeżywa w oknie tak długo, jak sam dokument — nowy dokument
+# (nawigacja, reload, submit formularza) dostaje nowy, więc porównanie
+# `url|token` wykrywa też powrót pod ten sam adres.
+_DOC_JS = "(function(){ if(!window.__multibot_doc__) window.__multibot_doc__ = String(Math.random()); return location.href + '|' + window.__multibot_doc__; })()"
+
+
+async def _doc_state(cdp: "_Cdp", session: str) -> str:
+    """Tożsamość bieżącego dokumentu. W trakcie nawigacji `Runtime.evaluate` rzuca
+    („Execution context was destroyed") — to też jest zmiana dokumentu, nie błąd."""
+    try:
+        result = await cdp.call(
+            "Runtime.evaluate", {"expression": _DOC_JS, "returnByValue": True}, session_id=session
+        )
+        return str(result["result"].get("value") or "")
+    except Exception:  # noqa: BLE001
+        return f"__zmiana__{time.monotonic()}"
+
+
+async def _wait_load(cdp: "_Cdp", session: str, timeout: float = 10.0) -> None:
+    """Poczekaj na `document.readyState === 'complete'`. `Page.navigate` wraca po
+    commicie, nie po wczytaniu — bez tego snapshot pokazywałby starą stronę."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            result = await cdp.call(
+                "Runtime.evaluate",
+                {"expression": "document.readyState", "returnByValue": True},
+                session_id=session,
+            )
+            if result["result"].get("value") == "complete":
+                return
+        except Exception:  # noqa: BLE001 — kontekst zniknął w trakcie nawigacji
+            pass
+        await asyncio.sleep(0.1)
+
+
+def _action_events(action: dict) -> list[dict]:
+    """Krok batcha → zdarzenia wejścia. `ValueError` = zły krok, czyli stop."""
+    kind = str(action.get("type") or "")
+    if kind == "click":
+        ref, x, y = action.get("ref"), action.get("x"), action.get("y")
+        if ref is None and (x is None or y is None):
+            raise ValueError("click potrzebuje `ref` albo pary `x`/`y`")
+        where = {"ref": str(ref)} if ref is not None else {"x": float(x), "y": float(y)}
+        hit = {"kind": "mouse", **where, "button": str(action.get("button") or "left"), "clickCount": 1}
+        return [
+            {"kind": "mouse", "type": "mouseMoved", **where},
+            {**hit, "type": "mousePressed"},
+            {**hit, "type": "mouseReleased"},
+        ]
+    if kind == "type_text":
+        ref = action.get("ref")
+        focus: list[dict] = []
+        if ref is not None:
+            focus = _action_events({"type": "click", "ref": ref})
+        return [*focus, {"kind": "text", "text": str(action.get("text") or "")}]
+    if kind == "key":
+        name = str(action.get("name") or action.get("key") or "")
+        if not name:
+            raise ValueError("key potrzebuje `name`")
+        base = {"kind": "key", "key": name, "modifiers": action.get("modifiers") or 0}
+        return [{**base, "type": "keyDown"}, {**base, "type": "keyUp"}]
+    if kind == "scroll":
+        return [{
+            "kind": "mouse", "type": "mouseWheel",
+            "x": float(action.get("x") or 0), "y": float(action.get("y") or 0),
+            "deltaX": float(action.get("dx") or 0), "deltaY": float(action.get("dy") or 400),
+        }]
+    if kind == "wait":
+        return []
+    raise ValueError(f"nieznany krok {kind!r}; dozwolone: click, type_text, key, scroll, wait")
+
+
+def _describe(action: dict) -> str:
+    kind = str(action.get("type") or "?")
+    detail = action.get("ref") or action.get("name") or action.get("text") or action.get("ms") or action.get("dy")
+    return f"{kind} {detail}" if detail is not None else kind
+
+
+# Zdarzenia CDP, które znaczą "ta strona już nie jest tą stroną". Sam pomiar
+# `location.href` po kroku ich NIE zastąpi: klik na link wraca zanim nawigacja się
+# zatwierdzi, więc porównanie adresu tuż po kliknięciu pokazuje jeszcze starą
+# stronę. `frameStartedNavigating` leci od razu, przed siecią.
+_NAV_EVENTS = {"Page.frameStartedNavigating", "Page.frameNavigated", "Page.navigatedWithinDocument"}
+
+
+class _NavWatch:
+    """Flaga „główna ramka nawigowała". Ramki podrzędne (reklamy, widżety)
+    NIE liczą się: na żywej stronie iframe przeładowuje się bez końca, a refy
+    ramki głównej są wtedy dalej dobre."""
+
+    def __init__(self) -> None:
+        self.frame_id: str | None = None
+        self.hit = False
+
+    async def __call__(self, msg: dict) -> None:
+        if msg.get("method") not in _NAV_EVENTS:
+            return
+        params = msg.get("params") or {}
+        frame = params.get("frame") or params
+        if frame.get("frameId", frame.get("id")) == self.frame_id:
+            self.hit = True
+
+
+async def run_actions(bot_id: str, actions: list[dict]) -> dict:
+    """Wykonaj listę kroków sekwencyjnie w JEDNEJ sesji CDP i zwróć świeży snapshot."""
+    if len(actions) > _MAX_ACTIONS:
+        raise ValueError(f"za dużo kroków: {len(actions)} (limit {_MAX_ACTIONS})")
+    watch = _NavWatch()
+    async with _operation(bot_id):
+        async with _attached(bot_id, watch) as (cdp, session):
+            await cdp.call("Page.enable", session_id=session)
+            tree = await cdp.call("Page.getFrameTree", session_id=session)
+            watch.frame_id = ((tree.get("frameTree") or {}).get("frame") or {}).get("id")
+
+            executed: list[str] = []
+            stopped: dict | None = None
+            for index, action in enumerate(actions):
+                before = await _doc_state(cdp, session)
+                try:
+                    events = _action_events(action)
+                    if events:
+                        await _dispatch(bot_id, cdp, session, events)
+                    if str(action.get("type")) == "wait":
+                        await asyncio.sleep(min(float(action.get("ms") or 0), _MAX_WAIT_MS) / 1000)
+                except Exception as err:  # noqa: BLE001 — błąd kroku kończy batch, nie turę
+                    stopped = {"index": index, "step": _describe(action), "reason": f"błąd: {err}"}
+                    break
+                executed.append(_describe(action))
+                # `_doc_state` łapie to, czego zdarzenie nie pokaże (podmieniony
+                # dokument pod tym samym adresem), zdarzenie łapie to, czego nie
+                # pokaże `_doc_state` (nawigacja jeszcze niezatwierdzona).
+                if watch.hit or await _doc_state(cdp, session) != before:
+                    stopped = {
+                        "index": index,
+                        "step": _describe(action),
+                        "reason": "dokument się zmienił (nawigacja/przeładowanie) — dalsze kroki pominięte, "
+                                  "bo refy i współrzędne dotyczyły poprzedniej strony",
+                    }
+                    await _wait_load(cdp, session)
+                    break
+            return {
+                "executed": executed,
+                "skipped": 0 if stopped is None else len(actions) - int(stopped["index"]) - 1,
+                "stopped": stopped,
+                "page": await _snapshot(cdp, session),
+            }
 
 
 async def navigate(bot_id: str, url: str) -> None:

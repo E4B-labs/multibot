@@ -59,6 +59,10 @@ class _FakeEngine(BaseHTTPRequestHandler):
             return self._json(200, {"data": base64.b64encode(_JPEG).decode()})
         if self.path.endswith("/computer/input"):
             return self._json(200, {"ok": True})
+        if self.path.endswith("/computer/actions"):
+            return self._json(200, {"executed": ["click e7"], "skipped": 1,
+                                    "stopped": {"index": 0, "step": "click e7", "reason": "dokument się zmienił"},
+                                    "page": {"url": "https://example.test/next", "elements": ""}})
         if self.path.endswith("/computer/navigate"):
             return self._json(200, {"running": True, "url": "https://example.test/next"})
         return self._json(404, {"detail": "not found"})
@@ -127,7 +131,7 @@ async def _exercise_refs(params: StdioServerParameters) -> None:
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as client:
             await client.initialize()
-            assert "find" in {t.name for t in (await client.list_tools()).tools}
+            assert {"find", "actions"} <= {t.name for t in (await client.list_tools()).tools}
 
             found = await client.call_tool("find", {"query": "zaloguj"})
             assert not found.isError
@@ -138,6 +142,13 @@ async def _exercise_refs(params: StdioServerParameters) -> None:
             # bez `ref` i bez pary x/y nie ma w co kliknąć — narzędzie musi odmówić,
             # a nie wysłać kliknięcie w (0, 0)
             assert (await client.call_tool("click", {})).isError
+
+            batch = await client.call_tool("actions", {"steps": [
+                {"type": "click", "ref": "e7"},
+                {"type": "key", "name": "Enter"},
+            ]})
+            assert not batch.isError
+            assert "e7" in str(batch.content[0].text)
 
 
 def test_handshake_tools_and_calls(params):
@@ -176,6 +187,10 @@ def test_refs_travel_from_find_into_click_and_type(params):
         "mouseMoved", "mousePressed", "mouseReleased", "text",
     ]
     assert typed[-1] == {"kind": "text", "text": "jan"}
+    # batch idzie JEDNYM żądaniem — cała oszczędność rund siedzi właśnie tutaj
+    batches = [body for _, path, body in _FakeEngine.calls if path.endswith("/computer/actions")]
+    assert len(batches) == 1
+    assert batches[0] == {"actions": [{"type": "click", "ref": "e7"}, {"type": "key", "name": "Enter"}]}
 
 
 async def _exercise_exec_without_harness(params: StdioServerParameters) -> None:

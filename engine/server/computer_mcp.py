@@ -213,6 +213,31 @@ async def scroll(x: float, y: float, dy: float = 400, dx: float = 0) -> str:
 
 
 @mcp.tool()
+async def actions(steps: list[dict]) -> dict:
+    """Wykonaj kilka kroków JEDNYM wywołaniem — używaj tego zamiast serii osobnych
+    `click`/`type_text`/`key`. Cała sekwencja idzie w jednej sesji przeglądarki i
+    kończy się świeżym snapshotem strony, więc nie musisz potem wołać `read_page`.
+
+    Kroki (max 20), po kolei:
+      {"type": "click", "ref": "e5"}                  albo {"x": …, "y": …, "button": "left"}
+      {"type": "type_text", "text": "…", "ref": "e6"} `ref` = kliknij w to pole i wpisz
+      {"type": "key", "name": "Enter", "modifiers": ["ctrl"]}   `modifiers` opcjonalne
+      {"type": "scroll", "dy": 400, "x": …, "y": …}
+      {"type": "wait", "ms": 500}                     max 10 000 ms
+
+    ZATRZYMUJE SIĘ i zwraca raport, gdy krok padnie ORAZ gdy krok zmienił dokument
+    (nawigacja, przeładowanie, wysłanie formularza) — dalsze refy dotyczyłyby wtedy
+    strony, której już nie ma. Dlatego krok zmieniający stronę dawaj NA KOŃCU listy.
+    `navigate` do batcha nie wchodzi z tego samego powodu.
+
+    Zwraca: `executed` (co poszło), `stopped` (krok i powód albo `null`), `skipped`
+    (ile pominięto) i `page` — snapshot z refami jak z `read_page`. Bez zrzutu
+    ekranu: gdy potrzebujesz obrazu, zawołaj `screenshot` osobno."""
+    await _ensure()
+    return await _call("POST", f"/api/bots/{_bot}/computer/actions", json={"actions": steps})
+
+
+@mcp.tool()
 async def status() -> dict:
     """Czy przeglądarka bota stoi i na jakim adresie."""
     await _ensure()

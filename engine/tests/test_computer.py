@@ -573,6 +573,133 @@ def test_find_narrows_to_matching_refs_keeping_numbering(client, page):
     assert miss["matches"] == 0 and "note" in miss
 
 
+# ── batch akcji ───────────────────────────────────────────────────────────────
+# Sekwencja `click → type → Enter` to dziś cztery rundy modelu; batch robi z tego
+# jedną. Kontrakt na przerwanie jest tym, co odróżnia batch od "pętli po akcjach".
+
+
+def _refs(client, *needles: str) -> list[str]:
+    tree = client.get(f"/api/bots/{_BOT}/computer/page").json()["elements"]
+    out = []
+    for needle in needles:
+        line = next(line for line in _lines(tree) if needle in line)
+        out.append(line.split("]")[0].strip("[ "))
+    return out
+
+
+def test_actions_run_in_order_and_return_a_fresh_snapshot(client, page):
+    page.goto(_FORM, marker="go")
+    mail, go = _refs(client, "textbox", 'button "Zaloguj"')
+
+    body = client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [
+            {"type": "type_text", "ref": mail, "text": "jan@nowak.pl"},
+            {"type": "wait", "ms": 50},
+            {"type": "click", "ref": go},
+        ]},
+    ).json()
+
+    assert len(body["executed"]) == 3
+    assert body["stopped"] is None and body["skipped"] == 0
+    assert page.eval("document.getElementById('mail').value") == "jan@nowak.pl"
+    assert page.eval("document.title") == "wyslane"
+    # snapshot po batchu = zero dodatkowej rundy na "a pokaż, co się stało"
+    assert 'button "Zaloguj"' in body["page"]["elements"]
+
+
+def test_actions_stop_on_the_first_error_and_report_what_was_skipped(client, page):
+    page.goto(_FORM, marker="go")
+    (mail,) = _refs(client, "textbox")
+
+    body = client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [
+            {"type": "type_text", "ref": mail, "text": "abc"},
+            {"type": "click", "ref": "e999"},  # refa nie ma → stop
+            {"type": "key", "name": "Enter"},
+        ]},
+    ).json()
+
+    assert body["executed"] == [f"type_text {mail}"]
+    assert body["stopped"]["index"] == 1
+    assert "nie istnieje" in body["stopped"]["reason"]
+    assert body["skipped"] == 1
+    assert page.eval("document.title") != "wyslane"  # trzeci krok NIE poszedł
+
+
+def test_actions_stop_after_a_step_that_changed_the_document(client, page):
+    """browser-use: „Page changed after {action} — skipping N remaining actions".
+    Po nawigacji refy i współrzędne dotyczą strony, której już nie ma."""
+    # Chromium blokuje nawigację ramki głównej na `data:` z kliknięcia w link, więc
+    # dokument podmieniamy przeładowaniem — z punktu widzenia refów to ta sama
+    # katastrofa: mapa `window.__multibot_refs__` znika razem ze starym dokumentem.
+    reload_page = (
+        "data:text/html,<body style='margin:0'>"
+        "<input id=i><button id=b style='position:fixed;bottom:0;left:0;width:50px;height:20px' "
+        "onclick='location.reload()'>reload</button></body>"
+    )
+    page.goto(reload_page)
+    (button,) = _refs(client, 'button "reload"')
+
+    body = client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [
+            {"type": "click", "ref": button},
+            {"type": "type_text", "text": "tego juz nie wpiszemy"},
+            {"type": "key", "name": "Enter"},
+        ]},
+    ).json()
+
+    assert body["executed"] == [f"click {button}"]
+    assert "dokument się zmienił" in body["stopped"]["reason"]
+    assert body["skipped"] == 2
+    assert page.wait_for("document.getElementById('i').value === ''") is True
+    assert body["page"]["elements"]  # snapshot z odświeżonej strony, nie pustka
+
+
+def test_actions_reject_an_unknown_step_and_an_over_long_batch(client, page):
+    page.goto(_FORM, marker="go")
+    body = client.post(
+        f"/api/bots/{_BOT}/computer/actions", json={"actions": [{"type": "teleport"}]}
+    ).json()
+    assert body["stopped"]["index"] == 0 and "nieznany krok" in body["stopped"]["reason"]
+
+    too_many = client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [{"type": "wait", "ms": 1}] * 50},
+    )
+    assert too_many.status_code == 422
+
+
+def test_modifier_names_become_a_cdp_mask_and_drop_the_text(client, page):
+    """`Ctrl+A` szedł jako `modifiers: 0`, więc skróty nie działały w ogóle. Do tego
+    `text` przy Ctrl wpisałby literę zamiast wykonać skrót."""
+    from server import computer as _computer
+
+    assert _computer.modifier_bits(["ctrl"]) == 2
+    assert _computer.modifier_bits(["ctrl", "shift"]) == 10
+    assert _computer.modifier_bits(["nieznany"]) == 0
+    assert _computer.modifier_bits(8) == 8
+
+    with_ctrl = _computer._key_params({"key": "a", "type": "keyDown", "modifiers": ["ctrl"]})
+    assert with_ctrl["modifiers"] == 2 and "text" not in with_ctrl
+    plain = _computer._key_params({"key": "a", "type": "keyDown"})
+    assert plain["text"] == "a"
+
+    page.goto(_FORM, marker="go")
+    (mail,) = _refs(client, "textbox")
+    client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [
+            {"type": "type_text", "ref": mail, "text": "do skasowania"},
+            {"type": "key", "name": "a", "modifiers": ["ctrl"]},
+            {"type": "key", "name": "Delete"},
+        ]},
+    )
+    assert page.wait_for("document.getElementById('mail').value === ''") is True
+
+
 def test_page_without_text_tells_the_model_to_use_a_screenshot(client, page):
     """Karta z PDF-em zwraca 115 B pustki (zmierzone na telefonie) — model musi
     usłyszeć, że ma sięgnąć po zrzut, zamiast wołać read_page drugi raz."""

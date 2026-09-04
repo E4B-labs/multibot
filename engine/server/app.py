@@ -141,6 +141,13 @@ class NavigateIn(BaseModel):
     url: str
 
 
+class ActionsIn(BaseModel):
+    # Kroki batcha: `{"type": "click"|"type_text"|"key"|"scroll"|"wait", ...}`.
+    # Walidację robi `computer._action_events` (ValueError → 422), żeby błąd kroku
+    # brzmiał tak samo w batchu, jak w pojedynczym narzędziu.
+    actions: list[dict]
+
+
 class ComputerModeIn(BaseModel):
     mode: str
 
@@ -419,6 +426,14 @@ async def computer_input(bot_id: str, body: InputIn) -> dict:
     _require(bot_id)
     await computer.send_input(bot_id, body.events)  # KeyError → 404, gdy brak przeglądarki
     return {"ok": True}
+
+
+@app.post("/api/bots/{bot_id}/computer/actions")
+async def computer_actions(bot_id: str, body: ActionsIn) -> dict:
+    """Batch: lista kroków w JEDNEJ sesji CDP, stop na pierwszym błędzie i po kroku,
+    który zmienił dokument. Zwraca co wykonano, na czym stanęło i świeży snapshot."""
+    _require(bot_id)
+    return await computer.run_actions(bot_id, body.actions)  # KeyError → 404, ValueError → 422
 
 
 @app.post("/api/bots/{bot_id}/computer/navigate")

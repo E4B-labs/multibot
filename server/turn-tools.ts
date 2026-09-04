@@ -22,6 +22,7 @@ export const COMPUTER_MCP_TOOLS = [
   "type_text",
   "key",
   "scroll",
+  "actions",
   "status",
   "computer_exec",
 ] as const;
