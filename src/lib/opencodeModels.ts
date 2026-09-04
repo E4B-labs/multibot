@@ -17,6 +17,8 @@ export function modelLabel(id: string, label?: string): string {
   // Katalogowy fallback wpisuje w `label` samo id — wtedy nazwą jest człon po
   // ukośniku. Prawdziwa nazwa zostaje nietknięta, także gdy ma ukośnik.
   const raw = named && named !== id ? named : (id.split("/").pop()?.trim() || id);
+  // ponytail: `x-free` i `x` wypadają tu tą samą nazwą. Katalog nie serwuje
+  // obu naraz, a gdyby zaczął — rozdziela je odznaka „darmowy" w wierszu.
   return raw.replace(/-free$/, "") || id;
 }
 

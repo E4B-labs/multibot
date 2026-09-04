@@ -83,11 +83,14 @@ export function ModelPicker({ bot, className, compact }: { bot: Bot; className?:
   ) => {
     const current = selection.instanceId === instance.instanceId && selection.model === option.id;
     const disabled = instance.snapshot.state !== "available";
+    const keyHint = polish ? "wymaga wspólnego klucza OpenCode Go" : "needs the shared OpenCode Go key";
     return (
       <button
         key={option.id}
         disabled={disabled}
-        title={disabled ? (instance.snapshot.reason ?? undefined) : undefined}
+        // Powód siedzi na całym wierszu, nie tylko na ikonce — 12 px kłódki to
+        // za mały cel dla myszy i nic dla klawiatury.
+        title={disabled ? (instance.snapshot.reason ?? undefined) : opts.needsKey ? keyHint : undefined}
         onClick={() => pick(instance, option.id)}
         className={cn(
           "flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[13px]",
@@ -103,10 +106,7 @@ export function ModelPicker({ bot, className, compact }: { bot: Bot; className?:
           {option.id === instance.models.default && badge(polish ? "domyślny" : "default")}
           {isFreeModel(option.id) && badge(polish ? "darmowy" : "free")}
           {opts.needsKey && (
-            <span
-              className="shrink-0 text-ink-secondary"
-              title={polish ? "wymaga wspólnego klucza OpenCode Go" : "needs the shared OpenCode Go key"}
-            >
+            <span className="shrink-0 text-ink-secondary" role="img" aria-label={keyHint} title={keyHint}>
               <KeyRound size={12} aria-hidden />
             </span>
           )}

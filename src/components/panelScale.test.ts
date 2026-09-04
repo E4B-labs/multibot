@@ -76,8 +76,9 @@ describe("skala prawego panelu i czatu", () => {
     expect(picker).toContain("wymaga wspólnego klucza OpenCode Go");
     expect(picker).toContain("<KeyRound size={12}");
     expect(picker).toContain('!disabled && opts.needsKey && "opacity-60"');
-    // niedostępna instancja mówi dlaczego
-    expect(picker).toContain("title={disabled ? (instance.snapshot.reason ?? undefined) : undefined}");
+    // powód siedzi na całym wierszu: niedostępność albo brakujący klucz
+    expect(picker).toContain("title={disabled ? (instance.snapshot.reason ?? undefined) : opts.needsKey ? keyHint : undefined}");
+    expect(picker).toContain('role="img" aria-label={keyHint}');
     // licznik grupy z jednostką, nie goła liczba
     expect(picker).toContain('{group.options.length} {polish ? "modeli" : "models"}');
   });
