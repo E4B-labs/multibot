@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, ScanSearch, Search, Upload, Wand2 } from "lucide-react";
+import { ArrowDown, Bell, CalendarClock, Crosshair, File as FileIcon, Loader2, Monitor, Plug, ScanSearch, Search, Upload, Wand2, X } from "lucide-react";
 // multibot: wspólna pigułka zdarzenia i wspólna karta pliku
 import { EventChip } from "./EventChip";
 import { SkillPill } from "./SkillPill";
@@ -218,12 +218,58 @@ function SessionSeparator({ at, polish }: { at: number; polish: boolean }) {
   );
 }
 
+/** multibot: bot poprosił o podłączenie konektora. Karta NIE blokuje tury —
+ * „Podłącz" prowadzi w to jedno miejsce, w którym się to robi, „Pomiń" ją
+ * zamyka. Komputer nie jest wtyczką, więc idzie do ustawień aplikacji. */
+function ConnectCard({ botId, message, polish }: { botId: string; message: Message; polish: boolean }) {
+  const { dispatch } = useStore();
+  const card = message.card;
+  if (!card || card.dismissed) return null;
+  const connect = () => {
+    dispatch({ type: "dismissCard", botId, messageId: message.id });
+    if (card.connector === "computer") dispatch({ type: "toggleAppSettings", open: true });
+    else dispatch({ type: "togglePlugins", open: true, connector: card.connector });
+  };
+  return (
+    <div className="w-full max-w-[840px] rounded-2xl border border-hairline/50 bg-card p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 gap-3">
+          <Plug size={18} className="mt-0.5 shrink-0 text-ink-secondary" />
+          <div className="min-w-0">
+            <div className="text-[16px] font-semibold text-ink">{card.title}</div>
+            {card.subtitle && <div className="mt-0.5 text-[14px] text-ink-secondary">{card.subtitle}</div>}
+          </div>
+        </div>
+        <button
+          onClick={() => dispatch({ type: "dismissCard", botId, messageId: message.id })}
+          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <div className="mt-3 flex gap-2">
+        <button onClick={connect} className="rounded-lg bg-accent px-4 py-2 text-[14px] font-medium text-white hover:opacity-90">
+          {polish ? "Podłącz" : "Connect"}
+        </button>
+        <button
+          onClick={() => dispatch({ type: "dismissCard", botId, messageId: message.id })}
+          className="rounded-lg bg-raised px-4 py-2 text-[14px] text-ink hover:bg-raised-hover"
+        >
+          {polish ? "Pomiń" : "Skip"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function EventPill({ message, polish }: { message: Message; polish: boolean }) {
   const { dispatch } = useStore();
   if (!message.event) return null;
+  // przypomnienie jest rutyną z jednorazową datą, więc prowadzi w to samo miejsce
+  const routineEvent = message.event.type === "routine-created" || message.event.type === "reminder-created";
   const labels = polish
-    ? { renamed: "Zmieniono nazwę na", "skill-created": "Utworzono umiejętność", "routine-created": "Utworzono rutynę", "goal-progress": "Cel" }
-    : { renamed: "Renamed to", "skill-created": "Created skill", "routine-created": "Created routine", "goal-progress": "Goal" };
+    ? { renamed: "Zmieniono nazwę na", "skill-created": "Utworzono umiejętność", "routine-created": "Utworzono rutynę", "reminder-created": "Przypomnienie", "goal-progress": "Cel" }
+    : { renamed: "Renamed to", "skill-created": "Created skill", "routine-created": "Created routine", "reminder-created": "Reminder", "goal-progress": "Goal" };
   // multibot: wspólna pigułka zamiast własnego markupu — patrz EventChip.tsx.
   // Rutyna dostaje ikonę zegara, zmiana nazwy zostaje czystym tekstem.
   // skill-created → centered SkillPill (czarno-amber, klikalny) jak na screenie 561×110
@@ -236,11 +282,15 @@ function EventPill({ message, polish }: { message: Message; polish: boolean }) {
   }
   return (
     <EventChip
-      icon={message.event.type === "routine-created" ? <CalendarClock size={13} /> : message.event.type === "goal-progress" ? <Crosshair size={13} /> : undefined}
+      icon={
+        message.event.type === "routine-created" ? <CalendarClock size={13} />
+          : message.event.type === "reminder-created" ? <Bell size={13} />
+            : message.event.type === "goal-progress" ? <Crosshair size={13} /> : undefined
+      }
       label={labels[message.event.type]}
       value={message.event.value}
-      onClick={message.event.type === "routine-created" ? () => dispatch({ type: "toggleRoutines", open: true }) : undefined}
-      title={message.event.type === "routine-created" ? "Otwórz rutyny / Open routines" : undefined}
+      onClick={routineEvent ? () => dispatch({ type: "toggleRoutines", open: true }) : undefined}
+      title={routineEvent ? "Otwórz rutyny / Open routines" : undefined}
     />
   );
 }
@@ -617,7 +667,9 @@ export function ChatView({ bot }: { bot: Bot }) {
                 // (miniatura ekranu + przejmij/gotowe/pomiń), reszta kart bez zmian
                 child = m.card?.kind === "computer-handoff"
                   ? <ComputerHandoffCard key={m.id} botId={bot.id} message={m} />
-                  : <OptionCard key={m.id} botId={bot.id} message={m} />;
+                  : m.card?.kind === "connect"
+                    ? <ConnectCard key={m.id} botId={bot.id} message={m} polish={polish} />
+                    : <OptionCard key={m.id} botId={bot.id} message={m} />;
                 break;
               // multibot: wywołania narzędzi lecą dalej do stanu (Sidebar pokazuje
               // last.tool.name jako status), ale w czacie są niewidoczne —

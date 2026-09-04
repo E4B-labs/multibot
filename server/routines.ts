@@ -43,13 +43,14 @@ export interface HarnessRoutine {
 }
 
 type Dispatch = (
-  job: Pick<HarnessRoutine, "id" | "botId" | "name" | "prompt">,
+  job: Pick<HarnessRoutine, "id" | "botId" | "name" | "prompt" | "schedule">,
   payload?: string | null,
 ) => Promise<void>;
 type Clock = () => number;
 
 const EVERY = /^every\s+(\d+)\s*([mhd])$/i;
 const FIELD = /^(?:\*|\*\/\d+|\d+(?:-\d+)?)(?:,(?:\*|\*\/\d+|\d+(?:-\d+)?))*$/;
+const ONE_SHOT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
 
 function privateFile(path: string): void {
   if (process.platform !== "win32" && existsSync(path)) chmodSync(path, 0o600);
@@ -106,8 +107,24 @@ function nextCron(schedule: string, after: number): number {
   throw new Error("schedule has no run time within one year");
 }
 
+/** Trzecia forma harmonogramu obok `every N[mhd]` i crona: konkretna data i
+ * godzina (ISO 8601) — czyli przypomnienie, które ma odpalić RAZ. Bez offsetu
+ * czytamy ją jako czas lokalny serwera, tak jak `Date.parse` traktuje formę
+ * date-time bez strefy; ze spacją zamiast `T` (co wpisuje człowiek) też.
+ * // ponytail: strefa hosta, nie użytkownika — do zmiany, gdy wejdą strefy per user. */
+export function oneShotAt(schedule: string | null | undefined): number | null {
+  if (!schedule) return null;
+  const raw = schedule.trim();
+  if (!ONE_SHOT.test(raw)) return null;
+  const at = Date.parse(raw.replace(" ", "T"));
+  return Number.isFinite(at) ? at : null;
+}
+
 export function nextRun(schedule: string | null, after: number): number | null {
   if (!schedule) return null;
+  // Data jednorazowa: minęła → null, czyli rutyna sama gaśnie po odpaleniu.
+  const once = oneShotAt(schedule);
+  if (once !== null) return once > after ? once : null;
   const interval = EVERY.exec(schedule.trim());
   if (interval) {
     const amount = Number(interval[1]);
@@ -202,9 +219,13 @@ export class HarnessRoutines {
     const schedule = input.schedule?.trim() || null;
     if (!name || name.length > 100) throw new Error("name required (max 100)");
     if (!prompt || prompt.length > 20_000) throw new Error("prompt required (max 20000)");
+    const nextRunAt = nextRun(schedule, this.now());
+    // Przypomnienie na wczoraj nigdy nie odpali — powiedz to od razu, zamiast
+    // zapisywać martwą rutynę, którą bot zamelduje jako ustawioną.
+    if (nextRunAt === null && oneShotAt(schedule) !== null) throw new Error("reminder time is in the past");
     const job: HarnessRoutine = {
       id: newId(), botId, name, prompt, schedule, enabled: true, trigger: null,
-      last_runs: [], nextRunAt: nextRun(schedule, this.now()),
+      last_runs: [], nextRunAt,
     };
     this.jobs.push(job);
     this.persist();

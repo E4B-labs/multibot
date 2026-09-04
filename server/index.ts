@@ -79,7 +79,7 @@ import { EventBus } from "./harness/bus.ts";
 import * as mcpConnectors from "./mcp-connectors.ts";
 import * as googleWorkspace from "./google-workspace.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
-import { HarnessRoutines, routineTurnText, verifyWebhookSignature, type HarnessRoutine } from "./routines.ts";
+import { HarnessRoutines, oneShotAt, routineTurnText, verifyWebhookSignature, type HarnessRoutine } from "./routines.ts";
 import { runGroupRound } from "./group-round.ts";
 import { GroupStore } from "./group-store.ts";
 import { RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
@@ -1078,7 +1078,7 @@ const USER_ASK_DISMISS_NOTE = "MultiBot: the user closed the question without an
 // JEDNO miejsce wysyłki powiadomień: sprawdza przełącznik bota, tytułem jest
 // nazwa bota, a `data.botId` pozwala aplikacji otworzyć po tapnięciu właśnie
 // tego bota. Wysyłka nigdy nie przerywa obsługi zdarzenia.
-type PushKind = "question" | "handoff" | "approval" | "started" | "finished" | "failed" | "attention";
+type PushKind = "question" | "handoff" | "approval" | "started" | "finished" | "failed" | "attention" | "reminder" | "notify";
 function pushForBot(botId: string, kind: PushKind, body: string): void {
   const bot = store.bot(botId);
   // `=== false` a nie `!`: boty zapisane zanim pole istniało nie mają go w JSON
@@ -1086,6 +1086,25 @@ function pushForBot(botId: string, kind: PushKind, body: string): void {
   const audience = bot.visibility === "private" && bot.ownerId ? [bot.ownerId] : undefined;
   void notifyPushDevices(bot.name || "Bot", body.slice(0, 300) || "…", bot.id, { botId: bot.id, kind }, audience).catch(() => {});
 }
+
+/** multibot: JEDNO wyjście dla „powiedz człowiekowi coś TERAZ" — przypomnienie
+ * i `notify_user`. Push leci na telefon, ramka SSE budzi powłokę na pulpicie
+ * (Electron rysuje banerkę systemową). Nie zapisuje wiadomości w czacie: tekst
+ * pisze sam bot w swojej turze. */
+function notifyUser(botId: string, title: string, body: string, kind: "reminder" | "notify"): void {
+  pushForBot(botId, kind, body || title);
+  broadcast({ kind: "notify", botId, title, body });
+}
+
+/** Konektory, o których podłączenie bot może poprosić kartą (`request_connection`).
+ * Enum jest zamknięty: karta prowadzi do konkretnego miejsca w interfejsie, a
+ * nie do dowolnego stringa od modelu. */
+const CONNECTION_TARGETS: Record<string, { pl: string; en: string }> = {
+  composio: { pl: "Aplikacje (Composio)", en: "Apps (Composio)" },
+  "google-workspace": { pl: "Google Workspace", en: "Google Workspace" },
+  mcp: { pl: "Własny serwer MCP", en: "Your own MCP server" },
+  computer: { pl: "Komputer", en: "Computer" },
+};
 
 // Kto zaczął turę: tury bot-bot (`ask_bot`, runda grupy, cel) nie pushują
 // startu ani końca — rozmowa trzech botów dałaby sześć powiadomień. Rozgrzewka
@@ -2254,6 +2273,9 @@ const setupJobs = new SetupJobs(join(DATA_DIR, "setup-jobs.json"), (job) =>
 // jako osobny, oznaczony blok — `routineTurnText` jest JEDNYM wspólnym
 // miejscem składania dla wszystkich ścieżek (webhook, tick, Run now).
 const harnessRoutines = new HarnessRoutines(join(DATA_DIR, "routines.json"), async (routine, payload) => {
+  // Rutyna z konkretną datą to przypomnienie: człowiek ma dostać banerkę i push
+  // w zaplanowanej chwili, a nie dopiero wtedy, gdy bot skończy myśleć.
+  if (oneShotAt(routine.schedule) !== null) notifyUser(routine.botId, routine.name, routine.name, "reminder");
   await startTurn(routine.botId, routineTurnText(routine.name, routine.prompt, payload), { origin: "routine", routineName: routine.name });
 });
 
@@ -2922,6 +2944,59 @@ const server = createServer(async (req, res) => {
             if (!isCredentialTargetId(target)) return json(res, 422, { error: "unsupported credential target" });
             const answer = await askCredentialAndWait(caller, target);
             return json(res, 200, { answer });
+          }
+          // multibot: przypomnienie to rutyna z jednorazową datą (ISO), nie cron
+          // raz na rok. Prompt każe botowi POWIEDZIEĆ o tym w chwili odpalenia.
+          case "reminders.create": {
+            requireFull();
+            const text = String(body.text ?? "").trim().slice(0, 100);
+            const at = String(body.at ?? "").trim();
+            if (!text || !at) return json(res, 422, { error: "text and at required" });
+            try {
+              const routine = harnessRoutines.create(fromBotId, {
+                name: text,
+                prompt: `Reminder for the user: ${text}. Tell them now, in one short line, and do the task if it is something you can do yourself.`,
+                schedule: at,
+              });
+              appendBotEvent(fromBotId, { type: "reminder-created", value: text });
+              broadcast({ kind: "workspace", botId: fromBotId, resource: "routines" });
+              return json(res, 201, routineView(fromBotId, routine));
+            } catch (error) {
+              return json(res, 422, { error: error instanceof Error ? error.message : String(error) });
+            }
+          }
+          // multibot: bot ma coś do POWIEDZENIA, nie o co zapytać — banerka i
+          // push zamiast karty, która wstrzymuje turę na cztery minuty.
+          case "user.notify": {
+            const title = String(body.title ?? "").trim().slice(0, 120);
+            const text = String(body.body ?? "").trim().slice(0, 400);
+            if (!title) return json(res, 422, { error: "title required" });
+            notifyUser(fromBotId, title, text, "notify");
+            const updated = store.patchBot(fromBotId, { unread: true });
+            broadcast({ kind: "bot", bot: updated });
+            return json(res, 200, { ok: true });
+          }
+          // multibot: brak konektora to nie jest akapit prozy „wejdź w Plugins".
+          // Karta prowadzi w konkretne miejsce i NIE blokuje tury — bot kończy,
+          // a następna tura widzi konektor w `connectionsBlock`.
+          case "connection.request": {
+            const connector = String(body.connector ?? "").trim();
+            const label = CONNECTION_TARGETS[connector];
+            if (!label) return json(res, 422, { error: "unknown connector" });
+            const why = String(body.why ?? "").trim().slice(0, 300);
+            const message = store.appendMessage(caller.threadId, {
+              role: "bot",
+              kind: "options",
+              card: {
+                kind: "connect",
+                connector,
+                title: t(`Podłącz ${label.pl}`, `Connect ${label.en}`),
+                subtitle: why,
+                options: [],
+              },
+            });
+            broadcast({ kind: "message", threadId: caller.threadId, message });
+            return json(res, 200, { ok: true, connector });
           }
           case "memory.list": return json(res, 200, workspace.facts(fromBotId, String(body.query ?? "")));
           case "memory.graph": return json(res, 200, workspace.graph(fromBotId));

@@ -26,7 +26,7 @@ const ANDROID_CHANNEL = "default";
 const PRIORITY = "high";
 // Pushe, na które ktoś ma odpowiedzieć, żyją dobę; informacja o starcie albo
 // końcu tury po godzinie jest nieaktualna, więc nie ma po co jej dostarczać.
-const LONG_TTL_KINDS = new Set(["question", "handoff", "approval", "attention"]);
+const LONG_TTL_KINDS = new Set(["question", "handoff", "approval", "attention", "reminder"]);
 const SHORT_TTL_S = 3600;
 const LONG_TTL_S = 24 * 3600;
 /** exp.host przyjmuje najwyżej 100 wiadomości na żądanie. */

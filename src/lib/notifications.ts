@@ -121,6 +121,22 @@ export function shouldNotifyRoomDone(
   return prevStatus !== "done" && status === "done";
 }
 
+/** Ramka `notify` z serwera: bot ma coś do powiedzenia TERAZ (przypomnienie,
+ * `notify_user`). W odróżnieniu od `shouldNotify` odpala CELOWO także wtedy,
+ * gdy patrzysz na tego bota — o banerkę poprosił bot, nie zgadujemy jej z
+ * przejścia stanu. Ikonę dokłada wołający, bo zna kolor bota. */
+export interface NotifyFrame {
+  botId?: string;
+  title?: string;
+  body?: string;
+}
+
+export function notifyFrame(frame: NotifyFrame, ctx: { enabled: boolean }): NotifyPayload | null {
+  const title = String(frame?.title ?? "").trim();
+  if (!ctx.enabled || !title) return null;
+  return { title, body: String(frame?.body ?? "").trim(), botId: frame?.botId };
+}
+
 export interface NotifyPayload {
   title: string;
   body: string;

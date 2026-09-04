@@ -62,6 +62,10 @@ describe("push na telefon (fake ACP fleet)", () => {
     return bot.id;
   };
 
+  /** Transkrypt bota — GET /api/bots zwraca boty razem z wiadomościami. */
+  const botState = async (botId: string): Promise<any> =>
+    (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === botId);
+
   /** Urządzenia zapisane w configu serwera; pusto, gdy trafimy w moment zapisu. */
   const pushDevices = (): Record<string, { token?: string }> => {
     try {
@@ -127,6 +131,16 @@ describe("push na telefon (fake ACP fleet)", () => {
           grokPeer: {
             driver: "grokAgent",
             environment: { FAKE_ACP_MODE: "ask-peer" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
+          grokNotify: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "notify-user" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
+          grokConnect: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "request-connection" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
         },
@@ -226,6 +240,69 @@ describe("push na telefon (fake ACP fleet)", () => {
     expect(push?.ttl).toBe(3600);
     expect(push?.data).toMatchObject({ botId, kind: "finished" });
   }, 40_000);
+
+  // multibot: przypomnienie = rutyna z jednorazową datą ISO. W chwili odpalenia
+  // człowiek dostaje push `reminder` (żyje dobę, jak pytanie), a bot dostaje
+  // swoją turę i pisze o tym w czacie.
+  it("przypomnienie na za dwie sekundy: push `reminder` + wiadomość bota", async () => {
+    const botId = await newBot("Budzik", "happy");
+    const at = new Date(Date.now() + 2_000);
+    const iso = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}T${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}:${String(at.getSeconds()).padStart(2, "0")}`;
+    const created = await api("POST", `/api/bots/${botId}/routines`, { name: "kawa", prompt: "przypomnij o kawie", schedule: iso });
+    expect(created.status).toBe(201);
+    expect(created.body.next_run_at).toBeGreaterThan(Date.now());
+
+    // tick rutyn chodzi co 15 s, więc czekamy na nie dłużej niż jeden obrót
+    await until(() => kinds(botId).includes("reminder"), 40_000);
+    const reminder = pushes.find((p) => p.data?.botId === botId && p.data?.kind === "reminder");
+    expect(reminder?.title).toBe("Budzik");
+    expect(reminder?.body).toBe("kawa");
+    // przypomnienie ma dożyć do rana, a nie wygasnąć po godzinie
+    expect(reminder?.ttl).toBe(24 * 3600);
+
+    // tura rutyny leci normalnie: bot odpowiada w swoim wątku
+    const deadline = Date.now() + 20_000;
+    let said = false;
+    while (!said && Date.now() < deadline) {
+      const bot = await botState(botId);
+      said = (bot?.messages ?? []).some((m: any) => m.role === "bot" && m.kind === "text" && m.text);
+      if (!said) await new Promise((r) => setTimeout(r, 200));
+    }
+    expect(said).toBe(true);
+
+    // odpaliła raz i zgasła — brak kolejnego terminu
+    const routines = (await api("GET", `/api/bots/${botId}/routines`)).body;
+    expect(routines[0].next_run_at).toBeNull();
+  }, 70_000);
+
+  // multibot: `notify_user` — bot ma coś do POWIEDZENIA, nie o co zapytać.
+  it("notify_user: push `notify` i bot oznaczony jako nieprzeczytany", async () => {
+    const botId = await newBot("Krzykacz", "grokNotify");
+    expect((await api("POST", `/api/bots/${botId}/messages`, { text: "zrób raport" })).status).toBe(202);
+    await until(() => kinds(botId).includes("notify"), 30_000);
+    const notification = pushes.find((p) => p.data?.botId === botId && p.data?.kind === "notify");
+    expect(notification?.title).toBe("Krzykacz");
+    expect(notification?.body).toBe("Zebrałem dane z wczoraj.");
+    expect((await botState(botId))?.unread).toBe(true);
+  }, 60_000);
+
+  // multibot: brak konektora → karta z przyciskiem, nie akapit prozy. Karta NIE
+  // blokuje tury, więc bot kończy pracę mimo niepodłączonego Google Workspace.
+  it("request_connection: karta `connect` w czacie, tura kończy się bez czekania", async () => {
+    const botId = await newBot("Prosiciel", "grokConnect");
+    expect((await api("POST", `/api/bots/${botId}/messages`, { text: "wyślij maila" })).status).toBe(202);
+    const deadline = Date.now() + 30_000;
+    let card: any;
+    while (!card && Date.now() < deadline) {
+      const bot = await botState(botId);
+      card = (bot?.messages ?? []).find((m: any) => m.card?.kind === "connect");
+      if (!card) await new Promise((r) => setTimeout(r, 200));
+    }
+    expect(card?.card).toMatchObject({ kind: "connect", connector: "google-workspace" });
+    expect(card.card.subtitle).toBe("Muszę wysłać maila.");
+    await until(() => kinds(botId).includes("finished"), 30_000);
+    expect((await botState(botId))?.busy).not.toBe(true);
+  }, 60_000);
 
   it("ticket `DeviceNotRegistered` kasuje urządzenie z configu", async () => {
     expect((await api("POST", "/api/devices/dead-phone/push", { token: DEAD_TOKEN })).status).toBe(200);

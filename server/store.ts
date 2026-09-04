@@ -38,8 +38,12 @@ export interface OptionCardData {
   requestId?: string;
   /** multibot: rodzaj karty. Brak = zwykła karta pytania/zgody (jak dotąd).
    *  `computer-handoff` — bot oddaje komputer człowiekowi (logowanie, 2FA,
-   *  captcha) i czeka: przejmij / gotowe / pomiń. */
-  kind?: "computer-handoff";
+   *  captcha) i czeka: przejmij / gotowe / pomiń.
+   *  `connect` — bot potrzebuje konektora, którego nie ma: karta nie blokuje
+   *  tury, człowiek podłącza go wtedy, kiedy chce. */
+  kind?: "computer-handoff" | "connect";
+  /** karty `connect`: który konektor otworzyć w panelu wtyczek. */
+  connector?: string;
 }
 
 export interface SecretRequestCardData {
@@ -63,7 +67,7 @@ export interface Message {
   /** activity messages: tool name + outcome */
   tool?: { name: string; ok?: boolean };
   /** Small durable workspace event shown as a chat pill. */
-  event?: { type: "renamed" | "skill-created" | "routine-created" | "goal-progress"; value: string };
+  event?: { type: "renamed" | "skill-created" | "routine-created" | "reminder-created" | "goal-progress"; value: string };
   /** collaboration-room chip: a clickable "X texted Y" pill leading to the room */
   room?: { id: string; name: string; bot_ids: string[]; ownerBotId: string; status: string };
   /** screen messages: a frame of the bot's computer (base64 image) */

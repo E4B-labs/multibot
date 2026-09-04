@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   botNotificationIcon,
   notificationTag,
+  notifyFrame,
   readDesktopNotifications,
   shouldNotify,
   shouldNotifyRoomDone,
   type NotifyContext,
   type NotifySnapshot,
 } from "./notifications";
+import { parseSchedule } from "./routineSchedule";
 
 function snapshot(patch: Partial<NotifySnapshot> = {}): NotifySnapshot {
   return { id: "bot-1", busy: false, unread: false, needsAttention: null, notifications: true, ...patch };
@@ -107,5 +109,41 @@ describe("readDesktopNotifications", () => {
     expect(readDesktopNotifications({ getItem: () => "on" })).toBe(true);
     expect(readDesktopNotifications({ getItem: () => "off" })).toBe(false);
     expect(readDesktopNotifications(undefined)).toBe(true);
+  });
+});
+
+// multibot: ramka `notify` z serwera — przypomnienie i `notify_user`. Bot
+// poprosił o banerkę wprost, więc reguła jest inna niż przy `shouldNotify`.
+describe("notifyFrame", () => {
+  it("turns a server frame into a banner payload", () => {
+    expect(notifyFrame({ botId: "bot-1", title: "Kawa", body: "za 2 minuty" }, { enabled: true })).toEqual({
+      title: "Kawa",
+      body: "za 2 minuty",
+      botId: "bot-1",
+    });
+  });
+
+  it("fires even when that bot is the one on screen", () => {
+    // brak `ctx.focused`/`selectedBotId` jest celowy: o banerkę poprosił bot,
+    // nie zgadujemy jej z przejścia stanu
+    expect(notifyFrame({ botId: "bot-1", title: "Kawa" }, { enabled: true })).toMatchObject({ title: "Kawa", body: "" });
+  });
+
+  it("stays silent when banners are off or the title is empty", () => {
+    expect(notifyFrame({ title: "Kawa" }, { enabled: false })).toBeNull();
+    expect(notifyFrame({ title: "   ", body: "coś" }, { enabled: true })).toBeNull();
+    expect(notifyFrame({}, { enabled: true })).toBeNull();
+  });
+});
+
+// multibot: przypomnienie w panelu rutyn — jedno zdanie z datą, nie cron.
+describe("one-off reminder schedule", () => {
+  it("parses an ISO schedule into a moment, leaving the recurring presets alone", () => {
+    const parsed = parseSchedule("2030-01-02T09:30");
+    expect(parsed.once).toBe(new Date(2030, 0, 2, 9, 30).getTime());
+    expect(parseSchedule("2030-01-02 09:30").once).toBe(parsed.once);
+    expect(parseSchedule("15 9 * * 1").once).toBeUndefined();
+    expect(parseSchedule("every 1h").once).toBeUndefined();
+    expect(parseSchedule(null).once).toBeUndefined();
   });
 });
