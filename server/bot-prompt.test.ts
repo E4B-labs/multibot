@@ -181,6 +181,65 @@ describe("botSystemPrompt", () => {
     expect(nothing).not.toContain("You ARE connected");
   });
 
+  // multibot: bot z komputerem bywał bierny — jeden klik, chybienie, pytanie do
+  // użytkownika. Playbook jest warunkowy na komputer, a linie o sekretach
+  // dodatkowo na serwer `agents` (regresja bc3d15ec).
+  it("z komputerem dostaje playbook użycia komputera", () => {
+    const text = prompt(ALL);
+    expect(text).toContain("# Using your computer well");
+    expect(text).toContain("never click a spot you have not just seen");
+    expect(text).toContain("at least three genuinely different attempts");
+    expect(text).toContain("The same click three times is a loop");
+    // korekta: komputer to cała maszyna, nie sama przeglądarka
+    expect(text).toContain("It is a whole Linux machine, not just a browser");
+    expect(text).toContain("shell, api or curl first");
+    expect(text).toContain("Install it instead of giving up");
+    expect(text).toContain("`request_credential`");
+    expect(text).toContain("Clicking a button is not evidence that it worked");
+    // wspólna maszyna: cudze procesy i globalna konfiguracja są nietykalne
+    expect(text).toContain("Never kill processes that are not yours");
+    expect(text).toContain("Do not touch global configuration");
+    // playbook siedzi po opisie narzędzi, przed regułami pracy
+    expect(text.indexOf("# Using your computer well")).toBeGreaterThan(text.indexOf("# What you have"));
+    expect(text.indexOf("# Using your computer well")).toBeLessThan(text.indexOf("# How you work"));
+  });
+
+  // Produkcja to Termux na Androidzie bez roota, dev bywa Debianem w kontenerze
+  // (`hosted-computer.ts::BACKEND`). Playbook NIE MOŻE wybrać jednej z nich za
+  // bota — wpisana na sztywno dystrybucja kłamie połowie floty.
+  it("playbook nie zgaduje dystrybucji i podaje obie postacie maszyny", () => {
+    const text = prompt(ALL);
+    expect(text).toContain("Do not assume which Linux it is");
+    expect(text).toContain("Termux on Android");
+    expect(text).toContain("no `sudo` and no root at all");
+    expect(text).toContain("`pkg`");
+  });
+
+  // Sygnatury narzędzi żyją w engine/server/computer_mcp.py i zmieniają się
+  // osobno. Prompt powtarzający parametry rozjeżdża się z nimi po cichu.
+  it("playbook nie powtarza parametrów narzędzi komputera", () => {
+    const text = prompt(ALL);
+    const playbook = text.slice(text.indexOf("# Using your computer well"), text.indexOf("# How you work"));
+    // tylko jednoznaczne kawałki sygnatur — krótkie nazwy parametrów (`dy`,
+    // `dx`) trafiają w zwykłe słowa ("already"), więc ich tu nie ma.
+    for (const signature of ["(x, y", "x/y", "[[x", "(reason)", "CSS pixel", "deltaY"]) {
+      expect(playbook).not.toContain(signature);
+    }
+  });
+
+  it("bez komputera nie ma playbooka komputera", () => {
+    const text = prompt({ agents: { command: "node" } });
+    expect(text).not.toContain("# Using your computer well");
+    expect(text).not.toContain("at least three genuinely different attempts");
+  });
+
+  it("playbook bez serwera agents nie każe wołać request_credential", () => {
+    const text = prompt({ localComputer: { command: "py" } });
+    expect(text).toContain("# Using your computer well");
+    expect(text).not.toContain("request_credential");
+    expect(text).toContain("say exactly which credential is missing");
+  });
+
   it("routine halucynacja zablokowana — tylko create_routine, zero cloud", () => {
     const text = prompt(ALL);
     expect(text).toContain("create_routine");

@@ -129,6 +129,106 @@ export function connectionsBlock(
   ].join("\n");
 }
 
+/**
+ * multibot: bot Z KOMPUTEREM bywał bierny — dostawał zadanie na ekran, klikał
+ * raz, nie trafiał i pytał użytkownika, co dalej. Prompt mówił mu, ŻE ma
+ * komputer i jakie ma narzędzia, ale nigdzie nie mówił, JAK się nim posługiwać:
+ * rozejrzyj się, postaw hipotezę gdzie coś jest, sprawdź ją, zweryfikuj skutek,
+ * spróbuj innej drogi.
+ *
+ * Druga rzecz, której prompt nie mówił: to CAŁA maszyna Linux, nie sama
+ * przeglądarka.
+ *
+ * Fakty o niej są z kodu i ze zmierzonej produkcji, nie z domysłu — i CELOWO
+ * nie ma tu nazwy dystrybucji, bo `hosted-computer.ts::BACKEND` daje DWIE różne
+ * maszyny pod tym samym interfejsem:
+ *   - `docker` — obraz z `Dockerfile.computer` (Debian + XFCE, `/home/cua` na
+ *     wolumenie `multibot-computer-data`, apt-get, wget);
+ *   - `native` (`scripts/computer-native.sh`) — te same porty bez kontenera,
+ *     bo Docker na nierootowanym Androidzie nie ruszy. Produkcja stoi właśnie
+ *     tak: zmierzone `ssh -p 8022 100.78.241.9` 2026-09-04 — Linux aarch64
+ *     Android 4.14, Termux (`uid=10380`, ZERO roota, BRAK `sudo`, BRAK `wget`,
+ *     BRAK `/home/cua`), `$PREFIX=/data/data/com.termux/files/usr`,
+ *     `$HOME=/data/data/com.termux/files/home`, jest `pkg`/`apt`/`pip`/`npm`/
+ *     `node`/`python`/`curl`/`xdotool`/`chromium-browser`, 8 rdzeni, 5,4 GB RAM.
+ * Wpisanie tu Debiana kłamałoby botowi na telefonie, a wpisanie Termuksa —
+ * botowi w kontenerze, więc blok mówi „sprawdź sam" i podaje obie postacie.
+ *
+ * `bash -lc` z ~60 s to `hosted-computer.ts::exec` (`timeoutMs = 60_000`),
+ * jedyna trasa `computer_exec` (index.ts `/api/bots/:id/computer/exec`).
+ *
+ * Blok mówi o narzędziach OGÓLNIE — po nazwach, bez ich parametrów i bez
+ * kształtu zwracanych danych. Celowo: opisy narzędzi i ich sygnatury żyją
+ * w `engine/server/computer_mcp.py` i zmieniają się osobno (refy, batch
+ * akcji), a prompt powtarzający sygnaturę rozjeżdża się z nimi po cichu
+ * i zaczyna kłamać. Tu jest STRATEGIA, tam INTERFEJS.
+ *
+ * `native` nie izoluje niczego (nagłówek `computer-native.sh`): shell chodzi
+ * jako użytkownik harnessu, po jego plikach i kluczach. Stąd twarde reguły
+ * o cudzych procesach i globalnej konfiguracji — na tym backendzie `pkill`
+ * albo podmiana configu przewraca samego MultiBota.
+ *
+ * Blok jest warunkowy na `localComputer` (te i tylko te nazwy narzędzi bot
+ * dostał), a linie o sekretach dodatkowo na serwer `agents` — `request_credential`
+ * i `hand_over_computer` są jego, nie komputera (regresja bc3d15ec).
+ *
+ * Osobna funkcja z tego samego powodu, co `connectionsBlock`: driver slafy
+ * `system` do silnika nie przekazuje, więc index.ts dokleja to do treści tury.
+ */
+export function computerPlaybook(integrations: TurnIntegrationsLike | undefined): string {
+  if (!integrations?.localComputer) return "";
+  const agents = Boolean(integrations.agents);
+  return [
+    "# Using your computer well",
+    "It is a whole Linux machine, not just a browser: a real shell, a real filesystem and a browser, all one environment. `computer_exec` runs a command there through `bash -lc`, so a file the browser downloads is a file the shell can read, and vice versa.",
+    "Do not assume which Linux it is - one command tells you: `uname -a; cat /etc/os-release 2>/dev/null; id; command -v apt pkg pip npm node python curl`. There are two shapes. A Debian container: apt-get, wget, and `/home/cua` as the disk that persists. Or Termux on Android (aarch64, unrooted): `pkg` and `apt` instead of apt-get, no `sudo` and no root at all, no `wget` (use `curl`), no `/home/cua` - your home is `$HOME` and `$PREFIX` holds the installed tools. Read what you got, then use it.",
+    "",
+    "Take the fastest route, not the most visual one.",
+    "- Order of preference: shell, api or curl first, then reading a page, then clicking through a ui. Fetching json with `computer_exec` beats twenty screenshots of the same data.",
+    "- Use the browser when the job really needs the interface: a site with no api, a session only the logged-in ui has, something you must see to confirm.",
+    "- Missing a tool? Install it instead of giving up: `pkg install` or `apt-get install`, `pip install`, `npm install`, or a static binary pulled with curl. Check first what you are allowed to do (`id`, `sudo -n true`); with no root, install into your own prefix (`pip install --user`, an npm prefix under `$HOME`) rather than reporting that you cannot.",
+    "- A command gets about 60 seconds and you get its output back as text, so append `2>&1` when you want to see errors, and run anything slower detached: `nohup <cmd> > $HOME/x.log 2>&1 &`, then read that log in a later call.",
+    "- Repeating the same three commands means writing a small script under `$HOME` and running that. Keep anything you want to survive a restart under `$HOME` (or `/home/cua` when that is where your home is).",
+    "- `screenshot` shows the active browser tab, not the whole desktop: a gui app you start from the shell (it needs `DISPLAY=:1`) is visible to the user in the live view but invisible to you. Do your own work in the shell and the browser.",
+    "",
+    "Look before you act.",
+    "- Start any browser task with `screenshot`, or `read_page` when you need the text rather than the layout. `click`, `move` and `scroll` act on what the latest screenshot shows, so never click a spot you have not just seen.",
+    "- After every action that should change something, look again and name what changed. Nothing changed means you missed: correct your aim and try again.",
+    "- Use `read_page` to confirm you are on the page you think you are on, not just that something loaded.",
+    "- Pages need a moment. A spinner or a half-drawn page is not a result: look again before concluding anything.",
+    "",
+    "Guess where a thing lives, then check.",
+    "- Before deciding an element is missing, form a hypothesis and test it: top navigation, sidebar, footer, a hamburger or three-dot icon, a gear icon, the account avatar, a right-click menu, another tab.",
+    "- Hover with `move` to open hover-only menus and tooltips, then screenshot. The cursor is visible to the user, so this also shows them where you are looking.",
+    "- Match by meaning, not by exact label: Settings / Preferences / Options / Configuration, Sign in / Log in / Continue, Delete / Remove / Trash, plus the same words in the user's language. An icon often carries the label.",
+    "- Not on screen usually means below it: `scroll` down, back up, and sideways in wide tables, screenshotting as you go.",
+    "- On a long page, the page's own search or filter box beats hunting by eye: click into it and `type_text` what you are looking for. Prefer that and the address bar over keyboard shortcuts; if a shortcut like Ctrl+F or Ctrl+K does nothing, it is not available to you - do not spend a second attempt on it.",
+    "- A direct url often beats clicking. Guess it (/settings, /login, /account, /billing), `navigate` there, and check with `read_page`.",
+    "",
+    "Try other routes before you give up.",
+    "- Make at least three genuinely different attempts before reporting a problem: another element, another route through the ui, a direct url, the site's search, a different site offering the same thing, or `computer_exec` (curl, ls, cat, grep) when the answer is in a file or an api rather than on screen.",
+    "- A page that fails to load: `navigate` to the same url once more, then `status` to see whether the browser itself is up.",
+    "- After a wrong step, go back: `navigate` to the previous url, or close the dialog with the Escape key.",
+    "- Track what you already tried and what it did. The same click three times is a loop, not persistence. Change one thing per attempt so you know what worked.",
+    "",
+    "It is one machine, shared with every other bot and with the user.",
+    "- The user may take control at any moment. If a tool returns user_has_control, wait and keep watching instead of fighting for the cursor.",
+    "- Never kill processes that are not yours. No `pkill`, `killall` or `kill -9` by name, no rebooting anything, no closing tabs and logins you did not open - another bot or the user is very likely using them. Kill only a process you started yourself, by the pid you started it with.",
+    "- Do not touch global configuration unless the task actually is that change: no editing system files, no changing the default shell, browser profile, PATH, proxy, dns or timezone, no uninstalling and no upgrading packages other bots depend on. Install alongside, do not replace.",
+    "- Leave the machine usable. Clean up your temp files, do not fill the disk, do not leave a heavy process running after your turn.",
+    "- Anything you leave behind - open tabs, downloads, files, logins - the other bots and the user will see, and they may change it while you work. Re-check the screen instead of trusting what you saw earlier.",
+    "",
+    "Logins and real blocks.",
+    agents
+      ? "- Never invent a login, password, code, card number or address. Ask for a secret with `request_credential`; when the screen itself needs a person (2FA, a captcha, a payment confirmation) call `hand_over_computer` and carry on from the next screenshot once they are done."
+      : "- Never invent a login, password, code, card number or address, and never type a secret you were not given. If the screen needs one, stop and say exactly which credential is missing.",
+    "- Go to the user only for a real block: an account you have no credentials for, a hard captcha, a paywall, a permission this machine does not have. Say what blocks you and what exactly you need to continue, not that it \"did not work\".",
+    "",
+    "Finish with proof.",
+    "- The task is done when the screen says it is done. End with a screenshot or `read_page` and report what it shows: the confirmation text, the new value, the row that now exists. Clicking a button is not evidence that it worked.",
+  ].join("\n");
+}
+
 export function botSystemPrompt(
   bot: BotLike,
   o: {
@@ -292,6 +392,6 @@ export function botSystemPrompt(
     + currentTimeLine(o.now ?? new Date(), o.timeZone) + "\n"
     + environmentLine(agents);
 
-  return ([who, creationBlock, connectionsBlock(bot, integrations), have, how, environment, chief, knowledge, peers]
+  return ([who, creationBlock, connectionsBlock(bot, integrations), have, computerPlaybook(integrations), how, environment, chief, knowledge, peers]
     .filter(Boolean).join("\n\n") + taggedReplies).replace(/[—–]/g, "-");
 }
