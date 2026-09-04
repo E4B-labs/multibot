@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { Store, sortMessages, type BotRecord } from "./store.ts";
+import { managedBotPatch, Store, sortMessages, type BotRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -55,6 +55,32 @@ describe("Store", () => {
     const first = store.createBot();
     const second = store.createBot();
     expect(first.color).not.toBe(second.color);
+  });
+
+  it("accepts editable bot profile fields and rejects internal state", () => {
+    expect(managedBotPatch({
+      name: "  Researcher  ",
+      description: "Find evidence",
+      color: "purple",
+      mascotShape: "star",
+      avatarUrl: "https://example.com/avatar.webp",
+      modelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+      hidden: true,
+      ownerId: "stolen-owner",
+      threadId: "stolen-thread",
+    })).toEqual({
+      name: "Researcher",
+      description: "Find evidence",
+      color: "purple",
+      mascotShape: "star",
+      avatarUrl: "https://example.com/avatar.webp",
+      modelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+      hidden: true,
+    });
+    expect(() => managedBotPatch({ color: "infrared" })).toThrow("color must be one of");
+    expect(() => managedBotPatch({ avatarUrl: "javascript:alert(1)" })).toThrow("avatarUrl must be");
+    expect(() => managedBotPatch({ temporary: true })).toThrow("only be set while creating");
+    expect(managedBotPatch({ temporary: true }, { temporary: true })).toEqual({ temporary: true });
   });
 
   it("persists bots and messages across a restart, resetting busy", () => {

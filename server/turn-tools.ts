@@ -40,7 +40,7 @@ export const COMPUTER_MCP_TOOLS = [
  *
  * Cena: bot traci pamięć po stronie dostawcy. Transkrypt harnessu zostaje.
  */
-export const AGENTS_TOOLS_VERSION = 10;
+export const AGENTS_TOOLS_VERSION = 11;
 
 /** Narzędzia serwera agents — mirror `server/drivers/agents-proxy.ts` TOOLS. */
 export const AGENTS_MCP_TOOLS = [
@@ -66,7 +66,9 @@ export const AGENTS_MCP_TOOLS = [
   "delete_routine",
   "run_routine",
   "create_agent",
+  "get_agent",
   "update_agent",
+  "delete_agent",
   "list_groups",
   "create_group",
   "delete_group",

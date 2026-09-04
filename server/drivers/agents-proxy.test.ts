@@ -181,7 +181,15 @@ describe("agents-proxy MCP surface", () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(expect.arrayContaining(["list_bots", "ask_bot", "send_bot_mail", "read_bot_mail", "remember", "create_skill", "create_routine", "list_routines", "update_routine", "delete_routine", "create_agent", "list_groups", "delete_group", "read_file", "run_command"]));
+    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual(expect.arrayContaining(["list_bots", "ask_bot", "send_bot_mail", "read_bot_mail", "remember", "create_skill", "create_routine", "list_routines", "update_routine", "delete_routine", "create_agent", "get_agent", "update_agent", "delete_agent", "list_groups", "delete_group", "read_file", "run_command"]));
+    const update = list.result.tools.find((tool: { name: string }) => tool.name === "update_agent");
+    expect(update.inputSchema.properties.patch.properties).toMatchObject({
+      description: { type: "string" },
+      color: { enum: expect.arrayContaining(["purple"]) },
+      mascotShape: { enum: expect.arrayContaining(["star"]) },
+      avatarUrl: expect.any(Object),
+      modelSelection: expect.any(Object),
+    });
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -299,6 +307,34 @@ describe("agents-proxy MCP surface", () => {
     expect(lastActionBody).toMatchObject({ action: "routines.delete", id: "r1" });
 
     expect(JSON.parse((await callTool("list_routines", {})).result.content[0].text)).toEqual([]);
+  });
+
+  it("routes full bot lifecycle fields through the management API", async () => {
+    await callTool("create_agent", {
+      name: "Researcher",
+      description: "Find evidence",
+      color: "purple",
+      mascotShape: "star",
+      avatarUrl: "https://example.com/avatar.webp",
+      modelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+    });
+    expect(lastActionBody).toMatchObject({
+      fromBotId: "bot-asker",
+      action: "agent.create",
+      name: "Researcher",
+      color: "purple",
+      mascotShape: "star",
+      modelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+    });
+
+    await callTool("get_agent", { bot_id: "bot-helper" });
+    expect(lastActionBody).toMatchObject({ action: "agent.get", bot_id: "bot-helper" });
+
+    await callTool("update_agent", { bot_id: "bot-helper", patch: { title: "Lead researcher", color: "cyan", avatarUrl: null } });
+    expect(lastActionBody).toMatchObject({ action: "agent.update", bot_id: "bot-helper", patch: { title: "Lead researcher", color: "cyan", avatarUrl: null } });
+
+    await callTool("delete_agent", { bot_id: "bot-helper" });
+    expect(lastActionBody).toMatchObject({ action: "agent.delete", bot_id: "bot-helper" });
   });
 
   // multibot: bot→user file sending — the `send_file` tool lands on the
