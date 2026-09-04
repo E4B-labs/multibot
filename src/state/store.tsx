@@ -108,6 +108,8 @@ export interface Bot {
   // Arrives via the same `{kind:"bot"}` SSE frame as every other bot patch.
   needsAttention?: string | null;
   modelSelection: ModelSelection;
+  /** multibot: „Fast mode" — szybciej zamiast głębiej (dziś czyta go driver codex). */
+  fastMode?: boolean;
   pinned?: boolean;
   hidden?: boolean;
   messages: Message[];
@@ -300,7 +302,7 @@ type Action =
       patch: Partial<
         Pick<
           Bot,
-          "name" | "title" | "description" | "notifications" | "color" | "mascotExpression" | "mascotShape" | "avatarUrl" | "pinned" | "hidden" | "chiefOfStaff" | "composioAccounts"
+          "name" | "title" | "description" | "notifications" | "color" | "mascotExpression" | "mascotShape" | "avatarUrl" | "pinned" | "hidden" | "chiefOfStaff" | "composioAccounts" | "fastMode"
         >
         // multibot: sekcja dopuszcza null — JSON.stringify wycina undefined,
         // a null musi dolecieć do serwera, żeby wyczyścić pole.

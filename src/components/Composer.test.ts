@@ -3,7 +3,7 @@
 // ani rutyny nigdy się nie pokazują, więc ten test pilnuje właśnie tego.
 import { describe, expect, it } from "vitest";
 
-import { reasoningLevels, slashVisible, withCommand, type SlashRow } from "./Composer";
+import { fastModeAvailable, reasoningLevels, slashVisible, withCommand, type SlashRow } from "./Composer";
 
 const row = (kind: SlashRow["kind"], label: string): SlashRow => ({
   id: `${kind}-${label}`,
@@ -78,5 +78,24 @@ describe("reasoningLevels", () => {
 
   it("dla haiku zostawia sam domyślny poziom", () => {
     expect(ids("claude-haiku-4-5")).toEqual(["default"]);
+  });
+});
+
+// multibot: „Fast mode" (service tier `priority`) ma tylko codex — przełącznik
+// pokazany przy Claude czy silniku byłby atrapą, bo te drivery go nie wysyłają.
+describe("fastModeAvailable", () => {
+  it("daje przełącznik modelom codeksa", () => {
+    expect(fastModeAvailable("codex", "gpt-5.6-sol")).toBe(true);
+    expect(fastModeAvailable("codex", "gpt-5.5")).toBe(true);
+  });
+
+  it("chowa go dla gpt-5.4-mini, który nie ma tieru priority", () => {
+    expect(fastModeAvailable("codex", "gpt-5.4-mini")).toBe(false);
+  });
+
+  it("chowa go poza codeksem", () => {
+    expect(fastModeAvailable("claude", "claude-sonnet-5")).toBe(false);
+    expect(fastModeAvailable("slafy", "hermes-agent")).toBe(false);
+    expect(fastModeAvailable(undefined, "gpt-5.6-sol")).toBe(false);
   });
 });

@@ -14,6 +14,7 @@ mostek celowo nie umie nawigować (przeglądaniem steruje Hermes, nie my).
 
 import base64
 import asyncio
+import io
 import json
 import os
 import shutil
@@ -24,6 +25,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from PIL import Image
 from fastapi.testclient import TestClient
 from websockets.sync.client import connect
 
@@ -211,9 +213,68 @@ def test_status_false_without_browser(client):
     }
 
 
+def _jpeg_size(raw: bytes) -> tuple[int, int]:
+    """(szerokość, wysokość) z ramki SOF — bez Pillow, żeby test nie ciągnął zależności."""
+    i = 2
+    while i < len(raw):
+        assert raw[i] == 0xFF, "to nie jest JPEG"
+        marker, length = raw[i + 1], int.from_bytes(raw[i + 2:i + 4], "big")
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            return (int.from_bytes(raw[i + 7:i + 9], "big"), int.from_bytes(raw[i + 5:i + 7], "big"))
+        i += 2 + length
+    raise AssertionError("brak ramki SOF")
+
+
 def test_screenshot_returns_jpeg(client, page):
     data = client.post(f"/api/bots/{_BOT}/computer/screenshot").json()["data"]
     assert base64.b64decode(data)[:2] == b"\xff\xd8"  # magic JPEG
+
+
+def test_screenshot_keeps_image_pixels_equal_to_css_pixels(client, page):
+    """Zrzut MUSI mieć tyle pikseli, ile viewport ma pikseli CSS — bo dokładnie w tej
+    przestrzeni model podaje `click(x, y)`. Skalowanie zrzutu (kuszące: dałoby 53 %
+    mniej bajtów) rozjechałoby jedno z drugim o 1,5× i kliknięcia lądowałyby obok."""
+    for width, height in ((1920, 973), (1024, 640)):
+        page.call(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False},
+            page.session,
+        )
+        try:
+            raw = base64.b64decode(client.post(f"/api/bots/{_BOT}/computer/screenshot").json()["data"])
+            assert _jpeg_size(raw) == (width, height)
+        finally:
+            page.call("Emulation.clearDeviceMetricsOverride", {}, page.session)
+
+
+def test_screenshot_shows_the_viewport_not_the_top_of_a_scrolled_page(client, page):
+    """Regresja: `clip` w `Page.captureScreenshot` liczy się od DOKUMENTU, nie od
+    viewportu — zmierzone, że `clip={x:0,y:0}` na stronie przewiniętej o 2480 px
+    zwraca GÓRĘ dokumentu zamiast tego, co widać. Ten test trzyma zrzut przy tym,
+    co użytkownik ma na ekranie."""
+    # bez hexa: w `data:` URL `#` zaczyna fragment i ucina dokument
+    page.goto(
+        "data:text/html,<body style='margin:0'>"
+        "<div id=b style='height:600px;background:rgb(255,0,0)'>gora</div>"
+        "<div style='height:2000px;background:rgb(0,0,255)'></div>"
+        "<div style='height:600px;background:rgb(0,255,0)'>dol</div></body>"
+    )
+    page.eval("window.scrollTo(0, document.body.scrollHeight)")
+    assert page.wait_for("window.scrollY > 1000") is not None
+
+    # środek viewportu jest teraz zielony — gdyby zrzut brał górę dokumentu,
+    # byłby czerwony
+    assert page.eval(
+        "(function(){var r=document.elementFromPoint(innerWidth/2, innerHeight/2);"
+        "return getComputedStyle(r).backgroundColor})()"
+    ) == "rgb(0, 255, 0)", "test sam się nie przewinął — zrzut nic by nie dowiódł"
+
+    raw = base64.b64decode(client.post(f"/api/bots/{_BOT}/computer/screenshot").json()["data"])
+    assert _jpeg_size(raw) == (page.eval("window.innerWidth"), page.eval("window.innerHeight"))
+
+    image = Image.open(io.BytesIO(raw)).convert("RGB")
+    red, green, blue = image.getpixel((image.width // 2, image.height // 2))
+    assert green > 200 and red < 80, f"zrzut nie pokazuje viewportu, tylko górę strony: RGB({red},{green},{blue})"
 
 
 def test_screencast_delivers_frames(client, page):
@@ -472,6 +533,259 @@ def test_http_navigate_and_read_page(client, page):
     assert body["text"].strip() == "y"  # innerText, nie znaczniki
 
 
+def test_navigate_waits_for_the_page_to_load(client, page):
+    """`Page.navigate` wraca po commicie, nie po wczytaniu — bez czekania `read_page`
+    tuż po nawigacji zwracał jeszcze starą stronę (i stare refy)."""
+    page.goto(_FORM, marker="go")
+    client.post(f"/api/bots/{_BOT}/computer/navigate", json={"url": _PAGE2})
+    # ZERO czekania po naszej stronie: jeśli navigate nie czeka, tu jest stara strona
+    body = client.get(f"/api/bots/{_BOT}/computer/page").json()
+    assert body["url"] == _PAGE2
+    assert "Zaloguj" not in body["elements"]
+
+
+# ── snapshot z refami: read_page / find / click(ref) ──────────────────────────
+# Bez refów każdy klik wymagał zrzutu ekranu (0,24 s kodowania JPEG + ~1,7 tys.
+# tokenów obrazu). Te testy pilnują, że tekstowa droga naprawdę klika.
+
+_FORM = (
+    "data:text/html,<body style='margin:0'>"
+    "<h1>Logowanie</h1>"
+    "<form><label>Email<input id=mail placeholder='jan@example.com'></label>"
+    "<button id=go type=button onclick=\"document.title='wyslane'\">Zaloguj</button>"
+    "</form><p>zwykly akapit</p></body>"
+)
+
+
+def _lines(tree: str) -> list[str]:
+    return [line for line in tree.splitlines() if line.strip()]
+
+
+def test_read_page_returns_numbered_interactive_tree(client, page):
+    page.goto(_FORM, marker="go")
+    body = client.get(f"/api/bots/{_BOT}/computer/page").json()
+
+    tree = body["elements"]
+    assert 'heading "Logowanie"' in tree
+    assert 'button "Zaloguj"' in tree
+    assert 'textbox' in tree and 'placeholder="jan@example.com"' in tree
+    # akapit nie jest ani interaktywny, ani nagłówkiem — do drzewa nie wchodzi,
+    # ale zostaje w `text`, bo to nadal treść strony
+    assert "zwykly akapit" not in tree
+    assert "zwykly akapit" in body["text"]
+    # każdy wpis ma ref, którym da się kliknąć
+    assert all(line.strip().startswith("[e") for line in _lines(tree))
+    assert body["elements_total"] == len(_lines(tree))
+
+
+def test_click_by_ref_hits_the_element(client, page):
+    page.goto(_FORM, marker="go")
+    tree = client.get(f"/api/bots/{_BOT}/computer/page").json()["elements"]
+    ref = next(line.split("]")[0].strip("[ ") for line in _lines(tree) if 'button "Zaloguj"' in line)
+
+    hit = {"kind": "mouse", "ref": ref, "button": "left", "clickCount": 1}
+    assert client.post(
+        f"/api/bots/{_BOT}/computer/input",
+        json={"events": [
+            {"kind": "mouse", "type": "mouseMoved", "ref": ref},
+            {**hit, "type": "mousePressed"},
+            {**hit, "type": "mouseReleased"},
+        ]},
+    ).json() == {"ok": True}
+    assert page.wait_for("document.title === 'wyslane'") is True
+
+
+def test_type_text_by_ref_focuses_the_field(client, page):
+    page.goto(_FORM, marker="go")
+    tree = client.get(f"/api/bots/{_BOT}/computer/page").json()["elements"]
+    ref = next(line.split("]")[0].strip("[ ") for line in _lines(tree) if "textbox" in line)
+
+    hit = {"kind": "mouse", "ref": ref, "button": "left", "clickCount": 1}
+    client.post(
+        f"/api/bots/{_BOT}/computer/input",
+        json={"events": [
+            {"kind": "mouse", "type": "mouseMoved", "ref": ref},
+            {**hit, "type": "mousePressed"},
+            {**hit, "type": "mouseReleased"},
+            {"kind": "text", "text": "jan@nowak.pl"},
+        ]},
+    )
+    assert page.wait_for("document.getElementById('mail').value === 'jan@nowak.pl'") is True
+
+
+def test_stale_ref_says_so_instead_of_clicking_blind(client, page):
+    """Nawigacja kasuje mapę refów razem z globalnymi JS-ami strony. Stary ref MUSI
+    dostać czytelny błąd — klik "gdzieś" na nowej stronie jest gorszy niż odmowa."""
+    page.goto(_FORM, marker="go")
+    client.get(f"/api/bots/{_BOT}/computer/page")
+    page.goto(_PAGE2, marker="b2")
+
+    res = client.post(
+        f"/api/bots/{_BOT}/computer/input",
+        json={"events": [{"kind": "mouse", "type": "mouseMoved", "ref": "e1"}]},
+    )
+    assert res.status_code == 422
+    assert "nieaktualny" in res.text
+
+
+def test_find_narrows_to_matching_refs_keeping_numbering(client, page):
+    page.goto(_FORM, marker="go")
+    full = client.get(f"/api/bots/{_BOT}/computer/page").json()["elements"]
+    found = client.get(f"/api/bots/{_BOT}/computer/page", params={"find": "zaloguj"}).json()
+
+    assert found["matches"] == 1
+    assert 'button "Zaloguj"' in found["elements"]
+    assert "Logowanie" not in found["elements"]
+    assert "text" not in found  # find nie płaci za cały innerText
+    # ten sam ref, co w pełnym snapshocie — inaczej find byłby pułapką
+    ref = found["elements"].split("]")[0].strip("[ ")
+    assert next(line for line in _lines(full) if 'button "Zaloguj"' in line).strip().startswith(f"[{ref}]")
+
+    miss = client.get(f"/api/bots/{_BOT}/computer/page", params={"find": "nie ma tego"}).json()
+    assert miss["matches"] == 0 and "note" in miss
+
+
+# ── batch akcji ───────────────────────────────────────────────────────────────
+# Sekwencja `click → type → Enter` to dziś cztery rundy modelu; batch robi z tego
+# jedną. Kontrakt na przerwanie jest tym, co odróżnia batch od "pętli po akcjach".
+
+
+def _refs(client, *needles: str) -> list[str]:
+    tree = client.get(f"/api/bots/{_BOT}/computer/page").json()["elements"]
+    out = []
+    for needle in needles:
+        line = next(line for line in _lines(tree) if needle in line)
+        out.append(line.split("]")[0].strip("[ "))
+    return out
+
+
+def test_actions_run_in_order_and_return_a_fresh_snapshot(client, page):
+    page.goto(_FORM, marker="go")
+    mail, go = _refs(client, "textbox", 'button "Zaloguj"')
+
+    body = client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [
+            {"type": "type_text", "ref": mail, "text": "jan@nowak.pl"},
+            {"type": "wait", "ms": 50},
+            {"type": "click", "ref": go},
+        ]},
+    ).json()
+
+    assert len(body["executed"]) == 3
+    assert body["stopped"] is None and body["skipped"] == 0
+    assert page.eval("document.getElementById('mail').value") == "jan@nowak.pl"
+    assert page.eval("document.title") == "wyslane"
+    # snapshot po batchu = zero dodatkowej rundy na "a pokaż, co się stało"
+    assert 'button "Zaloguj"' in body["page"]["elements"]
+
+
+def test_actions_stop_on_the_first_error_and_report_what_was_skipped(client, page):
+    page.goto(_FORM, marker="go")
+    (mail,) = _refs(client, "textbox")
+
+    body = client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [
+            {"type": "type_text", "ref": mail, "text": "abc"},
+            {"type": "click", "ref": "e999"},  # refa nie ma → stop
+            {"type": "key", "name": "Enter"},
+        ]},
+    ).json()
+
+    assert body["executed"] == [f"type_text {mail}"]
+    assert body["stopped"]["index"] == 1
+    assert "nie istnieje" in body["stopped"]["reason"]
+    assert body["skipped"] == 1
+    assert page.eval("document.title") != "wyslane"  # trzeci krok NIE poszedł
+
+
+def test_actions_stop_after_a_step_that_changed_the_document(client, page):
+    """browser-use: „Page changed after {action} — skipping N remaining actions".
+    Po nawigacji refy i współrzędne dotyczą strony, której już nie ma.
+
+    Reload jest tu przypadkiem TRUDNIEJSZYM niż nawigacja na inny adres: zmierzone,
+    że `location.reload()` nie zmienia znacznika dokumentu (Chromium zachowuje
+    kontekst JS), więc wyłapuje go dopiero zdarzenie `Page.frameStartedNavigating`.
+    Ten test pilnuje właśnie tej ścieżki."""
+    # Chromium blokuje nawigację ramki głównej na `data:` z kliknięcia w link, więc
+    # dokument podmieniamy przeładowaniem — z punktu widzenia refów to ta sama
+    # katastrofa: mapa `window.__multibot_refs__` znika razem ze starym dokumentem.
+    reload_page = (
+        "data:text/html,<body style='margin:0'>"
+        "<input id=i><button id=b style='position:fixed;bottom:0;left:0;width:50px;height:20px' "
+        "onclick='location.reload()'>reload</button></body>"
+    )
+    page.goto(reload_page)
+    (button,) = _refs(client, 'button "reload"')
+
+    body = client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [
+            {"type": "click", "ref": button},
+            {"type": "type_text", "text": "tego juz nie wpiszemy"},
+            {"type": "key", "name": "Enter"},
+        ]},
+    ).json()
+
+    assert body["executed"] == [f"click {button}"]
+    assert "dokument się zmienił" in body["stopped"]["reason"]
+    assert body["skipped"] == 2
+    assert page.wait_for("document.getElementById('i').value === ''") is True
+    assert body["page"]["elements"]  # snapshot z odświeżonej strony, nie pustka
+
+
+def test_actions_reject_an_unknown_step_and_an_over_long_batch(client, page):
+    page.goto(_FORM, marker="go")
+    body = client.post(
+        f"/api/bots/{_BOT}/computer/actions", json={"actions": [{"type": "teleport"}]}
+    ).json()
+    assert body["stopped"]["index"] == 0 and "nieznany krok" in body["stopped"]["reason"]
+
+    too_many = client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [{"type": "wait", "ms": 1}] * 50},
+    )
+    assert too_many.status_code == 422
+
+
+def test_modifier_names_become_a_cdp_mask_and_drop_the_text(client, page):
+    """`Ctrl+A` szedł jako `modifiers: 0`, więc skróty nie działały w ogóle. Do tego
+    `text` przy Ctrl wpisałby literę zamiast wykonać skrót."""
+    from server import computer as _computer
+
+    assert _computer.modifier_bits(["ctrl"]) == 2
+    assert _computer.modifier_bits(["ctrl", "shift"]) == 10
+    assert _computer.modifier_bits(["nieznany"]) == 0
+    assert _computer.modifier_bits(8) == 8
+
+    with_ctrl = _computer._key_params({"key": "a", "type": "keyDown", "modifiers": ["ctrl"]})
+    assert with_ctrl["modifiers"] == 2 and "text" not in with_ctrl
+    plain = _computer._key_params({"key": "a", "type": "keyDown"})
+    assert plain["text"] == "a"
+
+    page.goto(_FORM, marker="go")
+    (mail,) = _refs(client, "textbox")
+    client.post(
+        f"/api/bots/{_BOT}/computer/actions",
+        json={"actions": [
+            {"type": "type_text", "ref": mail, "text": "do skasowania"},
+            {"type": "key", "name": "a", "modifiers": ["ctrl"]},
+            {"type": "key", "name": "Delete"},
+        ]},
+    )
+    assert page.wait_for("document.getElementById('mail').value === ''") is True
+
+
+def test_page_without_text_tells_the_model_to_use_a_screenshot(client, page):
+    """Karta z PDF-em zwraca 115 B pustki (zmierzone na telefonie) — model musi
+    usłyszeć, że ma sięgnąć po zrzut, zamiast wołać read_page drugi raz."""
+    page.goto("data:text/html,<body style='margin:0'><canvas id=b width=10 height=10></canvas></body>")
+    body = client.get(f"/api/bots/{_BOT}/computer/page").json()
+    assert body["elements"] == ""
+    assert "screenshot" in body.get("note", "")
+
+
 def test_http_input_404_without_browser(client):
     """Brak przeglądarki = 404 z `KeyError`, nie 500 — MCP ma z czego zrobić błąd."""
     other = Path(os.environ["SLAFY_DATA_DIR"]) / "profiles" / "bezkompa3"
@@ -665,6 +979,39 @@ def test_set_external_closes_running_local_browser(tmp_path, monkeypatch):
     assert closed == ["sess-local-1"]
     saved = json.loads((profile / "browser.json").read_text(encoding="utf-8"))
     assert saved == {"cdp_url": "http://127.0.0.1:32773", "external": True}
+
+
+def test_snapshot_tree_indents_and_caps_its_own_size():
+    """Format i limit liczone są w Pythonie, więc dają się sprawdzić bez przeglądarki.
+    Limit jest twardy: model płaci za każdy znak tego drzewa w każdej turze."""
+    from server import computer as _computer
+
+    tree, cut = _computer._render_tree(
+        [
+            {"ref": "e1", "role": "heading", "name": "Tytuł", "depth": 0, "attrs": {}},
+            {"ref": "e2", "role": "textbox", "name": "Email", "depth": 1,
+             "attrs": {"placeholder": "jan@ex.pl", "value": "a"}},
+            {"ref": "e3", "role": "checkbox", "name": "Zgoda", "depth": 1,
+             "attrs": {"checked": "true", "disabled": "true"}},
+        ],
+        truncated=False,
+        total=3,
+    )
+    assert tree.splitlines() == [
+        '[e1] heading "Tytuł"',
+        '  [e2] textbox "Email" placeholder="jan@ex.pl" value="a"',
+        '  [e3] checkbox "Zgoda" checked disabled',
+    ]
+    assert cut is False
+
+    many = [
+        {"ref": f"e{i}", "role": "link", "name": "x" * 100, "depth": 0, "attrs": {}}
+        for i in range(1, 400)
+    ]
+    tree, cut = _computer._render_tree(many, truncated=False, total=len(many))
+    assert cut is True
+    assert len(tree) < _computer._SNAPSHOT_MAX_CHARS + 200  # sam komunikat o obcięciu wystaje
+    assert "find(query)" in tree.splitlines()[-1]
 
 
 def test_set_external_clears_marker_on_null(tmp_path, monkeypatch):

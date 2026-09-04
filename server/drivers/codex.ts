@@ -56,6 +56,18 @@ const MODELS = {
 export const supportsMaxReasoning = (model: string | undefined) =>
   !!model && (model === "gpt-6-astra" || model.startsWith("gpt-5.6-"));
 
+/** multibot: „Fast mode" to codeksowy SERVICE TIER `priority` — w samym codeksie
+ * (`/fast` w TUI) nazywa się „Fast", katalog modeli opisuje go jako „1.5x speed,
+ * increased usage". Na subskrypcji ChatGPT NIE MA dopłaty w dolarach; płaci się
+ * limitem planu: 2,5x stawki dla GPT-5.6/5.5 i 2x dla GPT-5.4
+ * (https://learn.chatgpt.com/docs/agent-configuration/speed).
+ *
+ * Kto go ma, mówi `model/list` z app-servera: pole `serviceTiers`. Odpytane na
+ * zalogowanym koncie ChatGPT 04.09.2026 (codex-cli 0.152.1) — `priority` mają
+ * WSZYSTKIE modele poza `gpt-5.4-mini`, który wraca z pustą listą. Composer.tsx
+ * powiela tę linię: front i serwer żyją w osobnych projektach tsconfig. */
+export const supportsFastMode = (model: string | undefined) => !!model && model !== "gpt-5.4-mini";
+
 export interface CodexConfig {
   cli: string;
   fullAuto: boolean;
@@ -250,6 +262,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const turnId = newId();
       const requestedReasoning = (turn as SendTurnInput & { reasoning?: string }).reasoning;
       const effort = requestedReasoning === "max" && !supportsMaxReasoning(turn.model) ? "xhigh" : requestedReasoning;
+      // multibot: `serviceTierForTurn`, nie `serviceTier` — ten drugi zapisuje
+      // tier w USTAWIENIACH wątku codeksa, więc po wyłączeniu przełącznika wątek
+      // dalej chodziłby na `priority` (każda tura wznawia wątek przez
+      // `thread/resume`). Wersja „ForTurn" nie dotyka wątku, więc wyłączenie
+      // naprawdę wyłącza, a brak pola zostawia to, co ma user w config.toml.
+      const fastMode = (turn as SendTurnInput & { fastMode?: boolean }).fastMode === true && supportsFastMode(turn.model);
 
       const env: Record<string, string | undefined> = { ...process.env, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
       // the CLI owns its own ChatGPT login; a leaked API key silently flips
@@ -644,6 +662,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             threadId: codexThreadId,
             input: turnInput,
             ...(effort ? { effort } : {}),
+            ...(fastMode ? { serviceTierForTurn: "priority" } : {}),
           });
           providerTurnId = startedTurn?.turn?.id ?? startedTurn?.turnId ?? null;
         } catch (e) {

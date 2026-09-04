@@ -141,6 +141,14 @@ class NavigateIn(BaseModel):
     url: str
 
 
+class ActionsIn(BaseModel):
+    # Kroki batcha: `{"type": "click"|"type_text"|"key"|"scroll"|"wait", ...}`.
+    # Kształt kroku sprawdza `computer._action_events` już W PĘTLI, więc zły krok
+    # wraca jako 200 z `stopped.reason` (razem z listą tego, co zdążyło pójść), a
+    # nie jako 422. Twardym 422 jest tylko przekroczony limit liczby kroków.
+    actions: list[dict]
+
+
 class ComputerModeIn(BaseModel):
     mode: str
 
@@ -421,6 +429,14 @@ async def computer_input(bot_id: str, body: InputIn) -> dict:
     return {"ok": True}
 
 
+@app.post("/api/bots/{bot_id}/computer/actions")
+async def computer_actions(bot_id: str, body: ActionsIn) -> dict:
+    """Batch: lista kroków w JEDNEJ sesji CDP, stop na pierwszym błędzie i po kroku,
+    który zmienił dokument. Zwraca co wykonano, na czym stanęło i świeży snapshot."""
+    _require(bot_id)
+    return await computer.run_actions(bot_id, body.actions)  # KeyError → 404, ValueError → 422
+
+
 @app.post("/api/bots/{bot_id}/computer/navigate")
 async def computer_navigate(bot_id: str, body: NavigateIn) -> dict:
     _require(bot_id)
@@ -429,9 +445,12 @@ async def computer_navigate(bot_id: str, body: NavigateIn) -> dict:
 
 
 @app.get("/api/bots/{bot_id}/computer/page")
-async def computer_page(bot_id: str) -> dict:
+async def computer_page(bot_id: str, find: str | None = None) -> dict:
+    """Snapshot karty: drzewo refów + tekst. `find` zawęża wynik do pasujących
+    elementów (narzędzie `find` serwera MCP) — refy są te same, co w pełnym
+    snapshocie, bo mapa i tak powstaje z całego przejścia DOM."""
     _require(bot_id)
-    return await computer.page_text(bot_id)
+    return await computer.page_text(bot_id, find)
 
 
 @app.get("/health")

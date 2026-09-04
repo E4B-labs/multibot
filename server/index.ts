@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { botSystemPrompt, connectionsBlock } from "./bot-prompt.ts";
+import { botSystemPrompt, computerPlaybook, connectionsBlock } from "./bot-prompt.ts";
 // multibot: autoweryfikacja — filtr na prośbach o zgodę, patrz server/auto-verify.ts.
 import { decideAction, normalizeAutoVerify, type AutoVerifyState } from "./auto-verify.ts";
 import { fleetStatusBlock } from "./fleet-status.ts";
@@ -2071,6 +2071,11 @@ opts?: {
           // bot tego silnika inaczej NIGDY nie zobaczyłby, co ma zamontowane.
           // Pozostałe drivery mają ten blok w prompcie systemowym.
           instance.driverKind === "slafy" ? connectionsBlock(bot, integrations) : "",
+          // multibot: playbook komputera tą samą drogą i z tego samego powodu.
+          // Sam blok jest warunkowy na `integrations.localComputer`, więc bot
+          // bez zamontowanego komputera dostaje pusty string (i nic się nie
+          // dokleja) — tak jak w prompcie systemowym pozostałych driverów.
+          instance.driverKind === "slafy" ? computerPlaybook(integrations) : "",
           text,
           turnAttachments.length ? `Attached files:\n${turnAttachments.map((file) => `- ${file.name}: ${file.path}`).join("\n")}` : "",
         ]
@@ -2082,7 +2087,10 @@ opts?: {
         system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: visibleRoster, currentUser: promptUser, timeZone: cfg.timeZone }),
         integrations,
         ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
-      } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel });
+        // multibot: „Fast mode" jest USTAWIENIEM bota (przeżywa restart), nie
+        // wyborem na turę jak poziom rozumowania — stąd czytamy je z rekordu.
+        ...(bot.fastMode ? { fastMode: true } : {}),
+      } as Parameters<typeof instance.adapter.sendTurn>[0] & { reasoning?: ReasoningLevel; fastMode?: boolean });
       if (integrations.computer) startScreenPoller(bot.id);
     } catch (e) {
       releaseTurnSlot(bot.id);
@@ -3487,8 +3495,11 @@ const server = createServer(async (req, res) => {
         if (section.length > 60) return json(res, 400, { error: "section must be at most 60 characters" });
       }
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "color", "mascotExpression", "mascotShape", "pinned", "hidden", "composioAccounts", "avatarUrl"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "unread", "color", "mascotExpression", "mascotShape", "pinned", "hidden", "composioAccounts", "avatarUrl", "fastMode"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (patch.fastMode !== undefined && typeof patch.fastMode !== "boolean") {
+        return json(res, 400, { error: "fastMode must be boolean" });
       }
       // avatarUrl validation — allow data: URL or /api/bots/:id/avatar path, max 500KB string (covers 512x512 webp base64 ~100KB)
       if (patch.avatarUrl !== undefined) {
