@@ -867,7 +867,7 @@ for (const bot of store.bots) {
   const model = bot.modelSelection.model;
   const stable = model === "opus" || model.startsWith("claude-opus-") ? "claude-opus-5"
     : model === "haiku" || model.startsWith("claude-haiku-") ? "claude-haiku-4-5"
-      : model === "fable" || model.startsWith("claude-fable-") ? "claude-fable-5"
+      : model === "fable" || model.startsWith("claude-fable-") ? "claude-fable-5-1"
         : model === "sonnet" || model.startsWith("claude-sonnet-") ? "claude-sonnet-5"
           : model;
   if (stable !== model) store.patchBot(bot.id, { modelSelection: { instanceId: "claude", model: stable } });

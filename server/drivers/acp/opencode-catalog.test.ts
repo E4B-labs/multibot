@@ -71,7 +71,8 @@ describe("OpenCode model catalog", () => {
     scratch = mkdtempSync(join(tmpdir(), "omb-opencode-catalog-"));
     const store = new OpenCodeCatalogStore(async () => response({}, false), join(scratch, "missing.json"));
     await store.refresh(true);
-    expect(store.go.options.length).toBeGreaterThan(0);
+    expect(store.go.options.map((option) => option.id)).toContain("opencode-go/gpt-6-astra");
+    expect(store.go.default).toBe("opencode-go/gpt-5.6-luna");
     expect(store.zen.options.map((option) => option.id)).toContain("opencode/big-pickle");
   });
 });
