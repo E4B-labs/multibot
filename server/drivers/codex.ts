@@ -236,6 +236,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       stop: () => void;
       turnId: string;
       asks: Map<string, (behavior: string, message?: string) => void>;
+      steer: (text: string) => Promise<"accepted" | "unavailable">;
     }
     const active = new Map<string, Turn>();
     // multibot: Codex raportuje NARASTAJĄCĄ sumę tokenów wątku i robi to
@@ -314,6 +315,29 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           cancelFallback.unref?.();
         } else {
           settle(true, "cancelled");
+        }
+      };
+
+      /** multibot: `turn/steer` — tekst wpada do TRWAJĄCEJ tury, bez drugiej
+       * tury i bez zabijania procesu (kończy ją dalej samo `turn/completed`).
+       * `expectedTurnId` to warunek po stronie codeksa: gdy tura już nie jest ta
+       * sama (skończyła się, `/review`, `/compact` → `activeTurnNotSteerable`),
+       * żądanie PADA zamiast dostarczyć tekst gdzie indziej — i tylko dlatego
+       * wyścig „steer kontra zakończenie" ma jedną ścieżkę dostarczenia.
+       * Odpowiedź niesie `turnId` tury, która wchłonęła tekst — zapamiętujemy
+       * go, żeby kolejny steering nie celował w nieaktualne id. */
+      const steer = async (text: string): Promise<"accepted" | "unavailable"> => {
+        if (state.settled || cancelled || !codexThreadId || !providerTurnId) return "unavailable";
+        try {
+          const result = await request("turn/steer", {
+            threadId: codexThreadId,
+            expectedTurnId: providerTurnId,
+            input: [{ type: "text", text }],
+          });
+          if (typeof result?.turnId === "string") providerTurnId = result.turnId;
+          return "accepted";
+        } catch {
+          return "unavailable";
         }
       };
 
@@ -603,7 +627,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         }
       });
 
-      active.set(threadId, { stop, turnId, asks });
+      active.set(threadId, { stop, turnId, asks, steer });
       emit({ ...base(threadId, turnId), type: "turn.started" });
 
       // handshake + kickoff; any refusal surfaces as failure, not a hang
@@ -705,8 +729,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
-        capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true, webTools: "mcp" },
+        capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true, webTools: "mcp", steering: "same-turn" },
         sendTurn,
+        steerTurn: async (threadId, text) => (await active.get(threadId)?.steer(text)) ?? "unavailable",
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {
           const turn = active.get(threadId);
