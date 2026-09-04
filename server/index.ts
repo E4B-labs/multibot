@@ -87,7 +87,7 @@ import { BotMailQueue, BotMailStore, botMailThreadId, type PendingBotMail } from
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
-import { chainDepth, mentionedBots, Store, type BotRecord, type Message, type OptionCardData } from "./store.ts";
+import { chainDepth, managedBotPatch, mentionedBots, Store, type BotRecord, type Message, type OptionCardData } from "./store.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, isCredentialTargetId, type CredentialTargetId } from "./credential-request.ts";
 import { inspectorEvents, recordInspectorEvent, replayInspectorEvents } from "./inspector.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
@@ -2497,6 +2497,33 @@ async function deleteGroupRecord(id: string): Promise<{ found: boolean; engineSy
   return { found: true, engineSynced };
 }
 
+async function deleteBotRecord(bot: BotRecord): Promise<{ engineSynced: boolean }> {
+  await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
+  stopScreenPoller(bot.id);
+  harnessRoutines.deleteBot(bot.id);
+  attachments.deleteBot(bot.id);
+  workspace.deleteBot(bot.id);
+  removeBotMail(bot.id);
+  store.deleteBot(bot.id);
+  for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
+    try {
+      unlinkSync(join(dir, `${bot.threadId}.ndjson`));
+    } catch {}
+  }
+  let engineSynced = false;
+  if (!engineDisabled()) {
+    try {
+      const base = await ensureEngine();
+      const removed = await fetch(`${base}/api/bots/${encodeURIComponent(engineBotIdFor(bot.threadId))}`, { method: "DELETE", signal: AbortSignal.timeout(5_000) });
+      engineSynced = removed.ok || removed.status === 404;
+    } catch {
+      // Harness data is authoritative; stale engine profile can reconcile later.
+    }
+  }
+  broadcast({ kind: "bot.deleted", botId: bot.id, visibility: bot.visibility, ownerId: bot.ownerId, allowedUserIds: bot.allowedUserIds });
+  return { engineSynced };
+}
+
 // multibot: tworzenie grupy nie potrzebuje silnika slafy — rozmowa grupowa i
 // tak idzie przez harness (runGroupRound/askBotAndWait). Przy
 // MULTIBOT_ENGINE=off (telefon) id nadajemy lokalnie, zamiast oddawać 502 z
@@ -2938,22 +2965,29 @@ const server = createServer(async (req, res) => {
             if ((activeCommsDepth.get(fromBotId) ?? 0) >= MAX_COMMS_DEPTH) {
               return json(res, 403, { error: "subagents cannot create another subagent" });
             }
-            const created = store.createBot({ temporary: body.temporary === true });
-            const selection = bootSelection;
+            let profile: Partial<BotRecord>;
+            try {
+              profile = managedBotPatch(body, { temporary: true });
+            } catch (error) {
+              return json(res, 422, { error: error instanceof Error ? error.message : String(error) });
+            }
+            if (!profile.name) return json(res, 422, { error: "name required" });
+            const created = store.createBot({ temporary: profile.temporary === true });
+            const selection = profile.modelSelection ?? bootSelection;
             const creator = store.bot(fromBotId);
-            const rawIntent = String(body.description ?? body.title ?? body.name ?? "").trim().slice(0, 2000);
+            const rawIntent = String(profile.description ?? profile.title ?? profile.name).trim().slice(0, 2000);
             const creationContext = rawIntent
               ? `Stworzony przez bota ${creator?.name ?? fromBotId} (id: ${fromBotId}) do zadania: ${rawIntent}. Twoim pierwszym zadaniem jest to zadanie — zacznij od razu, nie pytaj kim jesteś.`
               : `Stworzony przez bota ${creator?.name ?? fromBotId} (id: ${fromBotId}). Sprawdź swój profil (name/title/description) i skrzynkę (read_bot_mail) — to jest Twoje zadanie. Zacznij od razu, nie pytaj kim jesteś.`;
-            const updated = store.patchBot(created.id, { name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), modelSelection: selection, ownerId: caller.ownerId, visibility: caller.visibility === "private" ? "private" : "team", ...(caller.chiefOfStaff ? { section: caller.section } : {}), createdByBotId: fromBotId, creationContext });
-            console.log(`[multibot] bot ${created.id} (${String(body.name ?? created.name)}) created by bot ${fromBotId} (${creator?.name ?? "unknown"}) — intent: ${rawIntent.slice(0, 120)}`);
+            const updated = store.patchBot(created.id, { ...profile, modelSelection: selection, ownerId: caller.ownerId, visibility: caller.visibility === "private" ? "private" : "team", ...(caller.chiefOfStaff ? { section: caller.section } : {}), createdByBotId: fromBotId, creationContext });
+            console.log(`[multibot] bot ${created.id} (${profile.name}) created by bot ${fromBotId} (${creator?.name ?? "unknown"}) — intent: ${rawIntent.slice(0, 120)}`);
             if (access === "full") workspace.setAccess(created.id, "full");
             broadcast({ kind: "bot", bot: updated });
             if (!engineDisabled()) {
               void ensureEngine().then(async (baseUrl) => {
                 try {
                   const engineBotId = engineBotIdFor(created.threadId);
-                  const payload = { id: engineBotId, name: String(body.name ?? created.name), title: String(body.title ?? ""), description: String(body.description ?? ""), createdByBotId: fromBotId, creationContext };
+                  const payload = { id: engineBotId, name: profile.name, title: profile.title ?? "", description: profile.description ?? "", createdByBotId: fromBotId, creationContext };
                   const r = await fetch(`${baseUrl}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(5000) });
                   if (!r.ok && r.status !== 409) throw new Error(`engine create ${r.status}`);
                   if (r.status === 409) {
@@ -2968,13 +3002,36 @@ const server = createServer(async (req, res) => {
           }
           case "agent.update": {
             requireFull();
-            const target = store.bot(String(body.botId ?? ""));
+            const target = store.bot(String(body.bot_id ?? body.botId ?? ""));
             if (!target) return json(res, 404, { error: "no such target bot" });
             if (!canBotContact(caller, target)) return json(res, 404, { error: "no such target bot" });
             if (caller.chiefOfStaff && (target.section?.trim() ?? "") !== (caller.section?.trim() ?? "")) return json(res, 403, { error: "chief delegation is limited to its section" });
-            const updated = store.patchBot(target.id, { ...(body.patch as Record<string, unknown> ?? {}) });
+            let patch: Partial<BotRecord>;
+            try {
+              patch = managedBotPatch(body.patch ?? body);
+            } catch (error) {
+              return json(res, 422, { error: error instanceof Error ? error.message : String(error) });
+            }
+            if (!Object.keys(patch).length) return json(res, 422, { error: "no editable fields supplied" });
+            const previousName = target.name;
+            const updated = store.patchBot(target.id, patch);
+            if (typeof patch.name === "string" && previousName !== patch.name) appendBotEvent(target.id, { type: "renamed", value: patch.name });
             broadcast({ kind: "bot", bot: updated });
             return json(res, 200, updated);
+          }
+          case "agent.get": {
+            const target = store.bot(String(body.bot_id ?? body.botId ?? ""));
+            if (!target || !canBotContact(caller, target)) return json(res, 404, { error: "no such target bot" });
+            return json(res, 200, target);
+          }
+          case "agent.delete": {
+            requireFull();
+            const target = store.bot(String(body.bot_id ?? body.botId ?? ""));
+            if (!target || !canBotContact(caller, target)) return json(res, 404, { error: "no such target bot" });
+            if (target.id === fromBotId) return json(res, 403, { error: "a bot cannot delete itself" });
+            if (caller.chiefOfStaff && (target.section?.trim() ?? "") !== (caller.section?.trim() ?? "")) return json(res, 403, { error: "chief delegation is limited to its section" });
+            const result = await deleteBotRecord(target);
+            return json(res, 200, { ok: true, ...result });
           }
           case "groups.list": {
             return json(res, 200, groupStore.list().filter((group) => group.bot_ids.every((id) => canBotContact(caller, store.bot(id)))));
@@ -3543,24 +3600,8 @@ const server = createServer(async (req, res) => {
     if (m && method === "DELETE") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      // a running turn dies with its bot
-      await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
-      stopScreenPoller(bot.id);
-      harnessRoutines.deleteBot(bot.id);
-      attachments.deleteBot(bot.id);
-      workspace.deleteBot(bot.id);
-      removeBotMail(bot.id);
-      store.deleteBot(bot.id);
-      // multibot (H1): the computer SURVIVES bot deletion. It belongs to the
-      // installation and every other bot is still using it — its volume holds
-      // shared logins and files that outlive any single bot.
-      for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
-        try {
-          unlinkSync(join(dir, `${bot.threadId}.ndjson`));
-        } catch {}
-      }
-      broadcast({ kind: "bot.deleted", botId: bot.id, visibility: bot.visibility, ownerId: bot.ownerId, allowedUserIds: bot.allowedUserIds });
-      return json(res, 200, { ok: true });
+      const result = await deleteBotRecord(bot);
+      return json(res, 200, { ok: true, ...result });
     }
     m = path.match(/^\/api\/devices\/([\w-]+)\/push$/);
     if (m && method === "POST") {

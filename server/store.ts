@@ -176,6 +176,77 @@ const COLORS: MausColor[] = [
   "coral",
 ];
 
+const MANAGED_MASCOT_SHAPES = new Set([
+  "blob", "leaf", "cursor", "circle", "square", "pill", "triangle", "star", "diamond", "folder",
+  // Legacy shapes stay editable for bots that already use them.
+  "oval", "hexagon", "cloud", "drop",
+]);
+
+/** Safe profile fields one bot may set on another. Infrastructure, ownership,
+ * permissions, thread ids and persisted runtime state never cross this boundary. */
+export function managedBotPatch(input: unknown, options: { temporary?: boolean } = {}): Partial<BotRecord> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("bot profile must be an object");
+  const value = input as Record<string, unknown>;
+  const patch: Partial<BotRecord> = {};
+
+  for (const [key, max] of [["name", 120], ["title", 240], ["description", 4_000]] as const) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== "string") throw new Error(`${key} must be a string`);
+    const text = value[key].trim();
+    if (key === "name" && !text) throw new Error("name must not be empty");
+    if (text.length > max) throw new Error(`${key} is too long (max ${max} characters)`);
+    (patch as Record<string, unknown>)[key] = text;
+  }
+  for (const key of ["notifications", "fastMode", "pinned", "hidden"] as const) {
+    if (value[key] === undefined) continue;
+    if (typeof value[key] !== "boolean") throw new Error(`${key} must be boolean`);
+    patch[key] = value[key];
+  }
+  if (value.color !== undefined) {
+    if (!COLORS.includes(value.color as MausColor)) throw new Error(`color must be one of: ${COLORS.join(", ")}`);
+    patch.color = value.color as MausColor;
+  }
+  if (value.mascotShape !== undefined) {
+    if (typeof value.mascotShape !== "string" || !MANAGED_MASCOT_SHAPES.has(value.mascotShape)) {
+      throw new Error(`mascotShape must be one of: ${[...MANAGED_MASCOT_SHAPES].join(", ")}`);
+    }
+    patch.mascotShape = value.mascotShape;
+  }
+  if (value.mascotExpression !== undefined) {
+    if (value.mascotExpression !== null && typeof value.mascotExpression !== "string") throw new Error("mascotExpression must be a string or null");
+    patch.mascotExpression = value.mascotExpression as string | null;
+  }
+  if (value.avatarUrl !== undefined) {
+    if (value.avatarUrl !== null && typeof value.avatarUrl !== "string") throw new Error("avatarUrl must be a string or null");
+    if (typeof value.avatarUrl === "string") {
+      if (value.avatarUrl.length > 700_000) throw new Error("avatar image too large (max ~500KB)");
+      if (value.avatarUrl && !value.avatarUrl.startsWith("data:image/") && !value.avatarUrl.startsWith("/api/bots/") && !/^https?:\/\//i.test(value.avatarUrl)) {
+        throw new Error("avatarUrl must be data:image/*, /api/bots/... or http(s) URL");
+      }
+    }
+    patch.avatarUrl = value.avatarUrl as string | null;
+  }
+  if (value.modelSelection !== undefined) {
+    const selection = value.modelSelection as Record<string, unknown> | null;
+    if (!selection || typeof selection !== "object" || Array.isArray(selection) || typeof selection.instanceId !== "string" || !selection.instanceId.trim() || typeof selection.model !== "string" || !selection.model.trim()) {
+      throw new Error("modelSelection needs non-empty instanceId and model strings");
+    }
+    patch.modelSelection = { instanceId: selection.instanceId.trim(), model: selection.model.trim() };
+  }
+  if (value.section !== undefined) {
+    if (value.section !== null && typeof value.section !== "string") throw new Error("section must be a string or null");
+    const section = typeof value.section === "string" ? value.section.trim() : "";
+    if (section.length > 60) throw new Error("section must be at most 60 characters");
+    patch.section = section || undefined;
+  }
+  if (value.temporary !== undefined) {
+    if (!options.temporary) throw new Error("temporary can only be set while creating a bot");
+    if (typeof value.temporary !== "boolean") throw new Error("temporary must be boolean");
+    patch.temporary = value.temporary;
+  }
+  return patch;
+}
+
 // multibot (F9): głębokość łańcucha ask_bot. Wołający DEKLARUJE ją w ciele
 // żądania (proxy dostaje ją w env przy spawnie), ale deklaracja bywa nieaktualna:
 // bot silnika ma agents zamontowane na stałe w profilu, więc jego `OMB_TURN_DEPTH`

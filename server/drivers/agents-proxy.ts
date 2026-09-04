@@ -24,6 +24,29 @@ const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
 
+const BOT_COLORS = ["green", "blue", "red", "orange", "purple", "cyan", "pink", "yellow", "teal", "coral"];
+const BOT_SHAPES = ["blob", "leaf", "cursor", "circle", "square", "pill", "triangle", "star", "diamond", "folder"];
+const BOT_PROFILE_PROPERTIES = {
+  name: { type: "string", description: "Display name (1-120 characters)." },
+  title: { type: "string", description: "Short role or specialty." },
+  description: { type: "string", description: "Detailed purpose, expertise and working instructions." },
+  color: { type: "string", enum: BOT_COLORS, description: "Mascot color." },
+  mascotShape: { type: "string", enum: BOT_SHAPES, description: "Built-in mascot icon shape." },
+  mascotExpression: { anyOf: [{ type: "string" }, { type: "null" }], description: "Resting mascot expression; null restores automatic expression." },
+  avatarUrl: { anyOf: [{ type: "string" }, { type: "null" }], description: "Photo as data:image URL or http(s) URL; null removes it. Max ~500KB for data URLs." },
+  notifications: { type: "boolean" },
+  modelSelection: {
+    type: "object",
+    properties: { instanceId: { type: "string" }, model: { type: "string" } },
+    required: ["instanceId", "model"],
+    additionalProperties: false,
+  },
+  fastMode: { type: "boolean", description: "Fast service tier when supported by selected model." },
+  section: { anyOf: [{ type: "string" }, { type: "null" }], description: "Sidebar section; null clears it." },
+  pinned: { type: "boolean" },
+  hidden: { type: "boolean" },
+} as const;
+
 const TOOLS = [
   {
     name: "list_bots",
@@ -100,8 +123,28 @@ const TOOLS = [
   { name: "update_routine", description: "Change one of your routines: its schedule, its prompt, or switch it off. Use it instead of creating a second routine whenever the user changes their mind about a recurring task — set enabled false to stop an old routine, or pass a new schedule to move it. Get the id from list_routines.", inputSchema: { type: "object", properties: { id: { type: "string", description: "Routine id from list_routines." }, schedule: { type: "string", description: "New schedule: 'every 30m' or a five-field cron expression such as '35 1 * * *'." }, prompt: { type: "string", description: "New task text the routine runs." }, enabled: { type: "boolean", description: "false switches the routine off without deleting it; true switches it back on." } }, required: ["id"] } },
   { name: "delete_routine", description: "Delete one of your routines for good. Prefer update_routine with enabled false when the user may want it back. Get the id from list_routines.", inputSchema: { type: "object", properties: { id: { type: "string", description: "Routine id from list_routines." } }, required: ["id"] } },
   { name: "run_routine", description: "Run one of your routines now.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
-  { name: "create_agent", description: "Create a temporary or persistent bot in this workspace.", inputSchema: { type: "object", properties: { name: { type: "string" }, title: { type: "string" }, description: { type: "string" }, temporary: { type: "boolean", description: "If true, bot disappears when server restarts." } }, required: ["name"] } },
-  { name: "update_agent", description: "Update another bot using its id.", inputSchema: { type: "object", properties: { botId: { type: "string" }, patch: { type: "object" } }, required: ["botId", "patch"] } },
+  {
+    name: "create_agent",
+    description: "Create and configure a temporary or persistent bot in this workspace. Set its role, appearance, photo, model and behavior in one call. The new bot inherits your owner and visibility scope.",
+    inputSchema: {
+      type: "object",
+      properties: { ...BOT_PROFILE_PROPERTIES, temporary: { type: "boolean", description: "If true, bot deletes itself after its first completed task. Default false creates a persistent bot." } },
+      required: ["name"],
+      additionalProperties: false,
+    },
+  },
+  { name: "get_agent", description: "Read another visible bot's complete profile before changing it.", inputSchema: { type: "object", properties: { bot_id: { type: "string", description: "Target id from list_bots." } }, required: ["bot_id"], additionalProperties: false } },
+  {
+    name: "update_agent",
+    description: "Change another visible bot's identity, role, description, photo, mascot, color, notifications, model, fast mode, section or sidebar state. Ownership, visibility, permissions and internal ids cannot be changed.",
+    inputSchema: {
+      type: "object",
+      properties: { bot_id: { type: "string", description: "Target id from list_bots." }, patch: { type: "object", properties: BOT_PROFILE_PROPERTIES, additionalProperties: false } },
+      required: ["bot_id", "patch"],
+      additionalProperties: false,
+    },
+  },
+  { name: "delete_agent", description: "Permanently delete another visible bot and its transcript, routines, memory, mail and engine profile. Cannot delete yourself. Use only when deletion is intended; this cannot be undone.", inputSchema: { type: "object", properties: { bot_id: { type: "string", description: "Target id from list_bots." } }, required: ["bot_id"], additionalProperties: false } },
   { name: "list_groups", description: "List bot groups.", inputSchema: { type: "object", properties: {} } },
   { name: "create_group", description: "Create a group conversation from bot ids.", inputSchema: { type: "object", properties: { name: { type: "string" }, bot_ids: { type: "array", items: { type: "string" } } }, required: ["name", "bot_ids"] } },
   { name: "delete_group", description: "Delete a bot group.", inputSchema: { type: "object", properties: { groupId: { type: "string" } }, required: ["groupId"] } },
@@ -246,7 +289,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     read_memory: "memory.graph", remember_for_team: "team.memory.add", recall_team: "team.memory.list", read_team_memory: "team.memory.graph",
     create_skill: "skills.create", list_skills: "skills.list", create_routine: "routines.create",
     list_routines: "routines.list", update_routine: "routines.update", delete_routine: "routines.delete",
-    run_routine: "routines.run", create_agent: "agent.create", update_agent: "agent.update",
+    run_routine: "routines.run", create_agent: "agent.create", get_agent: "agent.get", update_agent: "agent.update", delete_agent: "agent.delete",
     start_collab: "collab.start",
     list_groups: "groups.list", create_group: "groups.create", delete_group: "groups.delete", send_group_message: "groups.send", get_device_info: "device.info", read_file: "file.read",
     write_file: "file.write", run_command: "terminal.run",
