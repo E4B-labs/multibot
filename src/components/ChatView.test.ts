@@ -33,3 +33,21 @@ describe("szerokość dymków czatu", () => {
     expect(Number.parseInt(bubbleWidths()[0], 10)).toBeGreaterThanOrEqual(80);
   });
 });
+
+// multibot: awatar w pasku nad rozmową ma stać nieruchomo, gdy bot nie
+// pracuje. Wcześniej MausAvatar size 40 dostawał gołe `animated` plus
+// jednorazowy beat z `state.mascotMotion`, więc bezczynny bot mrugał
+// i oddychał, choć ten sam bot w pasku bocznym już stał.
+describe("awatar w nagłówku czatu", () => {
+  it("nie jest animowany na sztywno", () => {
+    expect(chat, "nagłówek wrócił do `animated` bez warunku").not.toMatch(/^\s*animated\s*$/m);
+    expect(chat, "nagłówek znowu odtwarza jednorazowy state.mascotMotion").not.toContain(
+      "state.mascotMotion",
+    );
+  });
+
+  it("liczy propsy tym samym helperem co pasek boczny", () => {
+    expect(chat).toContain("sidebarAvatarProps(bot)");
+    expect(chat).toContain("animated={headerAvatar.animated}");
+  });
+});
