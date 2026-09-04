@@ -35,7 +35,7 @@ interface OpenCodeCatalogCache {
 }
 
 const FALLBACK_GO = [
-  // [0] stays the preferred default (see modelsFor) — Astra goes after it.
+  // Preference order for the default (see modelsFor) — Astra goes after Luna.
   "gpt-5.6-luna",
   "gpt-6-astra",
   "grok-4.6",
@@ -80,16 +80,21 @@ const optionList = (rows: OpenCodeModelRow[], prefix: "opencode-go" | "opencode"
   });
 };
 
+// Default: the first preferred id the catalog actually serves, then the first
+// option it does serve. Both come from `optionList`, so the id always carries
+// this group's prefix — a Zen id can never end up as the Go default.
 const modelsFor = (
   rows: OpenCodeModelRow[],
   prefix: "opencode-go" | "opencode",
-  fallback: string,
+  preferred: readonly string[],
   updatedAt?: string,
 ): OpenCodeModels => {
   const options = optionList(rows, prefix);
-  const fallbackId = `${prefix}/${fallback}`;
+  const preferredIds = preferred.map((id) => `${prefix}/${id}`);
   return {
-    default: options.some((option) => option.id === fallbackId) ? fallbackId : options[0]?.id ?? fallbackId,
+    default: preferredIds.find((id) => options.some((option) => option.id === id))
+      ?? options[0]?.id
+      ?? preferredIds[0],
     options,
     ...(updatedAt ? { updatedAt } : {}),
   };
@@ -98,8 +103,8 @@ const modelsFor = (
 export function parseOpenCodeCatalog(goBody: unknown, zenBody: unknown, updatedAt = new Date().toISOString()) {
   const goRows = asRows(goBody);
   const zenRows = asRows(zenBody).filter(isFreeZenModel);
-  const go = modelsFor(goRows, "opencode-go", FALLBACK_GO[0], updatedAt);
-  const zen = modelsFor(zenRows, "opencode", FALLBACK_ZEN[0], updatedAt);
+  const go = modelsFor(goRows, "opencode-go", FALLBACK_GO, updatedAt);
+  const zen = modelsFor(zenRows, "opencode", FALLBACK_ZEN, updatedAt);
   if (!go.options.length) go.options = FALLBACK_GO.map((id) => ({ id: `opencode-go/${id}`, label: id }));
   if (!zen.options.length) zen.options = FALLBACK_ZEN.map((id) => ({ id: `opencode/${id}`, label: id }));
   return { go, zen, updatedAt } satisfies Pick<OpenCodeCatalogCache, "go" | "zen" | "updatedAt">;
@@ -140,8 +145,8 @@ export class OpenCodeCatalogStore {
     const cached = this.readCache();
     this.fetchedAt = cached?.fetchedAt ?? 0;
     this.lastRefreshSucceeded = Boolean(cached);
-    this.go = cached?.go ?? modelsFor([], "opencode-go", FALLBACK_GO[0]);
-    this.zen = cached?.zen ?? modelsFor([], "opencode", FALLBACK_ZEN[0]);
+    this.go = cached?.go ?? modelsFor([], "opencode-go", FALLBACK_GO);
+    this.zen = cached?.zen ?? modelsFor([], "opencode", FALLBACK_ZEN);
     if (!this.go.options.length) this.go.options = FALLBACK_GO.map((id) => ({ id: `opencode-go/${id}`, label: id }));
     if (!this.zen.options.length) this.zen.options = FALLBACK_ZEN.map((id) => ({ id: `opencode/${id}`, label: id }));
   }

@@ -67,6 +67,21 @@ describe("skala prawego panelu i czatu", () => {
     expect(picker).toContain("railInstance.models.updatedAt");
   });
 
+  it("wiersz modelu ma czytelną nazwę, odznaki i bramkę klucza", () => {
+    // nazwa zamiast surowego `opencode-go/…` — i w wierszu, i w pigułce nagłówka
+    expect(picker).toContain("modelLabel(option.id, option.label)");
+    expect(picker).toContain("instanceModelLabel(active, selection.model)");
+    expect(picker).toContain("isFreeModel(option.id)");
+    // klucz przygasza wiersz, ale go nie blokuje — klik otwiera pole klucza
+    expect(picker).toContain("wymaga wspólnego klucza OpenCode Go");
+    expect(picker).toContain("<KeyRound size={12}");
+    expect(picker).toContain('!disabled && opts.needsKey && "opacity-60"');
+    // niedostępna instancja mówi dlaczego
+    expect(picker).toContain("title={disabled ? (instance.snapshot.reason ?? undefined) : undefined}");
+    // licznik grupy z jednostką, nie goła liczba
+    expect(picker).toContain('{group.options.length} {polish ? "modeli" : "models"}');
+  });
+
   it("podpis poziomu rozumowania znika przy otwartym panelu", () => {
     expect(composer).toContain("{!state.settingsOpen && (");
   });
