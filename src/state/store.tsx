@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import type { MascotShape } from "@/lib/mascotShapes";
-import type { MausColor, MausMotion } from "@/lib/mascot";
+import type { MausColor, MausMotion, RuntimeKind, RuntimePhase } from "@/lib/mascot";
 import { MAUS_COLORS } from "@/lib/mascot";
 import { authFetch, authenticatedEventSource, ensureBrowserSession, getAuthMode } from "@/lib/auth";
 import { getLanguage } from "@/lib/language";
@@ -239,6 +239,11 @@ interface AppState {
   rooms: Room[];
   /** in-flight assistant text per threadId (content.delta fold) */
   streaming: Record<string, string>;
+  /** multibot: faza tury per threadId — serwer rozróżnia rozumowanie od
+   *  wyjścia (contracts `streamKind`), a pasek nad composerem rysuje z tego
+   *  „myśli" vs „pisze". Bez timerów sprzątających: wpis wygasa sam, bo
+   *  `stripMascotState` porównuje `at` z zegarem. */
+  runtime: Record<string, RuntimePhase>;
   /** latest live frame of a bot's computer, per botId */
   screens: Record<string, { png: string; mime: string }>;
   /** bots whose cloud computer is being provisioned */
@@ -272,6 +277,7 @@ type Action =
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
   | { type: "streamDelta"; threadId: string; delta: string }
+  | { type: "runtimeTick"; threadId: string; kind: RuntimeKind }
   | { type: "streamClear"; threadId: string }
   | { type: "screenFrame"; botId: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
@@ -503,6 +509,11 @@ function reducer(state: AppState, action: Action): AppState {
         messages: sortMessages(b.messages.map((m) => (m.id === action.message.id ? action.message : m))),
       }));
     }
+    case "runtimeTick":
+      return {
+        ...state,
+        runtime: { ...state.runtime, [action.threadId]: { at: Date.now(), kind: action.kind } },
+      };
     case "streamDelta":
       return {
         ...state,
@@ -780,6 +791,7 @@ const initialState: AppState = {
   mailThreads: [],
   rooms: [],
   streaming: {},
+  runtime: {},
   screens: {},
   provisioning: {},
   connected: false,
@@ -1130,9 +1142,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         case "runtime": {
           const event = frame.event;
-          if (event.type === "content.delta" && event.streamKind === "assistant_text") {
+          // multibot: pasek nad composerem odróżnia „myśli" od „pisze", więc
+          // reasoning nie jest już wyrzucany — obie ścieżki zapisują fazę tury.
+          if (event.type === "turn.started") {
+            rawDispatch({ type: "runtimeTick", threadId: event.threadId, kind: "start" });
+          } else if (event.type === "item.started" && event.itemType === "reasoning") {
+            rawDispatch({ type: "runtimeTick", threadId: event.threadId, kind: "reasoning" });
+          } else if (event.type === "content.delta" && event.streamKind === "reasoning_text") {
+            rawDispatch({ type: "runtimeTick", threadId: event.threadId, kind: "reasoning" });
+          } else if (event.type === "content.delta" && event.streamKind === "assistant_text") {
+            rawDispatch({ type: "runtimeTick", threadId: event.threadId, kind: "text" });
             rawDispatch({ type: "streamDelta", threadId: event.threadId, delta: event.delta });
           } else if (event.type === "turn.completed") {
+            rawDispatch({ type: "runtimeTick", threadId: event.threadId, kind: "done" });
             rawDispatch({ type: "streamClear", threadId: event.threadId });
           }
           break;
