@@ -227,11 +227,15 @@ const REASONING_LEVELS: Array<{ id: ReasoningLevel; label: string }> = [
   { id: "max", label: "Max" },
 ];
 
-function reasoningLevels(model: string) {
+// Mirrors supportsMaxReasoning in server/drivers/codex.ts — front and server
+// live in separate tsconfig projects, so the one line stays duplicated.
+const supportsMaxReasoning = (model: string) => model === "gpt-6-astra" || model.startsWith("gpt-5.6-");
+
+export function reasoningLevels(model: string) {
   // Claude Code does not expose adaptive effort for Haiku; leave provider
   // default intact instead of sending an unsupported value.
   if (model.toLowerCase().includes("haiku")) return [{ id: "default" as const, label: "Default" }];
-  return model.startsWith("gpt-5.6-") ? REASONING_LEVELS : REASONING_LEVELS.filter((level) => level.id !== "max");
+  return supportsMaxReasoning(model) ? REASONING_LEVELS : REASONING_LEVELS.filter((level) => level.id !== "max");
 }
 
 export function Composer({ bot }: { bot: Bot }) {

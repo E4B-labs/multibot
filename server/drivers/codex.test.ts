@@ -303,6 +303,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(instance.models).toEqual({
       default: "gpt-5.6-sol",
       options: [
+        { id: "gpt-6-astra", label: "GPT-6 Astra" },
         { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
         { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
         { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
@@ -333,6 +334,13 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((event) => event.type === "turn.completed" && recorder.events.filter((item) => item.type === "turn.completed").length === 2);
     const capped = JSON.parse(readFileSync(cappedDump, "utf8")).calls.find((call: any) => call.method === "turn/start");
     expect(capped.params.effort).toBe("xhigh");
+
+    const astraDump = join(scratch, "astra.json");
+    process.env.FAKE_CODEX_DUMP = astraDump;
+    await instance.adapter.sendTurn({ threadId: "t-astra", text: "go", model: "gpt-6-astra", reasoning: "max" } as any);
+    await recorder.until((event) => event.type === "turn.completed" && recorder.events.filter((item) => item.type === "turn.completed").length === 3);
+    const astra = JSON.parse(readFileSync(astraDump, "utf8")).calls.find((call: any) => call.method === "turn/start");
+    expect(astra.params.effort).toBe("max");
   });
 
   it("denies a disabled workspace tool even when legacy fullAuto is on", async () => {

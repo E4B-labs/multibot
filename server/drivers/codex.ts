@@ -40,6 +40,7 @@ const DRIVER_KIND = "codex";
 const MODELS = {
   default: "gpt-5.6-sol",
   options: [
+    { id: "gpt-6-astra", label: "GPT-6 Astra" },
     { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
     { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
     { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
@@ -48,6 +49,12 @@ const MODELS = {
     { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
   ],
 };
+
+// Only the 5.6 line and GPT-6 Astra (03.09.2026) accept "max"; older models
+// reject it, so the CLI gets "xhigh" instead. Composer.tsx mirrors this list —
+// front and server live in separate tsconfig projects, so it stays duplicated.
+export const supportsMaxReasoning = (model: string | undefined) =>
+  !!model && (model === "gpt-6-astra" || model.startsWith("gpt-5.6-"));
 
 export interface CodexConfig {
   cli: string;
@@ -242,7 +249,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const fullAuto = policy ? policy.autonomy === "autonomous" && !Object.values(policy.permissions).includes(false) : config.fullAuto;
       const turnId = newId();
       const requestedReasoning = (turn as SendTurnInput & { reasoning?: string }).reasoning;
-      const effort = requestedReasoning === "max" && !turn.model?.startsWith("gpt-5.6-") ? "xhigh" : requestedReasoning;
+      const effort = requestedReasoning === "max" && !supportsMaxReasoning(turn.model) ? "xhigh" : requestedReasoning;
 
       const env: Record<string, string | undefined> = { ...process.env, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
       // the CLI owns its own ChatGPT login; a leaked API key silently flips

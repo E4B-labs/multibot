@@ -3,7 +3,7 @@
 // ani rutyny nigdy się nie pokazują, więc ten test pilnuje właśnie tego.
 import { describe, expect, it } from "vitest";
 
-import { slashVisible, withCommand, type SlashRow } from "./Composer";
+import { reasoningLevels, slashVisible, withCommand, type SlashRow } from "./Composer";
 
 const row = (kind: SlashRow["kind"], label: string): SlashRow => ({
   id: `${kind}-${label}`,
@@ -56,5 +56,27 @@ describe("withCommand", () => {
 
   it("na pustym composerze zostawia spację na argumenty", () => {
     expect(withCommand("   ", "/model")).toBe("/model ");
+  });
+});
+
+// multibot: poziom "max" przyjmuje tylko linia 5.6 i GPT-6 Astra; reszta
+// dostałaby od CLI błąd, więc lista musi go dla nich uciąć.
+describe("reasoningLevels", () => {
+  const ids = (model: string) => reasoningLevels(model).map((level) => level.id);
+
+  it("daje max dla gpt-6-astra", () => {
+    expect(ids("gpt-6-astra")).toContain("max");
+  });
+
+  it("daje max dla linii 5.6", () => {
+    expect(ids("gpt-5.6-sol")).toContain("max");
+  });
+
+  it("tnie max starszym modelom", () => {
+    expect(ids("gpt-5.4")).not.toContain("max");
+  });
+
+  it("dla haiku zostawia sam domyślny poziom", () => {
+    expect(ids("claude-haiku-4-5")).toEqual(["default"]);
   });
 });
