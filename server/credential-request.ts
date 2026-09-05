@@ -22,7 +22,7 @@ export function credentialConfigPatch(target: CredentialTargetId, value: string)
     case "boxToken": return { box: { token: clean } };
     case "opencodeGoApiKey": return { opencode: { key: clean } };
     case "ttsKey": return { voice: { key: clean } };
-    case "openaiImageApiKey": return { instances: { openaiImage: { driver: "slafy", environment: { OPENAI_API_KEY: clean } } } };
+    case "openaiImageApiKey": return { instances: { openaiImage: { driver: "openaiCompatible", environment: { OPENAI_API_KEY: clean } } } };
   }
 }
 

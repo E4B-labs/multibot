@@ -5,12 +5,15 @@ import { describe, expect, it } from "vitest";
 import { DATA_DIR, ensureDirs, instanceConfigs, loadConfig, saveConfig, type AppConfig } from "./config.ts";
 
 describe("instanceConfigs", () => {
-  it("overlays configured instances on the built-in fleet without a default slafy entry", () => {
+  // A config.json written before the Hermes engine was removed still says
+  // `driver: "slafy"`. Reading it must silently land on the chat-completions
+  // driver, or every custom endpoint the user configured would go dark.
+  it("overlays configured instances on the built-in fleet and migrates legacy slafy entries", () => {
     const cfg: AppConfig = {
       instances: {
         codex: { driver: "codex", enabled: false },
         opencodeGo: { driver: "slafy", environment: { OPENAI_API_KEY: "legacy-value" } },
-        local: {
+        "local-qwen": {
           driver: "slafy",
           displayName: "Local Qwen",
           environment: { OPENAI_API_KEY: "local-key" },
@@ -21,20 +24,23 @@ describe("instanceConfigs", () => {
 
     const fleet = instanceConfigs(cfg);
     expect(Object.keys(fleet)).toEqual(
-      expect.arrayContaining(["grok", "gemini", "kimi", "qwen", "claude", "codex", "opencode", "local"]),
+      expect.arrayContaining(["grok", "gemini", "kimi", "qwen", "claude", "codex", "opencode", "local-qwen"]),
     );
     expect(fleet.opencodeGo).toBeUndefined();
     expect(fleet.opencode.environment?.OPENCODE_API_KEY).toBe("legacy-value");
+    // The engine instance and its driver are gone from the built-in fleet.
+    expect(fleet.local).toBeUndefined();
     expect(fleet.slafy).toBeUndefined();
     expect(fleet.codex.enabled).toBe(false);
-    expect(fleet.local).toMatchObject({
-      driver: "slafy",
+    expect(fleet["local-qwen"]).toMatchObject({
+      driver: "openaiCompatible",
       displayName: "Local Qwen",
       environment: { OPENAI_API_KEY: "local-key" },
       config: { model: { default: "qwen2.5", baseUrl: "http://127.0.0.1:11434/v1" } },
     });
     // Rendering the fleet must not mutate durable config objects.
-    expect(cfg.instances?.local.config).toBeUndefined();
+    expect(cfg.instances?.["local-qwen"].driver).toBe("slafy");
+    expect(cfg.instances?.["local-qwen"].config).toBeUndefined();
   });
 });
 
