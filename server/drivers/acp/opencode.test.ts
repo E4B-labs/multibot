@@ -30,7 +30,8 @@ describe("OpenCode ACP driver", () => {
   });
 
   it("uses official OpenCode ACP argv", () => {
-    expect(opencodeAcpArgs("opencode-go/gpt-5.6-luna")).toEqual(["--model", "opencode-go/gpt-5.6-luna", "acp"]);
+    // `opencode acp` rejects --model (1.18) — the model rides in the config env.
+    expect(opencodeAcpArgs()).toEqual(["acp"]);
   });
 
   it("runs Zen without passing Go key to child", async () => {
@@ -48,8 +49,39 @@ describe("OpenCode ACP driver", () => {
     await recorder.until((event) => event.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.argv).toEqual(["--model", "opencode/big-pickle", "acp"]);
+    expect(seen.argv).toEqual(["acp"]);
+    expect(seen.env.OPENCODE_CONFIG_CONTENT).toBe(JSON.stringify({ model: "opencode/big-pickle" }));
     expect(seen.env.OPENCODE_API_KEY).toBeUndefined();
+  });
+
+  it("mounts the Composio MCP server in the ACP http shape", async () => {
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    instance = await OpenCodeAgentDriver.create({
+      instanceId: "opencode-test",
+      displayName: "OpenCode",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+    await instance.adapter.sendTurn({
+      threadId: "opencode-composio",
+      text: "hello",
+      model: "opencode/big-pickle",
+      integrations: { composio: { key: "ck_test", url: "https://connect.composio.dev/mcp" } },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    // OpenCode validates session/new with zod: url + an object of headers
+    // (the pre-fix shape) failed the whole RPC, so the turn never ran.
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpServers).toContainEqual({
+      type: "http",
+      name: "composio",
+      url: "https://connect.composio.dev/mcp",
+      headers: [{ name: "x-consumer-api-key", value: "ck_test" }],
+    });
   });
 
   it("rejects Go turn before spawning without key", async () => {

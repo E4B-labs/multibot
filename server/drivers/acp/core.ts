@@ -141,7 +141,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const servers: Array<
         { name: string } & (
           | { command: string; args: string[]; env: Array<{ name: string; value: string }> }
-          | { url: string; headers?: Record<string, string> }
+          | { type: "http"; url: string; headers: Array<{ name: string; value: string }> }
         )
       > = [];
         const agents = turn.integrations?.agents;
@@ -196,12 +196,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         // multibot: Composio (meta-MCP HTTP) — ACP gubił go, więc boty ACP
         // (Grok/Gemini/Kimi/Qwen) nie widziały Gmaila. HTTP to EXTRA transport
-        // ACP, więc vendor musi go wspierać; montujemy w kształcie url+headers.
+        // ACP, więc vendor musi go wspierać; kształt jest ze schematu ACP:
+        // `type: "http"` i nagłówki jako {name,value}[]. Luźniejszy kształt
+        // (url + obiekt nagłówków) przechodził u pobłażliwych vendorów, ale
+        // OpenCode waliduje go zodem i wywracał CAŁE session/new — czyli turę.
         if (canUseIntegration(turn.threadId, "integrations") && turn.integrations?.composio?.key) {
           servers.push({
+            type: "http",
             name: "composio",
             url: turn.integrations.composio.url || "https://connect.composio.dev/mcp",
-            headers: { "x-consumer-api-key": turn.integrations.composio.key },
+            headers: [{ name: "x-consumer-api-key", value: turn.integrations.composio.key }],
           });
         }
         return servers;

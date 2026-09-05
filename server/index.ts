@@ -2868,7 +2868,9 @@ function cliInstallSpec(tool: (typeof CLI_TOOLS)[number]) {
         ? "install-claude.mjs"
         : tool.installStrategy === "kimi-native"
           ? "install-kimi.mjs"
-          : "install-codex.mjs";
+          : tool.installStrategy === "opencode-native"
+            ? "install-opencode.mjs"
+            : "install-codex.mjs";
     const scriptInRepo = join(ROOT, "scripts", filename);
     const script = existsSync(scriptInRepo) ? scriptInRepo : join(ROOT, filename);
     return existsSync(script)

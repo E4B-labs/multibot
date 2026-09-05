@@ -1,7 +1,12 @@
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { openCodeCatalog, type OpenCodeModels } from "./opencode-catalog.ts";
 
-export const opencodeAcpArgs = (model: string) => ["--model", model, "acp"];
+// `opencode acp` (1.18) takes no `--model`: yargs answers with the subcommand
+// help and exits 0, so the turn never starts. The model rides in
+// OPENCODE_CONFIG_CONTENT instead — acp honours it (session/new reports it back
+// as configOptions.model.currentValue).
+export const opencodeAcpArgs = () => ["acp"];
+export const opencodeConfigContent = (model: string) => JSON.stringify({ model });
 
 const models: OpenCodeModels = {
   default: openCodeCatalog.go.default,
@@ -24,9 +29,10 @@ const support: AcpSupport = {
   defaultCli: "opencode",
   nativeSource: "opencode.acp",
   loginNote: "OpenCode Go needs an API key; OpenCode Zen free models run without one",
-  spawnArgs: (_config, turn) => opencodeAcpArgs(turn.model || openCodeCatalog.go.default),
+  spawnArgs: () => opencodeAcpArgs(),
   transformEnv: (env, turn) => {
     if (turn?.model?.startsWith("opencode/")) delete env.OPENCODE_API_KEY;
+    env.OPENCODE_CONFIG_CONTENT = opencodeConfigContent(turn?.model || openCodeCatalog.go.default);
   },
   validateTurn: (turn, env) => {
     if (turn.model?.startsWith("opencode-go/") && !env.OPENCODE_API_KEY) {
