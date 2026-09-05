@@ -86,7 +86,7 @@ import { BotMailStore, botMailThreadId } from "./bot-mail.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
-import { BOT_COLORS, managedBotPatch, mentionedBots, Store, type BotRecord, type ConnectorTarget, type Message, type OptionCardData } from "./store.ts";
+import { BOT_COLORS, defaultSelectionTarget, managedBotPatch, mentionedBots, Store, type BotRecord, type ConnectorTarget, type Message, type OptionCardData } from "./store.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, isCredentialTargetId, type CredentialTargetId } from "./credential-request.ts";
 import { inspectorEvents, recordInspectorEvent, replayInspectorEvents } from "./inspector.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
@@ -490,18 +490,13 @@ function maybeStartCollab(botId: string, text: string): { room: RoomRecord; task
   return { room, task };
 }
 
-// default selection for new bots: embedded engine first, then CLI fallback.
+// Default selection for new bots: a real CLI provider first. The embedded
+// engine is hidden from the model picker, so a bot parked on it cannot be moved
+// off it from the UI — see `defaultSelectionTarget`.
 async function defaultSelection(described?: Awaited<ReturnType<ProviderRegistry["describe"]>>) {
   const fleet = described ?? (await registry.describe());
   const enabled = fleet.filter((d) => d.enabled !== false);
-  const available = enabled.filter((d) => d.snapshot.state === "available");
-  const pick =
-    available.find((d) => d.driverKind === "slafy") ??
-    available.find((d) => d.driverKind === "claudeAgent") ??
-    available[0] ??
-    enabled.find((d) => d.driverKind === "claudeAgent") ??
-    enabled[0] ??
-    fleet[0];
+  const pick = defaultSelectionTarget(enabled) ?? defaultSelectionTarget(fleet);
   return { instanceId: pick?.instanceId ?? "claude", model: pick?.models.default || "claude-sonnet-5" };
 }
 let bootSelection = { instanceId: "claude", model: "claude-sonnet-5" };
@@ -948,19 +943,24 @@ const seededPlaceholder = store.bots.length === 1 && store.bots[0]?.name === "Mi
 // new while harness bots.json already exists (fresh Termux/service rebuild).
 // Import endpoint is idempotent and returns 409 when target already exists.
 const localFirstBot = store.bots.length === 1 && store.bots[0]?.modelSelection.instanceId === "local";
-if (existingEngineProfile && (!hadHarnessBots || seededPlaceholder || localFirstBot) && store.bots.length === 1) {
+const localEngine = bootFleet.find((d) => d.instanceId === "local");
+if (existingEngineProfile && localEngine && (!hadHarnessBots || seededPlaceholder || localFirstBot) && store.bots.length === 1) {
   const first = store.bots[0];
   store.patchBot(first.id, {
     name: existingEngineProfile.name,
     ...(existingEngineProfile.title !== undefined ? { title: existingEngineProfile.title } : {}),
     ...(existingEngineProfile.description !== undefined ? { description: existingEngineProfile.description } : {}),
-    modelSelection: { instanceId: "local", model: bootFleet.find((d) => d.instanceId === "local")?.models.default || "hermes-agent" },
+    modelSelection: { instanceId: "local", model: localEngine.models.default || "hermes-agent" },
   });
   try {
     const baseUrl = await ensureEngine();
     await importExistingEngineProfile(baseUrl, existingEngineProfile, engineBotIdFor(first.threadId));
     console.log(`[multibot] imported existing engine profile "${existingEngineProfile.name}" into first bot`);
   } catch (error) {
+    // The engine never came up, so the bot would sit on an instance the model
+    // picker does not show and no driver can answer. Put it back on a provider
+    // that works; the import retries on the next boot.
+    store.patchBot(first.id, { modelSelection: bootSelection });
     console.warn(`[multibot] existing profile import deferred: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -2236,6 +2236,8 @@ function configStatusFor(actor: WorkspaceActor | null) {
     },
     composio: { configured: Boolean(cfg.composio?.key), apiKeyConfigured: Boolean(cfg.composio?.apiKey) },
     box: { configured: Boolean(cfg.box?.token) },
+    // "can this host speak?" — the Read aloud button routes on it
+    voice: { configured: Boolean(cfg.voice?.key) },
     // not a secret — the sidebar shows it
     profile: {
       name: identityMember?.displayName ?? member?.name ?? (actor?.name ?? cfg.profile?.name ?? ""),
@@ -3782,6 +3784,40 @@ const server = createServer(async (req, res) => {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
       void warmBot(m[1]).catch(() => {});
       return json(res, 202, { ok: true });
+    }
+
+    // multibot: Read aloud for every bot, not just the ones on the engine.
+    // The engine's edge-tts stays the fallback for engine bots (SpeakButton
+    // picks the route from `voice.configured`), so this only needs the harness
+    // key path: OpenAI speech in, audio/mpeg out.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/speak$/);
+    if (m && method === "POST") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const key = cfg.voice?.key;
+      if (!key) return json(res, 501, { error: "no text-to-speech key configured" });
+      const body = await readBody(req);
+      const text = String(body.text ?? "").trim();
+      if (!text) return json(res, 422, { error: "text required" });
+      // OpenAI rejects longer input outright; refuse here so the button shows
+      // its error state instead of waiting on a doomed request.
+      if (text.length > 4096) return json(res, 413, { error: "text too long (max 4096 characters)" });
+      try {
+        const upstream = await fetch(process.env.MULTIBOT_TTS_URL || "https://api.openai.com/v1/audio/speech", {
+          method: "POST",
+          headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+          body: JSON.stringify({ model: "gpt-4o-mini-tts", voice: "alloy", input: text, response_format: "mp3" }),
+          signal: AbortSignal.timeout(60_000),
+        });
+        if (!upstream.ok) return json(res, 502, { error: `text-to-speech upstream ${upstream.status}` });
+        // ponytail: whole clip buffered — one chat bubble is seconds of audio,
+        // and the client reads it as a blob anyway. Stream it if long-form
+        // reading ever lands.
+        const bytes = Buffer.from(await upstream.arrayBuffer());
+        res.writeHead(200, { "content-type": "audio/mpeg", "content-length": String(bytes.length) });
+        return res.end(bytes);
+      } catch (error) {
+        return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
+      }
     }
 
     // onboarding/ask cards persist their answered/dismissed state

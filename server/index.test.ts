@@ -4,6 +4,7 @@
 // behavior without replacing the built-in fleet.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +20,12 @@ let child: ChildProcess;
 let home: string;
 let stderr = "";
 let staticDir: string;
+// Stand-in for OpenAI speech, same trick as MULTIBOT_EXPO_PUSH_URL in push.ts:
+// the route is real, only the upstream is local. Records what it was asked for
+// so the test can assert the key and the text actually travelled.
+let ttsServer: Server;
+let ttsRequests: Array<{ authorization?: string; body: any }> = [];
+const TTS_AUDIO = Buffer.from("ID3-fake-mp3-bytes");
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
   const res = await fetch(`${BASE}${path}`, {
@@ -30,6 +37,18 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
 };
 
 beforeAll(async () => {
+  ttsServer = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      ttsRequests.push({ authorization: req.headers.authorization, body: JSON.parse(raw || "{}") });
+      res.writeHead(200, { "content-type": "audio/mpeg", "content-length": String(TTS_AUDIO.length) });
+      res.end(TTS_AUDIO);
+    });
+  });
+  await new Promise<void>((resolve) => ttsServer.listen(0, "127.0.0.1", resolve));
+  const ttsUrl = `http://127.0.0.1:${(ttsServer.address() as { port: number }).port}/v1/audio/speech`;
+
   home = mkdtempSync(join(tmpdir(), "omb-api-test-"));
   staticDir = join(home, "dist");
   mkdirSync(staticDir, { recursive: true });
@@ -42,7 +61,11 @@ beforeAll(async () => {
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
-    JSON.stringify({ auth: { token: TOKEN }, instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } } }),
+    JSON.stringify({
+      auth: { token: TOKEN },
+      voice: { key: "tts-test-key" },
+      instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } },
+    }),
   );
   // Seed a terminal setup job so progress endpoint is covered without
   // launching real provisioning or package installation in this test.
@@ -86,12 +109,15 @@ beforeAll(async () => {
       OMB_HOST: "127.0.0.1",
       OMB_STATIC_DIR: staticDir,
       ENGINE_URL: "http://127.0.0.1:1",
+      MULTIBOT_TTS_URL: ttsUrl,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stderr!.on("data", (c) => (stderr += c));
 
-  const deadline = Date.now() + 20_000;
+  // Boot probes every CLI provider before it listens; measured at ~39s on a
+  // Windows dev box, so the old 20s cap skipped this whole suite there.
+  const deadline = Date.now() + 90_000;
   for (;;) {
     try {
       const res = await fetch(`${BASE}/api/health`);
@@ -103,7 +129,7 @@ beforeAll(async () => {
     if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
     await new Promise((r) => setTimeout(r, 150));
   }
-}, 30_000);
+}, 120_000);
 
 afterAll(async () => {
   child?.kill("SIGTERM");
@@ -112,6 +138,7 @@ afterAll(async () => {
     child.on("close", () => resolve());
     setTimeout(() => (child.kill("SIGKILL"), resolve()), 5_000).unref?.();
   });
+  await new Promise<void>((resolve) => ttsServer.close(() => resolve()));
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -170,6 +197,29 @@ describe("harness HTTP API", () => {
     expect(authorized.headers.get("cache-control")).toBe("no-store");
     expect(authorized.headers.get("content-type")).toBe("application/json");
     expect((await authorized.json() as { bots: unknown[] }).bots).toBeDefined();
+  });
+
+  // Voice used to be engine-only, so a host without Hermes could not speak at
+  // all. With a ttsKey the harness does it for every bot.
+  it("speaks a message through the harness text-to-speech key", async () => {
+    expect((await api("GET", "/api/config")).body.voice).toEqual({ configured: true });
+
+    const bot = (await api("GET", "/api/bots")).body.bots[0];
+    ttsRequests = [];
+    const res = await fetch(`${BASE}/api/bots/${bot.id}/speak`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ text: "hello there" }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("audio/mpeg");
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(TTS_AUDIO);
+    expect(ttsRequests).toHaveLength(1);
+    expect(ttsRequests[0].authorization).toBe("Bearer tts-test-key");
+    expect(ttsRequests[0].body.input).toBe("hello there");
+
+    expect((await api("POST", `/api/bots/${bot.id}/speak`, { text: "" })).status).toBe(422);
+    expect((await api("POST", "/api/bots/no-such-bot/speak", { text: "hi" })).status).toBe(404);
   });
 
   it("seeds one starter bot with its greeting", async () => {

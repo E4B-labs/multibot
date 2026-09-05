@@ -424,7 +424,11 @@ describe("comms e2e (fake ACP fleet)", () => {
         await new Promise((r) => setTimeout(r, 250));
       }
 
-      const thread = (await api("GET", "/api/mail")).body.threads.find((t: any) => t.messages?.some((m: any) => m.text === "async ping"));
+      // Every bot on the send-mail fake writes "async ping", so match on this
+      // pair, not on the text alone — otherwise the lookup lands on whichever
+      // thread another test's bot happened to open first.
+      const thread = (await api("GET", "/api/mail")).body.threads.find((t: any) =>
+        t.messages?.some((m: any) => m.text === "async ping" && m.from === sender.id && m.to === receiver.id));
       expect(thread).toBeTruthy();
       // Round trip, not an exact count: the fake mails on EVERY turn, so a
       // reply that starts one more turn legitimately adds one more letter.
