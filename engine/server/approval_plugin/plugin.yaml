@@ -1,5 +1,0 @@
-name: slafy_approvals
-version: 1.0.0
-description: "Per-bot approval policy: escalate flagged tool calls to the human gate."
-author: slafy-bot
-kind: standalone
