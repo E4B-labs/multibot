@@ -513,6 +513,45 @@ describe("profile import acceptance", () => {
   });
 });
 
+// Teach-a-task: nagranie zostaje w silniku (CDP), ale skilla pisze BOT swoim
+// providerem. Do 0.3.32 syntezę robił `teach/synthesize` silnika, czyli CLI
+// Hermesa — na telefonie bez providera Hermesa kończyło się to zdaniem
+// „No inference provider configured", mimo że bot miał działającego providera
+// przez driver harnessu. Atrapa silnika nadal oddaje na tej trasie 501, więc
+// test padnie, gdyby ktoś tam wrócił.
+describe("teach-a-task: synteza providerem bota (nie Hermesem)", () => {
+  it("nagranie → skill utworzony driverem bota, bez dotykania trasy Hermesa", async () => {
+    const before = engine.teachCalls.length;
+    const started = await api("POST", "/api/engine/bots/mb-t-pre/teach/start");
+    expect(started.status).toBe(201);
+
+    const stopped = await api("POST", "/api/engine/bots/mb-t-pre/teach/stop", {
+      recording_id: started.body.recording_id,
+    });
+    expect(stopped.status).toBe(200);
+    expect(stopped.body.steps.length).toBeGreaterThan(0);
+
+    const made = await api("POST", "/api/bots/bot-pre/teach/synthesize", { steps: stopped.body.steps });
+    expect(made.status).toBe(201);
+    expect(made.body.skill_name).toBe("shop-order");
+
+    const skills = (await api("GET", "/api/bots/bot-pre/skills")).body as Array<{ name: string; instructions: string }>;
+    const skill = skills.find((s) => s.name === "shop-order");
+    expect(skill?.instructions).toContain("Before the first run");
+
+    // Prompt syntezy poszedł zwykłą turą na izolowanej nitce...
+    expect(engine.chats.some((chat) => chat.message?.includes("demonstrated a task in your browser"))).toBe(true);
+    // ...a trasa Hermesa dostała wyłącznie nagranie, nigdy syntezy.
+    expect(engine.teachCalls.slice(before)).toEqual(["start mb-t-pre", "stop mb-t-pre"]);
+  }, 20_000);
+
+  it("odrzuca puste nagranie zamiast prosić bota o skill z niczego", async () => {
+    const empty = await api("POST", "/api/bots/bot-pre/teach/synthesize", { steps: [] });
+    expect(empty.status).toBe(422);
+    expect((await api("POST", "/api/bots/nie-ma/teach/synthesize", { steps: ["x"] })).status).toBe(404);
+  });
+});
+
 // multibot: stan floty w każdej turze (29.08). Sprawdzane end-to-end przez
 // prawdziwy serwer, bo cała wartość tej zmiany polega na tym, że blok
 // naprawdę DOCIERA do silnika — driver slafy nie przekazuje pola `system`,

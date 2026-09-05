@@ -2218,6 +2218,47 @@ function appendBotEvent(botId: string, event: NonNullable<Message["event"]>) {
   broadcast({ kind: "message", threadId: bot.threadId, message });
 }
 
+// ── teach-a-task: synteza nagrania ────────────────────────────────────
+// Silnik NAGRYWA (CDP), ale pisanie skilla to zwykła tura tekstowa — więc leci
+// providerem, którym bot i tak gada (codex/claude/…), a nie CLI Hermesa.
+// Ścieżka silnika (`POST /api/engine/bots/<id>/teach/synthesize`) zostaje
+// nietknięta jako fallback dla flot prowadzonych przez Hermesa; tam działa
+// dokładnie wtedy, gdy provider Hermesa JEST skonfigurowany.
+//
+// ponytail: jedna izolowana tura, bez narzędzi i bez historii głównego wątku —
+// model dostaje kroki i oddaje JSON-a. Pętla „popraw i spróbuj jeszcze raz"
+// dopiero, gdyby modele naprawdę nie trafiały w ten kształt.
+const teachSynthesisPrompt = (steps: string[], name: string | null) =>
+  `A user just demonstrated a task in your browser. Here is the recording, step by step:
+
+${steps.map((step, i) => `${i + 1}. ${step}`).join("\n")}
+
+Write this up as one of your skills${name ? ` named "${name}"` : ""}. Do not call any tools. Answer with a single \`\`\`json fenced block and nothing else:
+
+{"name": "short-kebab-name", "description": "one line saying what the skill does", "instructions": "the SKILL.md body, markdown"}
+
+The instructions must contain:
+1. Numbered steps in natural language, in the recorded order. Treat URLs and selectors as hints, not a contract — the page may have changed, so say WHAT to do, not only what to click.
+2. A "Before the first run" section: ask the user multiple-choice (A/B/C) clarifying questions and wait for the answer instead of guessing the task's parameters.
+3. An "After each run" section: critique your own result and fix this skill straight away if a step failed or turned out to be unnecessary.`;
+
+/** First JSON object in a model reply, fenced or bare. `null` when the bot
+ * answered in prose — the caller turns that into a 502 with the reply in it,
+ * because a silent "nothing happened" is what made the old path unreadable. */
+function parseSkillDraft(reply: string): { name: string; description: string; instructions: string } | null {
+  const fenced = reply.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const raw = fenced ? fenced[1] : reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1);
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const name = String(parsed?.name ?? "").trim();
+    const instructions = String(parsed?.instructions ?? "").trim();
+    if (!name || !instructions) return null;
+    return { name, description: String(parsed?.description ?? "").trim(), instructions };
+  } catch {
+    return null;
+  }
+}
+
 // ── config hot-reload ─────────────────────────────────────────────────
 function configStatus() {
   const { profile: _profile, ...status } = configStatusFor(null);
@@ -4160,6 +4201,35 @@ const server = createServer(async (req, res) => {
         return ok ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such skill" });
       }
       return json(res, 405, { error: "method not allowed" });
+    }
+
+    // Kroki nagrania (z `POST /api/engine/bots/<id>/teach/stop`) → skill, tym
+    // samym providerem, co reszta pracy bota. Patrz `teachSynthesisPrompt`.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/teach\/synthesize$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const body = await readBody(req);
+      const steps: string[] = Array.isArray(body?.steps)
+        ? body.steps.map((step: unknown) => String(step).trim()).filter(Boolean)
+        : [];
+      if (!steps.length) return json(res, 422, { error: "steps must be a non-empty array" });
+      const wanted = typeof body?.name === "string" && body.name.trim() ? body.name.trim() : null;
+      // Izolowana nitka jak przy delegacji: prompt i odpowiedź nie zaśmiecają
+      // czatu, a `transcript: []` trzyma tę turę z dala od historii wątku.
+      const reply = await askBotAndWait(bot.id, teachSynthesisPrompt(steps, wanted), 0, {
+        threadId: `teach-${bot.id}`,
+        transcript: [],
+        timeoutMs: 240_000,
+      });
+      const draft = parseSkillDraft(reply);
+      if (!draft) {
+        throw Object.assign(new Error(`the bot did not return a skill: ${reply.slice(0, 300)}`), { status: 502 });
+      }
+      const skill = workspace.addSkill(bot.id, { ...draft, name: wanted ?? draft.name });
+      appendBotEvent(bot.id, { type: "skill-created", value: skill.name });
+      broadcast({ kind: "workspace", botId: bot.id, resource: "skills" });
+      return json(res, 201, { skill_name: skill.name });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/(access|autonomy|permissions|usage)$/);

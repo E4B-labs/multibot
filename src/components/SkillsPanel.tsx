@@ -136,6 +136,7 @@ type TeachState =
 // Dlatego bierze gotowość komputera i przejęcie/oddanie leasa (H5) jako propsy
 // zamiast duplikować tamtą logikę.
 export function TeachCard({
+  botId,
   engineBotId,
   onSkillCreated,
   polish,
@@ -144,6 +145,8 @@ export function TeachCard({
   onStartControl,
   onStopControl,
 }: {
+  /** Bot harnessu — syntezę robi JEGO provider, nie Hermes silnika. */
+  botId: string;
   engineBotId: string;
   onSkillCreated: () => void;
   polish: boolean;
@@ -193,16 +196,15 @@ export function TeachCard({
   const removeStep = (index: number) =>
     setTeach((t) => (t.phase === "stopped" ? { ...t, steps: t.steps.filter((_, i) => i !== index) } : t));
 
-  const synthesize = (recordingId: string, steps: string[]) => {
+  // Nagrywa silnik (CDP), ale skilla pisze bot swoim providerem — trasa
+  // harnessu, nie `/api/engine/.../teach/synthesize`, która wołała CLI Hermesa
+  // i na telefonie kończyła się „No inference provider configured".
+  const synthesize = (steps: string[]) => {
     setTeach({ phase: "synthesizing" });
     setError(null);
-    api(`/api/engine/bots/${engineBotId}/teach/synthesize`, {
+    api(`/api/bots/${botId}/teach/synthesize`, {
       method: "POST",
-      body: JSON.stringify({
-        recording_id: recordingId,
-        steps,
-        ...(name.trim() ? { name: name.trim() } : {}),
-      }),
+      body: JSON.stringify({ steps, ...(name.trim() ? { name: name.trim() } : {}) }),
     })
       .then(({ skill_name }: { skill_name: string }) => {
         setTeach({ phase: "done", skillName: skill_name });
@@ -350,7 +352,7 @@ export function TeachCard({
           />
           <div className="mt-2 flex gap-2">
             <button
-              onClick={() => synthesize(teach.recordingId, teach.steps)}
+              onClick={() => synthesize(teach.steps)}
               disabled={teach.steps.length === 0}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
             >

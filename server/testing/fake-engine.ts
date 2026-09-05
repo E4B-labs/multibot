@@ -57,6 +57,12 @@ export interface FakeEngine {
   botMcpCalls: string[];
   /** Surowe publiczne webhooki, do testu przezroczystości przelotki. */
   webhooks: Array<{ rid: string; body: string; signature: string; contentType: string; deliveryId: string }>;
+  /** ślad wywołań teach-a-task: `["start mb-t1", "stop mb-t1"]`. `synthesize`
+   * ma się tam NIE pojawić — to ścieżka Hermesa, po której szedł błąd
+   * „No inference provider configured". */
+  teachCalls: string[];
+  /** kroki, które silnik oddaje na `teach/stop` — wejście syntezy. */
+  teachSteps: string[];
   mode: FakeEngineMode;
   /** liczba żywych klientów `/api/ws`. */
   wsClients(): number;
@@ -103,6 +109,8 @@ export async function startFakeEngine(mode: FakeEngineMode = "happy"): Promise<F
     botMcp: {},
     botMcpCalls: [],
     webhooks: [],
+    teachCalls: [],
+    teachSteps: ['navigated to https://shop.example/orders', 'clicked "New order"'],
     mode,
     upgradePaths: [],
     wsClients: () => sockets.size,
@@ -208,6 +216,26 @@ export async function startFakeEngine(mode: FakeEngineMode = "happy"): Promise<F
       const botId = decodeURIComponent(messages[1]);
       if (!state.createdBots.includes(botId)) return json(404, { detail: "no such bot" });
       return json(200, state.history[botId] ?? []);
+    }
+
+    // Teach-a-task (faza 9). `start`/`stop` to nagranie CDP — zostaje w silniku.
+    // `synthesize` to STARA ścieżka przez CLI Hermesa: na telefonie bez
+    // providera oddaje 501 z tym właśnie zdaniem, więc atrapa oddaje je też.
+    const teach = path.match(/^\/api\/bots\/([^/]+)\/teach\/(start|stop|synthesize)$/);
+    if (teach && method === "POST") {
+      const botId = decodeURIComponent(teach[1]);
+      await readBody(req); // opróżnij strumień — proxy pipe'uje ciało zawsze
+      if (!state.createdBots.includes(botId)) return json(404, { detail: "no such bot" });
+      state.teachCalls.push(`${teach[2]} ${botId}`);
+      if (teach[2] === "start") return json(201, { recording_id: "rec-1" });
+      if (teach[2] === "stop") {
+        return json(200, { events: [], transcript: state.teachSteps.join("\n"), steps: state.teachSteps });
+      }
+      return json(501, {
+        detail:
+          "synteza nie ruszyła: Provider authentication failed: No inference provider configured. " +
+          "Run 'hermes model' to choose a provider and model.",
+      });
     }
 
     const attention = path.match(/^\/api\/bots\/([^/]+)\/attention$/);
@@ -362,6 +390,27 @@ export async function startFakeEngine(mode: FakeEngineMode = "happy"): Promise<F
         return res.end();
       }
       res.write(frame("working", { tool: { toolCallId: "call-1", name: "search", status: "running" } }));
+
+      // Synteza teach-a-task przychodzi tu jako ZWYKŁA tura — czyli provider
+      // bota, nie CLI Hermesa. Rozpoznajemy ją po prompcie z `index.ts`
+      // (`teachSynthesisPrompt`) i oddajemy skilla w umówionym kształcie.
+      if (String(body.message ?? "").includes("demonstrated a task in your browser")) {
+        const reply =
+          '```json\n' +
+          JSON.stringify({
+            name: "shop-order",
+            description: "Place an order in the shop.",
+            instructions: "1. Open the orders page.\n2. Start a new order.\n\n## Before the first run\n\n## After each run\n",
+          }) +
+          "\n```";
+        res.write(frame("delta", { text: reply }));
+        (state.history[botId] ??= []).push(
+          { role: "user", content: body.message },
+          { role: "assistant", content: reply },
+        );
+        res.write(frame("done", { reply, session_id: `slafy-${botId}`, finish_reason: "stop" }));
+        return res.end();
+      }
 
       if (state.mode === "approval") {
         // Silnik pyta i STOI — jak zaparkowany wątek tury (server/approvals.py).
