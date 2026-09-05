@@ -89,9 +89,11 @@ function ComposerAccessPill({ bot, collapsed }: { bot: Bot; collapsed: boolean }
         aria-label={`${polish ? "Dostęp" : "Access"}: ${polish ? ACCESS_LABELS[access].pl : ACCESS_LABELS[access].en}`}
       >
         <Shield size={14} />
-        {!collapsed && (
-          <span className="hidden lg:inline">{polish ? ACCESS_LABELS[access].pl : ACCESS_LABELS[access].en}</span>
-        )}
+        {/* multibot: podpis chowa `collapsed`, nie osobna bramka `lg:`. Przy
+            dwóch warunkach naraz poniżej 1024 px wychodziła pigułka bez
+            podpisu, ale wciąż z `px-2` — 30 px obok 32-pikselowych kwadratów
+            sąsiadów. Jeden warunek = jeden kształt. */}
+        {!collapsed && <span>{polish ? ACCESS_LABELS[access].pl : ACCESS_LABELS[access].en}</span>}
       </button>
       {open && (
         <div role="menu" className="absolute bottom-full right-0 z-30 mb-2 min-w-44 overflow-hidden rounded-xl border border-hairline/40 bg-card p-1 shadow-xl">
@@ -623,6 +625,9 @@ export function Composer({ bot }: { bot: Bot }) {
   // na same ikony (patrz sidePanelOpen).
   const pillsCollapsed = sidePanelOpen(state);
   const availableReasoning = reasoningLevels(bot.modelSelection.model);
+  const reasoningLabel =
+    availableReasoning.find((item) => item.id === reasoning)?.label ?? (polish ? "Domyślny" : "Default");
+  const reasoningTitle = `${polish ? "Rozumowanie" : "Reasoning"}: ${reasoningLabel}`;
   const fastAvailable = fastModeAvailable(
     state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.driverKind,
     bot.modelSelection.model,
@@ -1050,21 +1055,23 @@ export function Composer({ bot }: { bot: Bot }) {
           <button
             onClick={() => setReasoningOpen((open) => !open)}
             aria-expanded={reasoningOpen}
-            aria-label={polish ? "Poziom rozumowania" : "Reasoning effort"}
+            // multibot: poziom MUSI siedzieć w `aria-label`, nie tylko w `title`.
+            // aria-label wygrywa nazwę dostępną i spycha `title` do roli opisu,
+            // którego duża część czytników nie czyta — a przy zwiniętej pigułce
+            // to jedyne miejsce, z którego da się poznać ustawiony poziom.
+            aria-label={reasoningTitle}
             className={cn(
               "flex shrink-0 items-center rounded-full text-[11px] font-medium text-ink-secondary hover:bg-raised hover:text-ink",
               composerPillShape(pillsCollapsed),
             )}
-            title={`${polish ? "Rozumowanie" : "Reasoning"}: ${availableReasoning.find((item) => item.id === reasoning)?.label ?? (polish ? "Domyślny" : "Default")}`}
+            title={reasoningTitle}
           >
             <Brain size={15} />
             {/* multibot: przy otwartym panelu bocznym kolumna czatu robi się
                 wąska i podpis poziomu wypychał resztę wiersza — zostaje sama
                 ikona, a poziom mówi dymek i etykieta dla czytników
                 (Kacper 29.08, rozszerzone na wszystkie panele boczne). */}
-            {!pillsCollapsed && (
-              <span>{availableReasoning.find((item) => item.id === reasoning)?.label ?? (polish ? "Domyślny" : "Default")}</span>
-            )}
+            {!pillsCollapsed && <span>{reasoningLabel}</span>}
           </button>
           {reasoningOpen && (
             <div className="absolute bottom-full right-0 z-30 mb-2 min-w-32 overflow-hidden rounded-xl border border-hairline/40 bg-card p-1 shadow-xl">

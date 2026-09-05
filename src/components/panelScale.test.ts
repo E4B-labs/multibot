@@ -87,7 +87,7 @@ describe("skala prawego panelu i czatu", () => {
     // warunek przeniósł się z samych ustawień bota na KAŻDY panel boczny —
     // resztę pilnuje Composer.test.ts („zwijanie pigułek composera")
     expect(composer).toContain("const pillsCollapsed = sidePanelOpen(state);");
-    expect(composer).toContain("{!pillsCollapsed && (");
+    expect(composer).toContain("{!pillsCollapsed && <span>{reasoningLabel}</span>}");
     expect(composer).not.toContain("{!state.settingsOpen && (");
   });
 

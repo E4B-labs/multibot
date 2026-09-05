@@ -75,9 +75,18 @@ describe("czat nie przewija się w bok", () => {
     expect(chat).toContain('className="flex w-full min-w-0 flex-col gap-1 pb-16"');
   });
 
+  /** Ciało JEDNEJ reguły CSS: od selektora do najbliższej klamry zamykającej.
+   *  Bez tego `slice` leciał do końca pliku i asercja przechodziła na
+   *  deklaracji z zupełnie innej reguły niżej — skasowanie tej właściwej
+   *  nie wywaliłoby testu. */
+  const ruleBody = (selector: string) => {
+    const at = css.indexOf(selector);
+    expect(at, `nie ma reguły ${selector}`).toBeGreaterThanOrEqual(0);
+    return css.slice(at, css.indexOf("}", at));
+  };
+
   it("narożnik paska jest przezroczysty, a pasek poziomy tak samo cienki", () => {
-    expect(css).toContain("::-webkit-scrollbar-corner");
-    expect(css.slice(css.indexOf("::-webkit-scrollbar-corner"))).toContain("background: transparent");
-    expect(css.slice(css.indexOf("::-webkit-scrollbar {"))).toMatch(/height:\s*8px/);
+    expect(ruleBody("::-webkit-scrollbar-corner")).toMatch(/background:\s*transparent/);
+    expect(ruleBody("::-webkit-scrollbar {")).toMatch(/height:\s*8px/);
   });
 });

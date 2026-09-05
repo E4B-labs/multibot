@@ -163,13 +163,26 @@ describe("zwijanie pigułek composera", () => {
 
   it("wszystkie trzy pigułki i rząd używają wspólnego warunku", () => {
     expect(composer).toContain("const pillsCollapsed = sidePanelOpen(state);");
-    // rozumowanie + tryb szybki chowają podpis, dostęp dostaje prop
-    expect(composer.match(/!pillsCollapsed/g) ?? []).toHaveLength(2);
+    // Asercje na obecność, nie na globalną liczbę wystąpień: licznik wywracał
+    // się przy każdym kolejnym poprawnym użyciu flagi.
+    expect(composer).toContain("{!pillsCollapsed && <span>{reasoningLabel}</span>}");
+    expect(composer).toContain('{!pillsCollapsed && <span>{polish ? "Szybko" : "Fast"}</span>}');
     expect(composer).toContain("<ComposerAccessPill bot={bot} collapsed={pillsCollapsed} />");
-    expect(composer.match(/composerPillShape\((?:pillsCollapsed|collapsed)\)/g) ?? []).toHaveLength(3);
-    // podpis zwiniętej pigułki musi zostać w dymku i dla czytników
-    expect(composer).toContain('aria-label={polish ? "Poziom rozumowania" : "Reasoning effort"}');
+    expect(composer).toContain("{!collapsed && <span>{polish ? ACCESS_LABELS[access].pl");
+    // każda z trzech pigułek bierze kształt ze wspólnego helpera
+    expect(composer.match(/composerPillShape\((?:pillsCollapsed|collapsed)\)/g) ?? []).not.toHaveLength(0);
+    expect(composer).not.toMatch(/className="flex h-8 (?:shrink-0 )?items-center gap-1 rounded-full px-2/);
+  });
+
+  it("zwinięta pigułka rozumowania mówi czytnikowi POZIOM, nie samą nazwę pola", () => {
+    // aria-label wygrywa nazwę dostępną i spycha `title` do opisu, którego
+    // część czytników nie czyta — poziom musi być w obu.
+    expect(composer).toContain("const reasoningTitle = `${polish ? \"Rozumowanie\" : \"Reasoning\"}: ${reasoningLabel}`;");
+    expect(composer).toContain("aria-label={reasoningTitle}");
+    expect(composer).toContain("title={reasoningTitle}");
+    // tryb szybki niesie stan w aria-pressed, więc jemu wystarcza stała nazwa
     expect(composer).toContain('aria-label={polish ? "Tryb szybki" : "Fast mode"}');
+    expect(composer).toContain("aria-pressed={bot.fastMode === true}");
   });
 
   it("odstęp w rzędzie composera zszedł do 6 px", () => {
