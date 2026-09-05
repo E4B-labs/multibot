@@ -1333,7 +1333,7 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className={cn("pb-3 pt-2", collapsed ? "px-1" : "px-3")}>
-        {/* multibot: Mail agentów i Mapa zespołu przeniesione do 3-kropek
+        {/* multibot: Rozmowy botów i Mapa zespołu przeniesione do 3-kropek
             w nagłówku czatu (prawy górny róg) — tu celowo puste. */}
         {/* multibot: F11 — subtelna kropka statusu silnika, tylko offline+slafy;
             szara bg-raised-hover = konwencja "Service offline" */}

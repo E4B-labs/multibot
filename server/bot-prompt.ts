@@ -300,12 +300,12 @@ export function botSystemPrompt(
     const creatorLabel = creatorName ? `@${creatorName} (id: ${bot.createdByBotId})` : bot.createdByBotId ? `id: ${bot.createdByBotId}` : "another bot";
     const ctx = (bot.creationContext ?? "").trim().slice(0, 2000);
     if (bot.createdByBotId && ctx) {
-      return `# Creation context\nYou were created by ${creatorLabel} for this task: "${ctx}". This assignment is your first priority — begin it right away. Do not ask "who am I" or wait for the user to repeat it; your name is ${bot.name}${bot.title ? `, role: ${bot.title}` : ""} and the creation task plus your profile keywords are your brief. Infer intent from name/title when description is brief, and check your inbox (read_bot_mail) and memory (recall, read_memory) for the original request. If you were just created by another bot, your first task is what your creator asked for when creating you — read your agent mail, recent context and memory for that request and start there immediately, even if your description is short.`;
+      return `# Creation context\nYou were created by ${creatorLabel} for this task: "${ctx}". This assignment is your first priority — begin it right away. Do not ask "who am I" or wait for the user to repeat it; your name is ${bot.name}${bot.title ? `, role: ${bot.title}` : ""} and the creation task plus your profile keywords are your brief. Infer intent from name/title when description is brief, and check your room messages (read_bot_mail) and memory (recall, read_memory) for the original request. If you were just created by another bot, your first task is what your creator asked for when creating you — read the messages other bots sent you, recent context and memory for that request and start there immediately, even if your description is short.`;
     }
     if (ctx) {
-      return `# Creation context\nYou were created to handle this task: "${ctx}". Start it immediately — do not ask who you are; your profile and task are your brief. If you were just created by another bot, read your agent mail (read_bot_mail) and memory (recall, read_memory) for that request and start immediately.`;
+      return `# Creation context\nYou were created to handle this task: "${ctx}". Start it immediately — do not ask who you are; your profile and task are your brief. If you were just created by another bot, read the messages other bots sent you (read_bot_mail) and memory (recall, read_memory) for that request and start immediately.`;
     }
-    return `# Creation context\nYou were created by ${creatorLabel}. Your creator's intent is in your name/title/description — start that work immediately, checking mail (read_bot_mail) and memory if needed. Do not ask who you are.`;
+    return `# Creation context\nYou were created by ${creatorLabel}. Your creator's intent is in your name/title/description — start that work immediately, checking your room messages (read_bot_mail) and memory if needed. Do not ask who you are.`;
   })();
 
   // multibot (A2): bot ma OD RAZU wiedzieć, jakie narzędzia faktycznie
@@ -373,7 +373,7 @@ export function botSystemPrompt(
       + "- How much you write is your call, not a quota. Say what is useful and stop.\n"
       + "- Stopping means writing nothing: no thanks, no acknowledgements, no \"sounds good\". If your turn was started by another bot's message and there is genuinely nothing to send, reply with exactly [NO REPLY]. When the whole task the two of you were working on is finished, end your message with the exact line [TASK COMPLETE] - that closes the conversation and sends the summary to its owner.\n"
       + "- You may reorganise the team: update_agent changes another bot's model, section, fast mode or description, and the routine tools take an optional bot_id to manage that bot's routines.\n"
-      + "- get_environment_snapshot gives the latest live state of visible peers when current availability matters. read_bot_mail reads your durable inbox. start_collab opens a visible thread for work you will go back and forth on. create_agent makes a new bot. Do simple work yourself; bring in a peer when the work belongs to another specialisation.",
+      + "- get_environment_snapshot gives the latest live state of visible peers when current availability matters. read_bot_mail reads the messages other bots wrote to you in your rooms. start_collab opens a visible thread for work you will go back and forth on. create_agent makes a new bot. Do simple work yourself; bring in a peer when the work belongs to another specialisation.",
     agents &&
       "The device — for questions about the host device call get_device_info first and report the returned manufacturer/model/platform exactly; never infer a phone model from a chat claim.",
   ].filter(Boolean).join("\n\n");

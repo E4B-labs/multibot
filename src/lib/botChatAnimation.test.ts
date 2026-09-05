@@ -35,6 +35,8 @@ function room(id: string, botIds: string[], status: Room["status"] = "running", 
     bot_ids: botIds,
     transcript: [],
     status,
+    createdAt: 0,
+    ownerBotId: botIds[0] ?? "",
     ...(activeBotId !== undefined ? { activeBotId } : {}),
   };
 }

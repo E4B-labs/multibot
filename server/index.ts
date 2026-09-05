@@ -82,7 +82,6 @@ import { ProviderRegistry } from "./harness/registry.ts";
 import { HarnessRoutines, oneShotAt, routineTurnText, verifyWebhookSignature, type HarnessRoutine } from "./routines.ts";
 import { GroupStore } from "./group-store.ts";
 import { budgetLeft, isDuplicateOfLast, RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
-import { BotMailStore, botMailThreadId } from "./bot-mail.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
@@ -511,25 +510,25 @@ const pendingBotAttachments = new Map<string, ReturnType<AttachmentStore["add"]>
 // ląduje w wątku i w kolejce; koniec tury odpala drain — bot dostaje je wszystkie
 // naraz i odpowiada JEDNĄ odpowiedzią na wszystko.
 const queuedUserMessages = new QueuedUserMessages();
-// Durable agent mailbox: every peer message is persisted here as well as in
-// the room, so an exchange stays readable long after its room settles.
-const botMail = new BotMailStore();
+// Rooms are the ONE ledger of every bot-to-bot exchange; there is no second
+// mailbox any more. read_bot_mail reads what landed in a bot's rooms since it
+// last looked. The cursor lives in this process, so a restart replays a room's
+// tail once instead of losing it. An old data/bot-mail.json is simply ignored.
+const roomReadAt = new Map<string, number>();
 
-function broadcastMail(threadId: string): void {
-  const thread = botMail.get(threadId);
-  if (thread) broadcast({ kind: "mail", thread });
-}
-
-function removeBotMail(botId: string): void {
-  const threads = botMail.forBot(botId);
-  botMail.deleteBot(botId);
-  for (const thread of threads) broadcast({ kind: "mail.deleted", threadId: thread.id, bot_ids: thread.bot_ids });
-}
-
-function appendBotMail(input: Parameters<BotMailStore["append"]>[0]) {
-  const message = botMail.append(input);
-  broadcastMail(botMailThreadId(input.from, input.to));
-  return message;
+/** Messages other bots wrote in this bot's rooms since its last read. */
+function unreadRoomMessages(botId: string): Array<{ room: RoomRecord; from: string; text: string; at: number }> {
+  const since = roomReadAt.get(botId) ?? 0;
+  roomReadAt.set(botId, Date.now());
+  return rooms
+    .list()
+    .filter((room) => room.bot_ids.includes(botId))
+    .flatMap((room) =>
+      room.transcript
+        .filter((message) => message.from !== botId && message.at > since)
+        .map((message) => ({ room, from: message.from, text: message.text, at: message.at })),
+    )
+    .sort((a, b) => a.at - b.at);
 }
 
 // ── bot↔bot: a message is a turn ───────────────────────────────────────
@@ -699,7 +698,6 @@ async function deliverPeerMessage(
   // The same text fanned out to several bots is ONE line in the ledger.
   if (!isDuplicateOfLast(room, fromBotId, message)) rooms.append(room.id, fromBotId, message);
   broadcast({ kind: "room", room: rooms.get(room.id) });
-  appendBotMail({ from: fromBotId, to: toBotId, text: message, status: "delivered" });
   // Answered only the bot we are actually writing TO: forwarding work to a
   // third bot is not an answer, and marking it as one left the original sender
   // waiting on a reply that never came.
@@ -1050,12 +1048,6 @@ function eventVisible(payload: unknown, actor: WorkspaceActor | null): boolean {
   if (event.kind === "group") {
     const ids = Array.isArray(event.group?.bot_ids) ? event.group.bot_ids : [];
     return ids.length === 0 || ids.every((id: unknown) => canAccessBot(botFor(id), actor));
-  }
-  if (event.kind === "mail" || event.kind === "mail.deleted") {
-    const ids = Array.isArray(event.thread?.bot_ids)
-      ? event.thread.bot_ids
-      : (Array.isArray(event.bot_ids) ? event.bot_ids : []);
-    return ids.length === 2 && ids.every((id: unknown) => canAccessBot(botFor(id), actor));
   }
   return true;
 }
@@ -1455,7 +1447,6 @@ bus.subscribe((event: RuntimeEvent) => {
         harnessRoutines.deleteBot(bot.id);
         attachments.deleteBot(bot.id);
         workspace.deleteBot(bot.id);
-        removeBotMail(bot.id);
         store.deleteBot(bot.id);
         broadcast({ kind: "bot.deleted", botId: bot.id, visibility: bot.visibility, ownerId: bot.ownerId, allowedUserIds: bot.allowedUserIds });
       }
@@ -2606,7 +2597,6 @@ async function deleteBotRecord(bot: BotRecord): Promise<{ engineSynced: boolean 
   harnessRoutines.deleteBot(bot.id);
   attachments.deleteBot(bot.id);
   workspace.deleteBot(bot.id);
-  removeBotMail(bot.id);
   store.deleteBot(bot.id);
   for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
     try {
@@ -3101,7 +3091,15 @@ const server = createServer(async (req, res) => {
           case "memory.list": return json(res, 200, workspace.facts(fromBotId, String(body.query ?? "")));
           case "memory.graph": return json(res, 200, workspace.graph(fromBotId));
           case "memory.markdown.get": return json(res, 200, workspace.markdown(fromBotId));
-          case "mail.inbox": return json(res, 200, { threads: botMail.forBot(fromBotId) });
+          case "mail.inbox": return json(res, 200, {
+            messages: unreadRoomMessages(fromBotId).map((entry) => ({
+              roomId: entry.room.id,
+              room: entry.room.name,
+              from: store.bot(entry.from)?.name ?? entry.from,
+              text: entry.text,
+              at: entry.at,
+            })),
+          });
           case "mail.send": {
             const sent = await deliverPeerMessage(fromBotId, String(body.toBotId ?? ""), String(body.message ?? ""));
             if (sent.status === "refused") return json(res, 200, { error: sent.note });
@@ -3109,7 +3107,6 @@ const server = createServer(async (req, res) => {
               accepted: true,
               roomId: sent.roomId,
               delivery: sent.status,
-              threadId: botMailThreadId(fromBotId, String(body.toBotId ?? "")),
               botName: store.bot(String(body.toBotId ?? ""))?.name,
             });
           }
@@ -3157,7 +3154,7 @@ const server = createServer(async (req, res) => {
             const rawIntent = String(profile.description ?? profile.title ?? profile.name).trim().slice(0, 2000);
             const creationContext = rawIntent
               ? `Stworzony przez bota ${creator?.name ?? fromBotId} (id: ${fromBotId}) do zadania: ${rawIntent}. Twoim pierwszym zadaniem jest to zadanie — zacznij od razu, nie pytaj kim jesteś.`
-              : `Stworzony przez bota ${creator?.name ?? fromBotId} (id: ${fromBotId}). Sprawdź swój profil (name/title/description) i skrzynkę (read_bot_mail) — to jest Twoje zadanie. Zacznij od razu, nie pytaj kim jesteś.`;
+              : `Stworzony przez bota ${creator?.name ?? fromBotId} (id: ${fromBotId}). Sprawdź swój profil (name/title/description) i wiadomości od botów (read_bot_mail) — to jest Twoje zadanie. Zacznij od razu, nie pytaj kim jesteś.`;
             const updated = store.patchBot(created.id, { ...profile, modelSelection: selection, ownerId: caller.ownerId, visibility: caller.visibility === "private" ? "private" : "team", ...(caller.chiefOfStaff ? { section: caller.section } : {}), createdByBotId: fromBotId, creationContext });
             console.log(`[multibot] bot ${created.id} (${profile.name}) created by bot ${fromBotId} (${creator?.name ?? "unknown"}) — intent: ${rawIntent.slice(0, 120)}`);
             if (access === "full") workspace.setAccess(created.id, "full");
@@ -3405,18 +3402,6 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && path === "/api/environment") {
       return json(res, 200, { environment: fleetEnvironmentForActor(actor) });
     }
-    // Durable agent mailbox. Unlike collaboration rooms, mail remains after
-    // reload and can be opened without entering either bot's main chat.
-    if (method === "GET" && path === "/api/mail") {
-      return json(res, 200, { threads: botMail.list().filter((thread) => botSetVisible(thread.bot_ids, actor)) });
-    }
-    const mailMatch = path.match(/^\/api\/mail\/([^/]+)$/);
-    if (mailMatch && method === "GET") {
-      const thread = botMail.get(decodeURIComponent(mailMatch[1]));
-      return thread && botSetVisible(thread.bot_ids, actor)
-        ? json(res, 200, thread)
-        : json(res, 404, { error: "no such mail thread" });
-    }
     let m: RegExpMatchArray | null;
     // multibot: durable group rooms. Engine owns execution; harness owns the
     // user-facing roster and transcript so groups survive reload/restart.
@@ -3557,7 +3542,7 @@ const server = createServer(async (req, res) => {
     }
     // ── durable collaboration rooms (bot-to-bot tasks) ──
     if (method === "GET" && path === "/api/rooms") {
-      return json(res, 200, { rooms: rooms.list().filter((room) => botSetVisible(room.bot_ids, actor)) });
+      return json(res, 200, { rooms: rooms.list().filter((room) => botSetVisible(room.bot_ids, actor)), budget: collabMaxMessages() });
     }
     if (method === "POST" && path === "/api/rooms") {
       const body = await readBody(req);

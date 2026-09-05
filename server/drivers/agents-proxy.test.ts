@@ -268,9 +268,9 @@ describe("agents-proxy MCP surface", () => {
     });
   });
 
-  it("reads durable agent mail through the local action API", async () => {
+  it("reads unread room messages through the local action API", async () => {
     const res = await callTool("read_bot_mail", {});
-    expect(res.result.content[0].text).toContain("No agent mail yet");
+    expect(res.result.content[0].text).toContain("No unread room messages");
     expect(lastActionBody).toMatchObject({ fromBotId: "bot-asker", action: "mail.inbox" });
   });
 
