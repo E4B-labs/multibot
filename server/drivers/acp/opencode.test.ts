@@ -54,6 +54,36 @@ describe("OpenCode ACP driver", () => {
     expect(seen.env.OPENCODE_API_KEY).toBeUndefined();
   });
 
+  it("mounts the Composio MCP server in the ACP http shape", async () => {
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    instance = await OpenCodeAgentDriver.create({
+      instanceId: "opencode-test",
+      displayName: "OpenCode",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+    await instance.adapter.sendTurn({
+      threadId: "opencode-composio",
+      text: "hello",
+      model: "opencode/big-pickle",
+      integrations: { composio: { key: "ck_test", url: "https://connect.composio.dev/mcp" } },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    // OpenCode validates session/new with zod: url + an object of headers
+    // (the pre-fix shape) failed the whole RPC, so the turn never ran.
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpServers).toContainEqual({
+      type: "http",
+      name: "composio",
+      url: "https://connect.composio.dev/mcp",
+      headers: [{ name: "x-consumer-api-key", value: "ck_test" }],
+    });
+  });
+
   it("rejects Go turn before spawning without key", async () => {
     instance = await OpenCodeAgentDriver.create({
       instanceId: "opencode-test",

@@ -19,7 +19,7 @@
 //                     group-chat e2e)
 //   FAKE_ACP_RELAY_MAP  path to a JSON file {botId: [nextBotId, ...]} plus the
 //                   per-bot turn counters the relay mode keeps beside it
-//   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
+//   FAKE_ACP_DUMP   path to write {argv, env, mcpServers} as JSON, so a test can assert
 //                   argv shape (agent/stdio flags) and env hygiene
 //   FAKE_ACP_PROMPT_DUMP  path to append every received session/prompt as a
 //                   JSON line ({mode, at, prompt}) — lets tests pin what text
@@ -150,6 +150,11 @@ function handle(msg: any) {
     case "session/new": {
       const servers: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
       agentsMcp = servers.find((s: any) => s?.name === "agents") ?? null;
+      // Real agents validate this payload (OpenCode rejects a non-spec HTTP
+      // entry and the whole turn dies), so tests get to assert the shape.
+      if (process.env.FAKE_ACP_DUMP) {
+        writeFileSync(process.env.FAKE_ACP_DUMP, JSON.stringify({ argv, env: process.env, mcpServers: servers }, null, 2));
+      }
       result(msg.id, { sessionId: "fake-acp-session" });
       break;
     }
