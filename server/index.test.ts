@@ -108,7 +108,6 @@ beforeAll(async () => {
       // is provided by the HTTPS tunnel/reverse proxy in real deployments.
       OMB_HOST: "127.0.0.1",
       OMB_STATIC_DIR: staticDir,
-      ENGINE_URL: "http://127.0.0.1:1",
       MULTIBOT_TTS_URL: ttsUrl,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -161,9 +160,9 @@ describe("harness HTTP API", () => {
     expect((await fetch(`${BASE}/app.js`)).status).toBe(200);
     expect((await fetch(`${BASE}/api/bots`)).status).toBe(401);
     expect((await fetch(`${BASE}/api/auth/check`)).status).toBe(401);
-    // Exact POST webhook is public but its loopback engine remains the HMAC gate.
-    // This fixture has no engine, so reaching proxy yields 503 instead of auth's 401.
-    expect((await fetch(`${BASE}/webhooks/routine-id`, { method: "POST" })).status).toBe(503);
+    // Exact POST webhook is public; the HMAC over the routine secret is its
+    // gate. An unknown id is a 404 from the webhook handler, not auth's 401.
+    expect((await fetch(`${BASE}/webhooks/routine-id`, { method: "POST" })).status).toBe(404);
     expect((await fetch(`${BASE}/webhooks/routine-id`)).status).toBe(401);
     expect((await fetch(`${BASE}/webhooks/routine-id/extra`, { method: "POST" })).status).toBe(401);
   });
@@ -273,7 +272,7 @@ describe("harness HTTP API", () => {
     expect((await api("GET", "/api/groups")).body.map((group: { id: string }) => group.id)).toContain("g-local");
     const deleted = await api("DELETE", "/api/groups/g-local");
     expect(deleted.status).toBe(200);
-    expect(deleted.body).toEqual({ ok: true, engineSynced: false });
+    expect(deleted.body).toEqual({ ok: true });
     expect((await api("GET", "/api/groups")).body).toEqual([]);
   });
 
@@ -375,7 +374,7 @@ describe("harness HTTP API", () => {
     expect(body.instances.map((instance: { instanceId: string }) => instance.instanceId)).toEqual(
       expect.arrayContaining(["grok", "gemini", "kimi", "qwen", "claude", "codex", "ghost"]),
     );
-    expect(body.instances.some((instance: { instanceId: string }) => instance.instanceId === "slafy")).toBe(false);
+    expect(body.instances.some((instance: { instanceId: string }) => ["slafy", "local"].includes(instance.instanceId))).toBe(false);
     const ghost = body.instances.find((instance: { instanceId: string }) => instance.instanceId === "ghost");
     expect(ghost).toMatchObject({
       instanceId: "ghost",
@@ -467,7 +466,6 @@ describe("harness HTTP API", () => {
       arch: process.arch,
       python: expect.any(Boolean),
       docker: expect.any(Boolean),
-      engineInstalled: expect.any(Boolean),
     });
     expect(body.hostname).toBeTruthy();
     expect(body.memoryGb).toBeGreaterThan(0);

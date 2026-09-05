@@ -9,10 +9,9 @@
 //                       HTTP: type/url/headers),
 //   * ACP (`drivers/acp/core.ts`) → własny kształt sesji, stdio only — bierze
 //                       `connectors()` wprost,
-//   * `engineSpec()`  → wpis `mcp_servers` Hermesa w silniku slafy.
 import { loadConfig, type AppConfig } from "./config.ts";
 import type { SendTurnInput } from "./contracts.ts";
-import { connectors, type McpConnector } from "./mcp-connectors.ts";
+import { connectors } from "./mcp-connectors.ts";
 
 const COMPOSIO_URL = "https://connect.composio.dev/mcp";
 
@@ -50,17 +49,4 @@ export function mcpServers(
           };
   }
   return servers;
-}
-
-/** Konektor → wpis `mcp_servers` w formacie Hermesa (silnik slafy). */
-export function engineSpec(c: McpConnector): Record<string, unknown> {
-  if (c.transport.type === "stdio") {
-    return { command: c.transport.command, args: c.transport.args ?? [], env: c.transport.env ?? {} };
-  }
-  return {
-    url: c.transport.url,
-    ...(c.transport.headers ? { headers: c.transport.headers } : {}),
-    // Hermes rozpoznaje streamable HTTP sam; `transport` ustawiamy tylko dla SSE.
-    ...(c.transport.type === "sse" ? { transport: "sse" } : {}),
-  };
 }

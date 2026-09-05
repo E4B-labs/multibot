@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR, loadConfig } from "./config.ts";
 import { connectorCards, connectors, removeConnector, saveConnector } from "./mcp-connectors.ts";
-import { engineSpec, mcpServers } from "./mcp-servers.ts";
+import { mcpServers } from "./mcp-servers.ts";
 
 const STDIO = { name: "Echo", transport: { type: "stdio", command: "node", args: ["echo.mjs"], env: { TOKEN: "t" } } };
 const HTTP = { name: "Firma", transport: { type: "http", url: "https://mcp.firma.dev/mcp", headers: { authorization: "Bearer x" } } };
@@ -98,22 +98,5 @@ describe("mcp-servers", () => {
     saveConnector("echo", STDIO);
     expect(Object.keys(mcpServers(undefined))).toEqual(["echo"]);
     expect(mcpServers({})).toEqual({ echo: { command: "node", args: ["echo.mjs"], env: { TOKEN: "t" } } });
-  });
-
-  it("renders the Hermes spec the engine expects", () => {
-    expect(engineSpec(saveConnector("echo", STDIO))).toEqual({
-      command: "node",
-      args: ["echo.mjs"],
-      env: { TOKEN: "t" },
-    });
-    expect(engineSpec(saveConnector("firma", HTTP))).toEqual({
-      url: "https://mcp.firma.dev/mcp",
-      headers: { authorization: "Bearer x" },
-    });
-    // `transport` tylko dla SSE — streamable HTTP Hermes rozpoznaje sam
-    expect(engineSpec(saveConnector("sse", { transport: { type: "sse", url: "https://s.dev/sse" } }))).toEqual({
-      url: "https://s.dev/sse",
-      transport: "sse",
-    });
   });
 });

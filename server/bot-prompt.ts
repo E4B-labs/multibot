@@ -109,7 +109,7 @@ export function currentTimeLine(now: Date, timeZone?: string): string {
  * nigdy nie obieca narzędzia, którego bot nie dostał. Nazwa drivera/silnika tu
  * NIE wchodzi — sekcja tożsamości zabrania ją ujawniać.
  *
- * Osobna funkcja, bo driver slafy `system` do silnika nie przekazuje: index.ts
+ * Osobna funkcja, żeby ten sam blok dało się dokleić do TREŚCI tury: index.ts
  * dokleja ten sam blok do treści tury (tak samo, jak robi to ze stanem floty).
  */
 export function connectionsBlock(
@@ -119,8 +119,8 @@ export function connectionsBlock(
   const mounted = mountedConnections(integrations);
   return [
     "# Your connections and tools",
-    // Bez id bota: blok jedzie też w TREŚCI tury drivera slafy, a tam żadna
-    // linia nie może wyglądać jak wpis floty o samym sobie (proxy.test.ts).
+    // Bez id bota: blok bywa doklejany do TREŚCI tury, a tam żadna linia nie
+    // może wyglądać jak wpis floty o samym sobie.
     `You are ${bot.name}, working in the user's MultiBot workspace.`,
     mounted.length
       ? `You ARE connected. Mounted for you in THIS turn:\n${mounted.map((line) => `- ${line}`).join("\n")}`
@@ -165,7 +165,7 @@ export function connectionsBlock(
  *
  * Blok mówi o narzędziach OGÓLNIE — po nazwach, bez ich parametrów i bez
  * kształtu zwracanych danych. Celowo: opisy narzędzi i ich sygnatury żyją
- * w `engine/server/computer_mcp.py` i zmieniają się osobno (refy, batch
+ * przez serwer MCP komputera i zmieniają się osobno (refy, batch
  * akcji), a prompt powtarzający sygnaturę rozjeżdża się z nimi po cichu
  * i zaczyna kłamać. Tu jest STRATEGIA, tam INTERFEJS.
  *
@@ -178,7 +178,7 @@ export function connectionsBlock(
  * dostał), a linie o sekretach dodatkowo na serwer `agents` — `request_credential`
  * i `hand_over_computer` są jego, nie komputera (regresja bc3d15ec).
  *
- * Osobna funkcja z tego samego powodu, co `connectionsBlock`: driver slafy
+ * Osobna funkcja z tego samego powodu, co `connectionsBlock`: bywa
  * `system` do silnika nie przekazuje, więc index.ts dokleja to do treści tury.
  */
 export function computerPlaybook(integrations: TurnIntegrationsLike | undefined): string {
@@ -265,8 +265,8 @@ export function botSystemPrompt(
   const computer = Boolean(integrations.localComputer);
   const currentUser = o.currentUser;
 
-  // Driver-neutral workspace context. Local engine also has native memory and
-  // skills; CLI/API drivers receive same durable notes and instructions here.
+  // Driver-neutral workspace context: every driver receives the same durable
+  // notes and instructions here.
   const botMemory = workspace.markdown(bot.id).content.trim();
   const botFacts = workspace.facts(bot.id).slice(0, 40).map((fact) => `- ${fact.text}`).join("\n");
   const teamMemory = workspace.teamMarkdown?.().content.trim() ?? "";
@@ -294,8 +294,7 @@ export function botSystemPrompt(
   ].filter(Boolean).join("\n");
 
   // multibot: bot stworzony przez innego bota ma wiedzieć kto i po co go powołał.
-  // To jest DRUGA ścieżka promptu (harness → drivery CLI). Driver slafy dostaje
-  // tożsamość z engine/server/bots.py — tam ląduje ten sam kontekst via SOUL.md.
+  // To jest ścieżka promptu harness → drivery.
   // Graceful: brak pól = bot od usera, zero wstrzyknięcia.
   const creationBlock = (() => {
     if (!bot.createdByBotId && !bot.creationContext) return "";

@@ -1,7 +1,6 @@
-// Czat grupowy bez silnika slafy (MULTIBOT_ENGINE=off — tak chodzi telefon).
-// Tworzenie grupy szło przez ensureEngine() i kończyło się 502, choć tury i tak
-// liczy harness. Test bierze prawdziwy serwer z atrapą CLI Claude'a i przechodzi
-// pełną drogę: utwórz grupę → wypisz → napisz do niej → skasuj.
+// Czat grupowy end-to-end: prawdziwy serwer z atrapą CLI Claude'a przechodzi
+// pełną drogę — utwórz grupę → wypisz → napisz do niej → skasuj. Skład,
+// transkrypt i tury należą wyłącznie do harnessu.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,7 +53,6 @@ describe("grupy botów bez silnika", () => {
         OMB_PORT: String(PORT),
         OMB_ONBOARDING_TURN: "0",
         MULTIBOT_COMPUTER: "off",
-        MULTIBOT_ENGINE: "off",
         FAKE_CLAUDE_MODE: "persistent",
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -126,7 +124,7 @@ describe("grupy botów bez silnika", () => {
 
       const removed = await api("DELETE", `/api/groups/${groupId}`);
       expect(removed.status).toBe(200);
-      expect(removed.body).toEqual({ ok: true, engineSynced: false });
+      expect(removed.body).toEqual({ ok: true });
       expect((await api("GET", "/api/groups")).body).toEqual([]);
     },
     120_000,

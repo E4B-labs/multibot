@@ -81,7 +81,6 @@ describe("auto-steer podczas trwającej tury (atrapa codeksa)", () => {
         OMB_ONBOARDING_TURN: "0",
         OMB_HOST: "127.0.0.1",
         MULTIBOT_COMPUTER: "off",
-        ENGINE_URL: "http://127.0.0.1:1",
         OMB_TURN_DEBOUNCE_MS: String(DEBOUNCE_MS),
         FAKE_CODEX_MODE: "steer",
       },

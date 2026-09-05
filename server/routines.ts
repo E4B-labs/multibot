@@ -1,13 +1,11 @@
 // multibot: driver-neutral routines. Scheduling belongs to harness because it
 // already owns every provider turn; no CLI-specific daemon or protocol.
 //
-// multibot (webhook): rutyny harnessu mają też webhook triggery, lustrzane do
-// silnika (engine/server/routines.py, wariant (a) — nasz HMAC, nie adapter
-// Hermesa). Sekret siedzi w rekordzie rutyny (routines.json w DATA_DIR), ale
-// NIGDY nie wraca w `list()`/`routineView()` — tylko `enableWebhookTrigger`
-// oddaje go raz, jak silnik. Kontrakt podpisu jest ten sam co
-// `verify_signature` silnika: HMAC-SHA256 surowego body, hex, nagłówek
-// `X-Slafy-Signature`.
+// multibot (webhook): rutyny mają też webhook triggery. Sekret siedzi
+// w rekordzie rutyny (routines.json w DATA_DIR), ale NIGDY nie wraca
+// w `list()`/`routineView()` — oddaje go raz `enableWebhookTrigger`. Podpis:
+// HMAC-SHA256 surowego body, hex, nagłówek `X-Slafy-Signature` (nazwa została
+// po silniku Hermesa; zmiana zerwałaby każdy skonfigurowany już webhook).
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -147,9 +145,8 @@ function webhookPublicUrl(routineId: string): string {
   return `${base}/webhooks/${routineId}`;
 }
 
-/** Weryfikacja podpisu webhooka — identyczna konstrukcja co
- * `verify_signature` silnika (engine/server/routines.py): HMAC-SHA256 surowego
- * body, hex, porównanie odporne na timing. Hash obu stron przed
+/** Weryfikacja podpisu webhooka: HMAC-SHA256 surowego body, hex, porównanie
+ * odporne na timing. Hash obu stron przed
  * `timingSafeEqual`, żeby bufor zawsze miał tę samą długość — jak
  * `tokenMatches` w server/auth.ts. Pusty/brak podpisu → false (→ 401). */
 export function verifyWebhookSignature(secret: string, body: Buffer | string, signature: string): boolean {

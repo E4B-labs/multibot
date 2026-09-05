@@ -1,12 +1,8 @@
 // multibot: bieżący stan floty doklejany do KAŻDEJ tury bota, żeby bot wiedział,
 // kto jeszcze pracuje i czy jest wolny — bez wołania `list_bots`.
 //
-// Dlaczego w treści tury, a nie w prompcie systemowym: prompt systemowy ma
-// w tym repo dwie ścieżki. Drivery CLI dostają pole `system` z `sendTurn`, ale
-// driver `slafy` je IGNORUJE — do silnika idzie tylko `{ message, model }`,
-// a tożsamość bota żyje w engine/server/bots.py. Blok w prompcie systemowym
-// dotarłby więc do części floty i po cichu ominął resztę. Treść tury przechodzi
-// tą samą drogą u wszystkich, więc jedno miejsce wystarcza.
+// Dlaczego w treści tury, a nie w prompcie systemowym: treść przechodzi tą samą
+// drogą u każdego drivera, więc jedno miejsce wystarcza na całą flotę.
 //
 // To samo rozwiązanie, którym idą już wiadomości w pokojach współpracy
 // (server/index.ts, „wiadomości innych botów jadą W TREŚCI promptu").

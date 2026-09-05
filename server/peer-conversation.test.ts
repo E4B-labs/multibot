@@ -61,7 +61,6 @@ async function boot(prefix: string, env: Record<string, string>, instances: Reco
       OMB_PORT: String(port),
       OMB_HOST: "127.0.0.1",
       MULTIBOT_COMPUTER: "off",
-      ENGINE_URL: "http://127.0.0.1:1",
       OMB_TURN_DEBOUNCE_MS: "150",
       ...env,
     },

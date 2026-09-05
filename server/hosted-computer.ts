@@ -27,9 +27,9 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 
-/** Ports the image serves. cdp drives the browser (engine/server/computer.py
- *  and teach.py both speak it); novnc is the screen the user sees and takes
- *  over; api is cua's computer-server for whole-desktop input. */
+/** Ports the image serves. cdp drives the browser over the DevTools protocol;
+ *  novnc is the screen the user sees and takes over; api is cua's
+ *  computer-server for whole-desktop input. */
 export const CONTAINER_PORTS = { cdp: 9223, novnc: 6901, api: 8000 } as const;
 export type PortName = keyof typeof CONTAINER_PORTS;
 

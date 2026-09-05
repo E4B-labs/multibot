@@ -5,7 +5,7 @@
 // promptu, więc nie zależy od kolejności tur).
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -133,7 +133,7 @@ describe("group chat: the user writes to everyone, the members pick who answers"
   let researcher = "";
 
   beforeAll(async () => {
-    await startHarness({ MULTIBOT_ENGINE: "off", ENGINE_URL: "http://127.0.0.1:1" });
+    await startHarness({});
     for (const seeded of await bots()) await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
     atlas = await newBot("Atlas", "atlas", "chief of staff, general questions and coordination");
     researcher = await newBot("Researcher", "research", "web research, sources, fact checking");
@@ -195,67 +195,5 @@ describe("group chat: the user writes to everyone, the members pick who answers"
     const room = await roomOf(chat.body.roomId);
     expect(room.transcript.some((m: any) => m.from === researcher)).toBe(true);
     expect(room.transcript.some((m: any) => m.from === atlas)).toBe(false);
-  }, 90_000);
-});
-
-// Regresja z telefonu (grupa `588559d7` „Github Review"): grupy założone przed
-// przebudową siedzą w trwałym zapisie harnessu i widać je w `GET /api/groups`,
-// ale silnik ich nie pamięta. Czat pytał najpierw silnik, więc każda taka grupa
-// odpowiadała 404 — martwa dla użytkownika. Skład ma pochodzić z harnessu.
-describe("czat grupowy: skład z harnessu, gdy silnik grupy nie zna", () => {
-  const ENGINE_GROUP_ID = "588559d7";
-  let engine: Server;
-  let engineBase = "";
-  let atlas = "";
-  let researcher = "";
-
-  beforeAll(async () => {
-    const enginePort = 18800 + Math.floor(Math.random() * 10_000);
-    engineBase = `http://127.0.0.1:${enginePort}`;
-    // Atrapa silnika: przyjmuje utworzenie grupy (harness dostaje id), ale sama
-    // żadnej nie pamięta — każde `GET /api/groups/:id` to 404.
-    engine = createServer((req, res) => {
-      req.resume();
-      const url = req.url ?? "";
-      res.setHeader("content-type", "application/json");
-      if (url === "/health") return res.end("{}");
-      if (req.method === "POST" && url === "/api/bots") return res.end("{}");
-      if (req.method === "POST" && url === "/api/groups") {
-        res.writeHead(201);
-        return res.end(JSON.stringify({ id: ENGINE_GROUP_ID }));
-      }
-      res.writeHead(404);
-      res.end(JSON.stringify({ error: "not found" }));
-    });
-    await new Promise<void>((resolve) => engine.listen(enginePort, "127.0.0.1", resolve));
-
-    await startHarness({ ENGINE_URL: engineBase });
-    for (const seeded of await bots()) await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
-    atlas = await newBot("Atlas", "atlas", "chief of staff, general questions and coordination");
-    researcher = await newBot("Researcher", "research", "web research, sources, fact checking");
-  }, 40_000);
-
-  afterAll(async () => {
-    await stopHarness();
-    await new Promise<void>((resolve) => engine.close(() => resolve()));
-  });
-
-  it("grupa jest w zapisie harnessu, a nie w silniku — czat i tak działa", async () => {
-    const gid = await newGroup("Github Review", [atlas, researcher]);
-    expect(gid).toBe(ENGINE_GROUP_ID);
-    // ta sama lista, którą widzi UI
-    const listed = (await api("GET", "/api/groups")).body as any[];
-    expect(listed.map((g) => g.id)).toContain(gid);
-    // silnik o niej nie wie
-    expect((await fetch(`${engineBase}/api/groups/${gid}`)).status).toBe(404);
-
-    const chat = await api("POST", `/api/groups/${gid}/chat`, { message: "hej" });
-    expect(chat.status).toBe(200);
-    expect(chat.body.turns.map((t: any) => t.bot_id).sort()).toEqual([atlas, researcher].sort());
-
-    const room = await roomOf(chat.body.roomId);
-    const said = (id: string) => room.transcript.filter((m: any) => m.from === id).map((m: any) => m.text);
-    expect(said(atlas)).toEqual(["hello from Atlas"]);
-    expect(said(researcher)).toEqual(["hello from Researcher"]);
   }, 90_000);
 });

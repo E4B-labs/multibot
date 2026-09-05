@@ -1,6 +1,6 @@
-// Provider-neutral web tools. Native providers and the Hermes engine expose
-// different spellings for the same operations, so the harness owns one small
-// registry and one execution path for aliases and tests.
+// Provider-neutral web tools. Native providers spell the same operations
+// differently, so the harness owns one small registry and one execution path
+// for aliases and tests.
 
 export const WEB_TOOL_NAMES = ["web_search", "web_extract"] as const;
 export type WebToolName = (typeof WEB_TOOL_NAMES)[number];

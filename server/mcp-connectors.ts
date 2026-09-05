@@ -29,9 +29,8 @@ export interface McpConnector {
   transport: StdioTransport | HttpTransport;
 }
 
-// Id ląduje w nazwie serwera MCP (a przez driver slafy także w kluczu YAML-a i
-// nazwie pliku tokena w silniku), więc trzymamy regex silnika — o jeden znak
-// krótszy, bo silnik dostaje `mb-<id>` i musi się zmieścić w swoich 64.
+// Id ląduje w nazwie serwera MCP, więc zostaje przy dotychczasowym regeksie —
+// o jeden znak krótszym niż 64, żeby zmieścił się też z prefiksem `mb-`.
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,60}$/;
 // Nazwy montowane przez drivery same z siebie — konektor o takim id po cichu
 // przykryłby (albo dał się przykryć) integracji harnessu.

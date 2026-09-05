@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { botSystemPrompt, computerPlaybook, connectionsBlock } from "./bot-prompt.ts";
+import { botSystemPrompt } from "./bot-prompt.ts";
 // multibot: autoweryfikacja — filtr na prośbach o zgodę, patrz server/auto-verify.ts.
 import { decideAction, normalizeAutoVerify, type AutoVerifyState } from "./auto-verify.ts";
 import { fleetStatusBlock } from "./fleet-status.ts";
@@ -52,12 +52,6 @@ import { deviceInfo, deviceResources } from "./device.ts";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { trimTranscript } from "./drivers/history.ts";
 import { openCodeCatalog, startOpenCodeModelRefresh } from "./drivers/acp/opencode-catalog.ts";
-// multibot: silnik slafy — proxy `/api/engine/*`, pipe WS i uwaga botów (D7)
-import { engineBotIdFor, threadIdOfEngineBot } from "./drivers/slafy.ts";
-import { engineDisabled, ensureEngine } from "./engine/supervisor.ts";
-import { findExistingEngineProfile, importExistingEngineProfile } from "./engine/bootstrap.ts";
-import { watchEngineAttention } from "./engine/attention.ts";
-import { attachExternalBrowser, configureEngineComputer, engineComputer } from "./engine/computer-mcp.ts";
 // multibot (H1-H5): jeden komputer bota — kontener na czas życia bota.
 import {
   dockerAvailable,
@@ -73,14 +67,13 @@ import { promptWithReply, resolveReplyTarget } from "./replies.ts";
 import { scoutProject } from "./project-scout.ts";
 import { matchVncRoute, mountVncUpgrade, proxyVncHttp } from "./computer-vnc-proxy.ts";
 import { broadcastWs, mountEventsWs } from "./events-ws.ts";
-import { mountEngineProxy } from "./engine/proxy.ts";
 import { EventBus } from "./harness/bus.ts";
 // multibot (F7): własne serwery MCP użytkownika obok Composio
 import * as mcpConnectors from "./mcp-connectors.ts";
 import * as googleWorkspace from "./google-workspace.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { HarnessRoutines, oneShotAt, routineTurnText, verifyWebhookSignature, type HarnessRoutine } from "./routines.ts";
-import { GroupStore } from "./group-store.ts";
+import { GroupStore, groupMemberId, threadIdOfGroupMember } from "./group-store.ts";
 import { budgetLeft, isDuplicateOfLast, RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
@@ -193,8 +186,6 @@ const TASK_HINTS =
 // multibot (F9): głębokość tury, która TERAZ trwa u danego bota — druga (i
 // wiarygodniejsza) połowa `chainDepth` w `store.ts`. Upstream ufa `depth` z env
 // proxy, co działa, dopóki proxy startuje raz na turę (claude/ACP); bot silnika
-// ma agents zamontowane na stałe w profilu (`drivers/slafy.ts`, `syncAgents`),
-// więc tam deklaracja zamarza na 0.
 const activeCommsDepth = new Map<string, number>();
 // multibot: boty, których tura trzyma slot z OMB_MAX_PARALLEL_TURNS. Slot
 // bierze tylko tura główna (nieizolowana, depth 0) — tura zagnieżdżona czekałaby
@@ -1003,7 +994,7 @@ function drainQueuedUserMessages(botId: string) {
 }
 const bootFleet = await registry.describe();
 bootSelection = await defaultSelection(bootFleet);
-// Legacy OpenCode Go used a visible slafy instance. Move only its selection;
+// Legacy OpenCode Go used a visible custom-model instance. Move only its selection;
 // bots, messages and memory keep their existing records.
 for (const bot of store.bots) {
   if (bot.modelSelection.instanceId !== "opencodeGo") continue;
@@ -1013,8 +1004,9 @@ for (const bot of store.bots) {
     : `opencode-go/${oldModel}`;
   store.patchBot(bot.id, { modelSelection: { instanceId: "opencode", model } });
 }
-// multibot (G1): legacy bots selected the removed `slafy` default instance.
-// Repair before the first API response, preferring a named custom model.
+// multibot (G1): legacy bots sat on instances that no longer exist — the
+// removed `slafy`/`local` engine instance among them. Repair before the first API
+// response, preferring a named custom model.
 store.migrateOrphanedSelections(bootFleet);
 // Keep persisted Claude selections inside four stable UI entries. The driver
 // translates these product IDs to Claude Code aliases at execution time.
@@ -1047,41 +1039,7 @@ if (openCodeModels && openCodeCatalog.lastRefreshSucceeded) {
     if (replacement) store.patchBot(bot.id, { modelSelection: { instanceId: "opencode", model: replacement } });
   }
 }
-const existingEngineProfile = findExistingEngineProfile(ROOT);
-const hadHarnessBots = store.bots.length > 0;
 store.seedIfEmpty();
-
-// First launch with an existing engine profile: preserve its SOUL, memory,
-// routines and skills by copying it to deterministic thread identity before
-// any UI turn can create a blank profile. A seeded "Milind" placeholder is
-// also eligible, so a Termux Hermes home discovered after first boot migrates
-// without deleting the user's harness data.
-const seededPlaceholder = store.bots.length === 1 && store.bots[0]?.name === "Milind" && store.bots[0]?.modelSelection.instanceId === "claude";
-// Re-check local first bot on every restart: the engine data directory can be
-// new while harness bots.json already exists (fresh Termux/service rebuild).
-// Import endpoint is idempotent and returns 409 when target already exists.
-const localFirstBot = store.bots.length === 1 && store.bots[0]?.modelSelection.instanceId === "local";
-const localEngine = bootFleet.find((d) => d.instanceId === "local");
-if (existingEngineProfile && localEngine && (!hadHarnessBots || seededPlaceholder || localFirstBot) && store.bots.length === 1) {
-  const first = store.bots[0];
-  store.patchBot(first.id, {
-    name: existingEngineProfile.name,
-    ...(existingEngineProfile.title !== undefined ? { title: existingEngineProfile.title } : {}),
-    ...(existingEngineProfile.description !== undefined ? { description: existingEngineProfile.description } : {}),
-    modelSelection: { instanceId: "local", model: localEngine.models.default || "hermes-agent" },
-  });
-  try {
-    const baseUrl = await ensureEngine();
-    await importExistingEngineProfile(baseUrl, existingEngineProfile, engineBotIdFor(first.threadId));
-    console.log(`[multibot] imported existing engine profile "${existingEngineProfile.name}" into first bot`);
-  } catch (error) {
-    // The engine never came up, so the bot would sit on an instance the model
-    // picker does not show and no driver can answer. Put it back on a provider
-    // that works; the import retries on the next boot.
-    store.patchBot(first.id, { modelSelection: bootSelection });
-    console.warn(`[multibot] existing profile import deferred: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
 
 // ── SSE fan-out to clients ─────────────────────────────────────────────
 // One ephemeral workspace snapshot is shared by the desktop and mobile
@@ -1636,7 +1594,7 @@ function stopScreenPoller(botId: string): Frame | null {
 // electron/cua.mjs and its connection file stay on disk; driving the host's
 // physical screen is explicitly deferred, not deleted.
 
-// multibot: Hermes-compatible provider/model switch for chat. `/model` is a
+// multibot: provider/model switch for chat. `/model` is a
 // harness command, not prose sent to whichever provider happens to be active.
 // Selection persists on bot, matching the model picker and surviving restart.
 async function handleModelCommand(bot: ReturnType<Store["bot"]>, text: string): Promise<string | null> {
@@ -1652,7 +1610,7 @@ async function handleModelCommand(bot: ReturnType<Store["bot"]>, text: string): 
   const target = raw
     .replace(/(?:^|\s)--(?:provider(?:=|\s+)[^\s]+|global|session|once|refresh)(?=\s|$)/gi, "")
     .trim();
-  const described = (await registry.describe()).filter((item) => item.instanceId !== "local");
+  const described = await registry.describe();
   const key = (value: string) => value.trim().toLowerCase().replace(/\s+/g, "");
   const aliases: Record<string, string> = {
     anthropic: "claude",
@@ -1717,7 +1675,7 @@ async function handleModelCommand(bot: ReturnType<Store["bot"]>, text: string): 
   }
   if (!model) model = provider.models.default;
   const known = provider.models.options.some((option) => option.id === model || option.label.toLowerCase() === model.toLowerCase());
-  if (!known && provider.models.options.length && provider.driverKind !== "slafy") {
+  if (!known && provider.models.options.length) {
     return `Unknown ${provider.displayName ?? provider.instanceId} model: ${model}. Available: ${provider.models.options.map((option) => option.id).join(", " )}`;
   }
   const selectedModel = provider.models.options.find((option) => option.id === model || option.label.toLowerCase() === model.toLowerCase())?.id ?? model;
@@ -2180,7 +2138,7 @@ opts?: {
       // awarią (`error`), nigdy cichym zejściem do bota bez komputera.
       // Żaden problem z komputerem nie może wywrócić tury — bez kontenera bot
       // rozmawia dalej, tylko bez narzędzi komputera (ta sama reguła
-      // graceful-absence, co przy wyłączonym silniku).
+      // graceful-absence, co przy braku kontenera).
       try {
         if (isolated) throw new Error("group turn has no private computer");
         const computer = canUseIntegration(bot.threadId, "browser")
@@ -2192,32 +2150,10 @@ opts?: {
         // a czekanie na nią szeregowało całą flotę. Gdyby dwa boty naprawdę
         // nie mogły klikać naraz, blokada należy do ścieżki narzędzi, nie do
         // startu tury.
-        // Tożsamość bota po stronie silnika NIE zależy od kontenera: profil
-        // trzyma pamięć, skille i rutyny, więc musi istnieć także wtedy, gdy
-        // komputer nie wstał. (Wcześniej zakładał go wybór "playwright" —
-        // którego już nie ma.)
-        await configureEngineComputer(bot.threadId, "own").catch(() => {});
-        if (computer?.ports) {
-          // Silnik dostaje ADRES przeglądarki w kontenerze; cała jego istniejąca
-          // ścieżka CDP (computer.py, computer_mcp.py, teach.py) działa wtedy bez
-          // zmian, a agent i użytkownik patrzą na jeden ekran. Port jest inny po
-          // każdym restarcie kontenera, więc podajemy go co turę.
-          // kolor bota jedzie razem z adresem: kursor na wspólnym pulpicie ma
-          // barwę tego, kto właśnie klika
-          await attachExternalBrowser(bot.threadId, computer.ports.cdp, bot.color).catch(() => {});
-          // Bot slafy steruje przeglądarką natywnie (toolset Hermesa), więc
-          // montowanie mu tego samego komputera drugi raz dałoby dwa wejścia do
-          // jednego pulpitu — dostaje sam adres, powyżej.
-          if (instance.driverKind !== "slafy") {
-            const mcp = await engineComputer(bot.threadId);
-            if (mcp) integrations.localComputer = mcp;
-            // Cichy `null` był powodem, dla którego "bot jakoś nie umie w
-            // komputer" nie zostawiał w logu ŻADNEGO śladu: bot dostawał
-            // `hand_over_computer` z serwera agents i ani jednego narzędzia
-            // komputera, a log milczał.
-            else console.warn(`[multibot] no computer MCP for ${bot.id}: no engine python or engine unavailable`);
-          }
-        }
+        // BLOKER (usunięcie silnika Hermesa): zestaw narzędzi przeglądarki dla
+        // botów claude/codex/acp jechał przez `python -m server.computer_mcp`,
+        // czyli klienta HTTP silnika. Ekran (noVNC) i `computer/exec` zostają —
+        // narzędzi CDP nie ma, dopóki nie powstanie ich odpowiednik w TS.
       } catch (e) {
         console.warn(`[multibot] computer unavailable for ${bot.id}:`, e instanceof Error ? e.message : e);
       }
@@ -2229,9 +2165,8 @@ opts?: {
       if (!isolated && instance.adapter.capabilities.agentsMcp === true) {
         integrations.agents = agentsIntegration(bot.id);
       }
-      // All non-Hermes providers receive the same provider-neutral web MCP.
-      // Slafy exposes web_search/web_extract natively through Hermes instead;
-      // mounting a second server there would create duplicate tool names.
+      // Every provider that speaks MCP receives the same provider-neutral web
+      // MCP.
       if (!isolated && instance.adapter.capabilities.webTools === "mcp" && canUseIntegration(bot.threadId, "browser")) {
         integrations.web = webMcpIntegration();
       }
@@ -2274,22 +2209,10 @@ opts?: {
       await instance.adapter.sendTurn({
         threadId: turnThreadId,
         // multibot: stan floty leci W TREŚCI tury, nie w polu `system` —
-        // driver slafy `system` do silnika NIE przekazuje, więc blok
-        // w prompcie systemowym ominąłby po cichu wszystkie boty tego
-        // silnika. Przeliczany co turę, bo `busy` zmienia się w trakcie
-        // pracy floty; zapamiętany raz byłby gorszy niż żaden.
+        // przeliczany co turę, bo `busy` zmienia się w trakcie pracy floty;
+        // zapamiętany raz byłby gorszy niż żaden.
         text: [
           fleetStatusBlock(visibleRoster, bot.id, fleetEnvironmentForBots(fleetEnvironment, visibleRoster)),
-          // multibot: spis połączeń tej tury z tego samego powodu, co stan
-          // floty wyżej — driver slafy `system` do silnika nie przekazuje, więc
-          // bot tego silnika inaczej NIGDY nie zobaczyłby, co ma zamontowane.
-          // Pozostałe drivery mają ten blok w prompcie systemowym.
-          instance.driverKind === "slafy" ? connectionsBlock(bot, integrations) : "",
-          // multibot: playbook komputera tą samą drogą i z tego samego powodu.
-          // Sam blok jest warunkowy na `integrations.localComputer`, więc bot
-          // bez zamontowanego komputera dostaje pusty string (i nic się nie
-          // dokleja) — tak jak w prompcie systemowym pozostałych driverów.
-          instance.driverKind === "slafy" ? computerPlaybook(integrations) : "",
           text,
           turnAttachments.length ? `Attached files:\n${turnAttachments.map((file) => `- ${file.name}: ${file.path}`).join("\n")}` : "",
         ]
@@ -2341,11 +2264,9 @@ function appendBotEvent(botId: string, event: NonNullable<Message["event"]>) {
 }
 
 // ── teach-a-task: synteza nagrania ────────────────────────────────────
-// Silnik NAGRYWA (CDP), ale pisanie skilla to zwykła tura tekstowa — więc leci
-// providerem, którym bot i tak gada (codex/claude/…), a nie CLI Hermesa.
-// Ścieżka silnika (`POST /api/engine/bots/<id>/teach/synthesize`) zostaje
-// nietknięta jako fallback dla flot prowadzonych przez Hermesa; tam działa
-// dokładnie wtedy, gdy provider Hermesa JEST skonfigurowany.
+// Pisanie skilla z listy kroków to zwykła tura tekstowa, więc leci providerem,
+// którym bot i tak gada (codex/claude/…). Nagrywarka CDP jechała przez silnik
+// Hermesa i zniknęła razem z nim — trasa przyjmuje kroki z dowolnego źródła.
 //
 // ponytail: jedna izolowana tura, bez narzędzi i bez historii głównego wątku —
 // model dostaje kroki i oddaje JSON-a. Pętla „popraw i spróbuj jeszcze raz"
@@ -2594,8 +2515,7 @@ function routineView(botId: string, routine: HarnessRoutine) {
   const bot = store.bot(botId);
   const driverKind = bot ? registry.get(bot.modelSelection.instanceId)?.driverKind ?? null : null;
   // R1: expose as `next_run_at` — the same JSON key the engine path uses
-  // (`engine/server/routines.py:_to_routine`) so the UI reads one shape
-  // regardless of backend. `nextRunAt` stays the internal TS field name
+  // so the UI reads one shape. `nextRunAt` stays the internal TS field name
   // (server/routines.ts); only the wire shape is renamed here.
   const { nextRunAt, ...rest } = routine;
   return {
@@ -2603,14 +2523,13 @@ function routineView(botId: string, routine: HarnessRoutine) {
     next_run_at: nextRunAt,
     execution: {
       driverKind,
-      limitations:
-        driverKind && driverKind !== "slafy"
-          ? [
-              "The selected command-line tool must stay installed and signed in on the server.",
-              "A busy bot is not interrupted; the routine records an error and waits for its next run.",
-              "Interactive CLI approvals may wait until a user reconnects.",
-            ]
-          : [],
+      limitations: driverKind
+        ? [
+            "The selected command-line tool must stay installed and signed in on the server.",
+            "A busy bot is not interrupted; the routine records an error and waits for its next run.",
+            "Interactive CLI approvals may wait until a user reconnects.",
+          ]
+        : [],
     },
   };
 }
@@ -2621,7 +2540,11 @@ const RESERVED_INSTANCE_IDS = new Set([
   ...Object.keys(DEFAULT_INSTANCE_CONFIGS),
   ...BUILT_IN_DRIVERS.map((driver) => driver.driverKind),
   "opencodeGo",
+  // multibot: `slafy` i `local` to kind oraz id sprzed usunięcia silnika
+  // Hermesa. Zostają zarezerwowane, żeby stary wpis w config.json nie zderzył
+  // się z nowo zakładanym modelem.
   "slafy",
+  "local",
   "__proto__",
   "prototype",
   "constructor",
@@ -2629,7 +2552,7 @@ const RESERVED_INSTANCE_IDS = new Set([
 
 function customModelsStatus() {
   return Object.entries(cfg.instances ?? {}).flatMap(([id, entry]) =>
-    entry.driver === "slafy" && !RESERVED_INSTANCE_IDS.has(id) && entry.model?.default
+    entry.driver === "openaiCompatible" && !RESERVED_INSTANCE_IDS.has(id) && entry.model?.default
       ? [
           {
             id,
@@ -2648,7 +2571,7 @@ function customModelsStatus() {
 // `tools`; wynik nie udaje gwarancji poprawnego użycia narzędzi przez model.
 async function probeCustomModel(id: string) {
   const entry = cfg.instances?.[id];
-  const baseUrl = entry?.driver === "slafy" ? entry.model?.baseUrl?.replace(/\/$/, "") : "";
+  const baseUrl = entry?.driver === "openaiCompatible" ? entry.model?.baseUrl?.replace(/\/$/, "") : "";
   if (!baseUrl || !entry?.model?.default) return { reachable: false, tools: "unknown", error: "no such local model" };
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -2726,29 +2649,6 @@ function cliInstallSpec(tool: (typeof CLI_TOOLS)[number]) {
   return tool.install ?? null;
 }
 
-function provisionJob() {
-  const target = process.env.OMB_ENGINE_RUNTIME || join(DATA_DIR, "engine-runtime");
-  const scriptInRepo = join(ROOT, "scripts", "provision-engine.mjs");
-  const script = existsSync(scriptInRepo) ? scriptInRepo : join(ROOT, "provision-engine.mjs");
-  const temp = join(target, "tmp");
-  mkdirSync(temp, { recursive: true });
-  return setupJobs.start({
-    key: "engine-provision",
-    kind: "provision",
-    title: "Install bot server",
-    command: process.execPath,
-    args: [script, "--target", target, "--requirements", join(ROOT, "engine", "requirements.txt")],
-    cwd: ROOT,
-    env: {
-      TMP: temp,
-      TEMP: temp,
-      OMB_ENGINE_RUNTIME: target,
-      PLAYWRIGHT_BROWSERS_PATH: join(target, "browsers"),
-      ELECTRON_RUN_AS_NODE: "1",
-    },
-  });
-}
-
 // ── HTTP plumbing ─────────────────────────────────────────────────────
 function json(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body);
@@ -2757,26 +2657,14 @@ function json(res: ServerResponse, status: number, body: unknown) {
   res.end(data);
 }
 
-// multibot: local group roster remains deletable when engine is offline.
-// Engine cleanup is best-effort; a dead engine must not turn a local DELETE
-// into a misleading 502 or leave the sidebar stuck.
-async function deleteGroupRecord(id: string): Promise<{ found: boolean; engineSynced: boolean }> {
+async function deleteGroupRecord(id: string): Promise<{ found: boolean }> {
   const found = groupStore.delete(id);
-  if (!found) return { found: false, engineSynced: false };
-  let engineSynced = false;
-  try {
-    const base = await ensureEngine();
-    const removed = await fetch(`${base}/api/groups/${encodeURIComponent(id)}`, { method: "DELETE" });
-    engineSynced = removed.ok || removed.status === 404;
-  } catch {
-    // The durable harness roster is authoritative for UI deletion; engine
-    // will reconcile on its next successful start.
-  }
+  if (!found) return { found: false };
   broadcast({ kind: "group", deleted: id });
-  return { found: true, engineSynced };
+  return { found: true };
 }
 
-async function deleteBotRecord(bot: BotRecord): Promise<{ engineSynced: boolean }> {
+async function deleteBotRecord(bot: BotRecord): Promise<void> {
   await registry.get(bot.modelSelection.instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
   stopScreenPoller(bot.id);
   harnessRoutines.deleteBot(bot.id);
@@ -2788,64 +2676,25 @@ async function deleteBotRecord(bot: BotRecord): Promise<{ engineSynced: boolean 
       unlinkSync(join(dir, `${bot.threadId}.ndjson`));
     } catch {}
   }
-  let engineSynced = false;
-  if (!engineDisabled()) {
-    try {
-      const base = await ensureEngine();
-      const removed = await fetch(`${base}/api/bots/${encodeURIComponent(engineBotIdFor(bot.threadId))}`, { method: "DELETE", signal: AbortSignal.timeout(5_000) });
-      engineSynced = removed.ok || removed.status === 404;
-    } catch {
-      // Harness data is authoritative; stale engine profile can reconcile later.
-    }
-  }
   broadcast({ kind: "bot.deleted", botId: bot.id, visibility: bot.visibility, ownerId: bot.ownerId, allowedUserIds: bot.allowedUserIds });
-  return { engineSynced };
 }
 
-// multibot: tworzenie grupy nie potrzebuje silnika slafy — rozmowa grupowa i
-// tak idzie przez harness (deliverPeerMessage/askBotAndWait). Przy
-// MULTIBOT_ENGINE=off (telefon) id nadajemy lokalnie, zamiast oddawać 502 z
-// ensureEngine(). Z silnikiem włączonym ścieżka zostaje bez zmian.
-async function createGroupRecord(name: string, engineIds: string[], section?: string): Promise<{ status: number; body: unknown }> {
-  if (engineDisabled()) {
-    const group = groupStore.upsert({ name, bot_ids: engineIds, section });
-    broadcast({ kind: "group", group });
-    return { status: 201, body: group };
-  }
-  const base = await ensureEngine();
-  for (const id of engineIds) {
-    const bot = store.botByThread(threadIdOfEngineBot(id) ?? "");
-    await fetch(`${base}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, name: bot?.name ?? id }) });
-  }
-  const created = await fetch(`${base}/api/groups`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, bot_ids: engineIds }) });
-  const payload = await created.json().catch(() => ({})) as { id?: string };
-  if (!created.ok) return { status: created.status, body: payload };
-  const group = groupStore.upsert({ id: String(payload.id), name, bot_ids: engineIds, section });
+// multibot: grupa mieszka w harnessie — rozmowa grupowa idzie przez
+// deliverPeerMessage/askBotAndWait, a skład i transkrypt trzyma groupStore.
+async function createGroupRecord(name: string, memberIds: string[], section?: string): Promise<{ status: number; body: unknown }> {
+  const group = groupStore.upsert({ name, bot_ids: memberIds, section });
   broadcast({ kind: "group", group });
   return { status: 201, body: group };
 }
 
 // multibot 0.1.46: dodanie bota do istniejącej grupy (drag & drop w sidebarze).
-// Skład mieszka w groupStore (harness jest autorytatywny dla UI), a silnik
-// dostaje PUT najlepiej wysiłkowo — jak przy tworzeniu i usuwaniu grupy.
 async function addGroupMemberRecord(id: string, botId: string): Promise<{ status: number; body: unknown }> {
   const group = groupStore.get(id);
   const bot = store.bot(botId);
   if (!group || !bot) return { status: 404, body: { error: "no such group or bot" } };
-  const engineId = engineBotIdFor(bot.threadId);
-  if (group.bot_ids.includes(engineId)) return { status: 200, body: group };
-  const engineIds = [...group.bot_ids, engineId];
-  if (!engineDisabled()) {
-    try {
-      const base = await ensureEngine();
-      await fetch(`${base}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: engineId, name: bot.name }) });
-      const updated = await fetch(`${base}/api/groups/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ bot_ids: engineIds }) });
-      if (!updated.ok) return { status: updated.status, body: await updated.json().catch(() => ({})) };
-    } catch {
-      // silnik offline — skład i tak zostaje w harnessie (wzorzec createGroupRecord)
-    }
-  }
-  const updated = groupStore.upsert({ id: group.id, name: group.name, bot_ids: engineIds });
+  const memberId = groupMemberId(bot.threadId);
+  if (group.bot_ids.includes(memberId)) return { status: 200, body: group };
+  const updated = groupStore.upsert({ id: group.id, name: group.name, bot_ids: [...group.bot_ids, memberId] });
   broadcast({ kind: "group", group: updated });
   return { status: 200, body: updated };
 }
@@ -3344,21 +3193,6 @@ const server = createServer(async (req, res) => {
             console.log(`[multibot] bot ${created.id} (${profile.name}) created by bot ${fromBotId} (${creator?.name ?? "unknown"}) — intent: ${rawIntent.slice(0, 120)}`);
             if (access === "full") workspace.setAccess(created.id, "full");
             broadcast({ kind: "bot", bot: updated });
-            if (!engineDisabled()) {
-              void ensureEngine().then(async (baseUrl) => {
-                try {
-                  const engineBotId = engineBotIdFor(created.threadId);
-                  const payload = { id: engineBotId, name: profile.name, title: profile.title ?? "", description: profile.description ?? "", createdByBotId: fromBotId, creationContext };
-                  const r = await fetch(`${baseUrl}/api/bots`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(5000) });
-                  if (!r.ok && r.status !== 409) throw new Error(`engine create ${r.status}`);
-                  if (r.status === 409) {
-                    await fetch(`${baseUrl}/api/bots/${encodeURIComponent(engineBotId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: payload.name, title: payload.title, description: payload.description, createdByBotId: fromBotId, creationContext }), signal: AbortSignal.timeout(5000) }).catch(() => {});
-                  }
-                } catch (e) {
-                  console.warn(`[multibot] engine sync for created bot ${created.id} failed (graceful):`, e instanceof Error ? e.message : String(e));
-                }
-              }).catch(() => {});
-            }
             return json(res, 201, updated);
           }
           case "agent.update": {
@@ -3391,8 +3225,8 @@ const server = createServer(async (req, res) => {
             if (!target || !canBotContact(caller, target)) return json(res, 404, { error: "no such target bot" });
             if (target.id === fromBotId) return json(res, 403, { error: "a bot cannot delete itself" });
             if (caller.chiefOfStaff && (target.section?.trim() ?? "") !== (caller.section?.trim() ?? "")) return json(res, 403, { error: "chief delegation is limited to its section" });
-            const result = await deleteBotRecord(target);
-            return json(res, 200, { ok: true, ...result });
+            await deleteBotRecord(target);
+            return json(res, 200, { ok: true });
           }
           case "groups.list": {
             return json(res, 200, groupStore.list().filter((group) => group.bot_ids.every((id) => canBotContact(caller, store.bot(id)))));
@@ -3404,7 +3238,7 @@ const server = createServer(async (req, res) => {
             if (!group || !group.bot_ids.every((botId) => canBotContact(caller, store.bot(botId)))) return json(res, 404, { error: "no such group" });
             const removed = await deleteGroupRecord(id);
             return removed.found
-              ? json(res, 200, { ok: true, engineSynced: removed.engineSynced })
+              ? json(res, 200, { ok: true })
               : json(res, 404, { error: "no such group" });
           }
           case "device.info": return json(res, 200, await deviceInfo());
@@ -3412,8 +3246,8 @@ const server = createServer(async (req, res) => {
             requireFull();
             const botIds: string[] = Array.isArray(body.bot_ids) ? (body.bot_ids as unknown[]).map(String) : [];
             if (botIds.some((id) => !canBotContact(caller, store.bot(id)))) return json(res, 404, { error: "no such target bot" });
-            const engineIds = botIds.map((id) => engineBotIdFor(store.bot(id)?.threadId ?? id));
-            const result = await createGroupRecord(String(body.name ?? "Group"), engineIds);
+            const memberIds = botIds.map((id) => groupMemberId(store.bot(id)?.threadId ?? id));
+            const result = await createGroupRecord(String(body.name ?? "Group"), memberIds);
             return json(res, result.status, result.body);
           }
           // multibot: grupa to jeden pokój i jeden budżet. Wiadomość idzie do
@@ -3427,7 +3261,7 @@ const server = createServer(async (req, res) => {
             const message = String(body.message ?? "").trim();
             if (!message) return json(res, 422, { error: "message required" });
             const groupBots = group.bot_ids
-              .map((engineId) => store.botByThread(threadIdOfEngineBot(engineId) ?? ""))
+              .map((memberId) => store.botByThread(threadIdOfGroupMember(memberId) ?? ""))
               .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot) && bot?.id !== fromBotId);
             const mentioned = mentionedBots(message, groupBots);
             const targets = mentioned.length ? mentioned : groupBots;
@@ -3538,37 +3372,6 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    // multibot: import profile and create matching harness bot in one request.
-    // The engine identity is deterministic, so Memory/Routines/Skills resolve
-    // to the copied profile immediately after import.
-    if (method === "POST" && path === "/api/profiles/import") {
-      const body = await readBody(req);
-      const source = String(body.source ?? "").trim();
-      const name = String(body.name ?? "").trim();
-      if (!source) return json(res, 400, { error: "profile source required" });
-      const bot = store.createBot();
-      store.patchBot(bot.id, {
-        ...(name ? { name } : {}),
-        modelSelection: { instanceId: "local", model: "hermes-agent" },
-        ownerId: actor?.uid,
-        visibility: "team",
-      });
-      try {
-        const baseUrl = await ensureEngine();
-        await importExistingEngineProfile(
-          baseUrl,
-          { source, id: name || "imported", name: name || "Imported profile" },
-          engineBotIdFor(bot.threadId),
-        );
-      } catch (error) {
-        store.deleteBot(bot.id);
-        return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
-      }
-      const created = { ...store.bot(bot.id)!, messages: store.messagesFor(bot.threadId) };
-      broadcast({ kind: "bot", bot: created });
-      return json(res, 201, { bot: created });
-    }
-
     // One server = one workspace. Members share team-visible bots and sections;
     // private bots are filtered by the access gate below.
     const botPath = path.match(/^\/api\/bots\/([^/]+)/);
@@ -3588,22 +3391,9 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { environment: fleetEnvironmentForActor(actor) });
     }
     let m: RegExpMatchArray | null;
-    // multibot: durable group rooms. Engine owns execution; harness owns the
-    // user-facing roster and transcript so groups survive reload/restart.
+    // multibot: durable group rooms — the harness owns roster, membership and
+    // transcript, so groups survive reload/restart.
     if (method === "GET" && path === "/api/groups") {
-      const local = groupStore.list().filter((group) => groupVisible(group, actor));
-      if (local.length || groupStore.hasLocalRoster()) return json(res, 200, local);
-      try {
-        const remote = await fetch(`${await ensureEngine()}/api/groups`);
-        if (remote.ok) {
-          const groups = await remote.json() as Array<{ id: string; name: string; bot_ids: string[] }>;
-          // multibot: pola przepisujemy po jednym — silnik nie wie o sekcjach,
-          // a `section: null` w jego odpowiedzi skasowałby sekcję z cienia.
-          for (const group of groups) {
-            groupStore.upsert({ id: group.id, name: group.name, bot_ids: group.bot_ids ?? [] });
-          }
-        }
-      } catch {}
       return json(res, 200, groupStore.list().filter((group) => groupVisible(group, actor)));
     }
     if (method === "POST" && path === "/api/groups") {
@@ -3614,11 +3404,11 @@ const server = createServer(async (req, res) => {
       if (!name || !botIds.length) return json(res, 422, { error: "group needs at least one bot" });
       if (!botSetVisible(botIds, actor)) return json(res, 404, { error: "no such bot" });
       try {
-        const engineIds = botIds.map((id) => engineBotIdFor(store.bot(id)!.threadId));
+        const memberIds = botIds.map((id) => groupMemberId(store.bot(id)!.threadId));
         // multibot: grupa mieszka w sekcji tak samo jak bot — osobnej sekcji
         // „GRUPY" już nie ma, więc nazwa przychodzi z formularza tworzenia.
         const section = typeof body.section === "string" ? body.section.trim().slice(0, 60) : "";
-        const result = await createGroupRecord(name, engineIds, section || undefined);
+        const result = await createGroupRecord(name, memberIds, section || undefined);
         return json(res, result.status, result.body);
       } catch (error) {
         return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
@@ -3648,7 +3438,7 @@ const server = createServer(async (req, res) => {
     if (m && method === "DELETE") {
       const removed = await deleteGroupRecord(m[1]);
       return removed.found
-        ? json(res, 200, { ok: true, engineSynced: removed.engineSynced })
+        ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such group" });
     }
     // multibot: zmiana nazwy grupy (port z OpenMausBot #343) — harnessowy
@@ -3663,20 +3453,6 @@ const server = createServer(async (req, res) => {
       if (hasName && !name) return json(res, 400, { error: "room name must be a non-empty string" });
       if (name.length > 100) return json(res, 400, { error: "room name must be at most 100 characters" });
       if (!hasName && !hasSection) return json(res, 400, { error: "room name must be a non-empty string" });
-      let engineSynced = true;
-      if (hasName) {
-        try {
-          const base = await ensureEngine();
-          const remote = await fetch(`${base}/api/groups/${encodeURIComponent(m[1])}`, {
-            method: "PATCH",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ name }),
-          });
-          engineSynced = remote.ok || remote.status === 404;
-        } catch {
-          engineSynced = false; // silnik offline — nazwa i tak zostaje w harnessie
-        }
-      }
       let group = hasName ? groupStore.rename(m[1], name) : groupStore.get(m[1]);
       if (group && hasSection) {
         group = groupStore.upsert({
@@ -3686,12 +3462,11 @@ const server = createServer(async (req, res) => {
           section: (body.section as string).trim().slice(0, 60),
         });
       }
-      if (!group && !engineSynced) return json(res, 404, { error: "no such group" });
-      return json(res, 200, { ok: true, group, engineSynced });
+      if (!group) return json(res, 404, { error: "no such group" });
+      return json(res, 200, { ok: true, group });
     }
-    // multibot: mixed-provider group rooms. Engine stores membership/shadow
-    // ids; harness owns actual turns so Claude/Codex/ACP bots answer through
-    // their selected provider instead of being silently replaced by engine.
+    // multibot: mixed-provider group rooms. The harness owns membership and
+    // turns, so Claude/Codex/ACP bots each answer through their own provider.
     m = path.match(/^\/api\/groups\/([\w-]+)\/chat$/);
     if (m && method === "POST") {
       const gid = m[1];
@@ -3701,22 +3476,13 @@ const server = createServer(async (req, res) => {
       try {
         // multibot: skład grupy bierzemy z trwałego zapisu harnessu — to ta sama
         // lista, którą pokazuje GET /api/groups, więc każda grupa widoczna w UI
-        // da się otworzyć. Tury i tak liczy harness. Silnika pytamy dopiero
-        // wtedy, gdy harness nic o tym id nie wie (grupa założona poza nim);
-        // pytanie go jako pierwszego zabijało grupy sprzed tej zmiany (404) i
-        // czat grupowy przy MULTIBOT_ENGINE=off (502).
-        let group: { bot_ids?: unknown[]; name?: unknown } | null = groupStore.get(gid);
-        if (!group) {
-          if (engineDisabled()) return json(res, 404, { error: "no such group" });
-          const base = await ensureEngine();
-          const groupResponse = await fetch(`${base}/api/groups/${encodeURIComponent(gid)}`);
-          if (!groupResponse.ok) return json(res, groupResponse.status === 404 ? 404 : 502, { error: "no such group" });
-          group = await groupResponse.json() as { bot_ids?: unknown[] };
-        }
+        // da się otworzyć.
+        const group: { bot_ids?: unknown[]; name?: unknown } | null = groupStore.get(gid);
+        if (!group) return json(res, 404, { error: "no such group" });
         const durable = groupStore.get(gid) ?? groupStore.upsert({ id: gid, name: String(group.name ?? "Group"), bot_ids: (group.bot_ids ?? []).map(String) });
         if (!groupVisible(durable, actor)) return json(res, 404, { error: "no such group" });
         const roster = (group.bot_ids ?? [])
-          .map((rawId) => store.botByThread(threadIdOfEngineBot(String(rawId)) ?? String(rawId)))
+          .map((rawId) => store.botByThread(threadIdOfGroupMember(String(rawId)) ?? String(rawId)))
           .filter((bot): bot is BotRecord => Boolean(bot))
           // Stable order, chief of staff first: someone has to read the message
           // before the others, and that is the job the chief already has.
@@ -3788,13 +3554,6 @@ const server = createServer(async (req, res) => {
       // bootSelection was resolved once at startup; rescanning every provider
       // here made the first screen wait on CLI processes.
       store.patchBot(bot.id, { modelSelection: bootSelection, ownerId: actor?.uid, visibility });
-      // multibot (U2): lokalny profil silnika zakładamy w tle przy tworzeniu
-      // bota, żeby pierwsza wiadomość nie płaciła kosztu inicjalizacji.
-      if (bootSelection.instanceId === "local" && !process.env.VITEST) {
-        void configureEngineComputer(bot.threadId, "own").catch((error) =>
-          console.warn(`[multibot] engine prewarm failed for ${bot.id}:`, error instanceof Error ? error.message : error),
-        );
-      }
       // multibot: nowy bot odzywa się PIERWSZY i mówi, co naprawdę potrafi
       // TERAZ. Rozgrzewka CLI nic nie mówiła użytkownikowi (patrzył w pusty
       // ekran), a bot dowiadywał się o swoich brakach dopiero, gdy pierwsze
@@ -3909,8 +3668,8 @@ const server = createServer(async (req, res) => {
     if (m && method === "DELETE") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      const result = await deleteBotRecord(bot);
-      return json(res, 200, { ok: true, ...result });
+      await deleteBotRecord(bot);
+      return json(res, 200, { ok: true });
     }
     m = path.match(/^\/api\/devices\/([\w-]+)\/push$/);
     if (m && method === "POST") {
@@ -4289,18 +4048,7 @@ const server = createServer(async (req, res) => {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
       if (method === "GET" && !m[2]) return json(res, 200, workspace.approvalRules(m[1]));
       if (method === "DELETE" && m[2]) {
-        const rule = workspace.approvalRules(m[1]).find((item) => item.id === m![2]);
         const ok = workspace.removeApprovalRule(m[1], m[2]);
-        if (ok && rule?.provider === "slafy" && rule.key.startsWith("native:")) {
-          try {
-            const nativeKey = JSON.parse(rule.key.slice("native:".length));
-            if (typeof nativeKey === "string") {
-              const bot = store.bot(m[1])!;
-              const base = await ensureEngine();
-              await fetch(`${base}/api/bots/${encodeURIComponent(engineBotIdFor(bot.threadId))}/approvals/allowlist/${encodeURIComponent(nativeKey)}`, { method: "DELETE" });
-            }
-          } catch {}
-        }
         if (ok) broadcast({ kind: "workspace", botId: m[1], resource: "approval-rules" });
         return ok ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such rule" });
       }
@@ -4409,8 +4157,8 @@ const server = createServer(async (req, res) => {
       return json(res, 405, { error: "method not allowed" });
     }
 
-    // Kroki nagrania (z `POST /api/engine/bots/<id>/teach/stop`) → skill, tym
-    // samym providerem, co reszta pracy bota. Patrz `teachSynthesisPrompt`.
+    // Lista kroków → skill, tym samym providerem, co reszta pracy bota.
+    // Patrz `teachSynthesisPrompt`.
     m = path.match(/^\/api\/bots\/([\w-]+)\/teach\/synthesize$/);
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
@@ -4428,24 +4176,6 @@ const server = createServer(async (req, res) => {
       // niej, więc użytkownik tracił kilka minut pracy modelu na literówkę.
       if (wanted && workspace.skills(bot.id).some((skill) => skill.name.toLowerCase() === wanted.toLowerCase())) {
         return json(res, 409, { error: "skill already exists" });
-      }
-      // Bot silnika (driver `slafy`) ma mózg po stronie Hermesa: `system` do
-      // silnika nie jedzie (patrz `startTurn`), więc skill z `workspace` nigdy
-      // by do niego nie dotarł. Dla niego zostaje STARA ścieżka — silnik zapisze
-      // SKILL.md, który agent naprawdę ładuje, i tam Hermes providera ma.
-      if (registry.get(bot.modelSelection.instanceId)?.driverKind === "slafy") {
-        const base = await ensureEngine();
-        const upstream = await fetch(
-          `${base}/api/bots/${encodeURIComponent(engineBotIdFor(bot.threadId))}/teach/synthesize`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ recording_id: String(body?.recording_id ?? ""), steps, ...(wanted ? { name: wanted } : {}) }),
-            signal: AbortSignal.timeout(300_000),
-          },
-        );
-        const out = await upstream.json().catch(() => ({}));
-        return json(res, upstream.status, out);
       }
       // Izolowana nitka jak przy delegacji: prompt i odpowiedź nie zaśmiecają
       // czatu, a `transcript: []` trzyma tę turę z dala od historii wątku.
@@ -4824,8 +4554,10 @@ const server = createServer(async (req, res) => {
       if (body?.server === true && process.env.OMB_PACKAGED_EXE) {
         await registerWindowsServerAutostart(process.env.OMB_PACKAGED_EXE);
       }
-      const job = provisionJob();
-      return json(res, 202, { id: job.id, job });
+      // Silnik Hermesa był jedyną rzeczą, którą ta trasa dociągała; po jego
+      // usunięciu zostaje sama rejestracja autostartu serwera 24/7, która nic
+      // nie pobiera — więc nie ma czego śledzić przez /api/progress.
+      return json(res, 202, { ok: true });
     }
     m = path.match(/^\/api\/progress\/([\w-]+)$/);
     if (m && method === "GET") {
@@ -4888,7 +4620,7 @@ const server = createServer(async (req, res) => {
         return json(res, 400, { error: "apiKey must be a string" });
       }
       const existing = cfg.instances?.[id];
-      if (existing && existing.driver !== "slafy") return json(res, 409, { error: "instance id already used" });
+      if (existing && existing.driver !== "openaiCompatible") return json(res, 409, { error: "instance id already used" });
       const apiKey = body.apiKey === undefined ? existing?.environment?.OPENAI_API_KEY : body.apiKey.trim();
       const environment = {
         ...(existing?.environment ?? {}),
@@ -4898,7 +4630,7 @@ const server = createServer(async (req, res) => {
       const instances = {
         ...(cfg.instances ?? {}),
         [id]: {
-          driver: "slafy",
+          driver: "openaiCompatible",
           displayName,
           environment,
           model: { default: model, baseUrl },
@@ -4913,7 +4645,7 @@ const server = createServer(async (req, res) => {
     }
     if (m && method === "DELETE") {
       const existing = cfg.instances?.[m[1]];
-      if (!existing || existing.driver !== "slafy" || RESERVED_INSTANCE_IDS.has(m[1])) {
+      if (!existing || existing.driver !== "openaiCompatible" || RESERVED_INSTANCE_IDS.has(m[1])) {
         return json(res, 404, { error: "no such custom model" });
       }
       const instances = { ...(cfg.instances ?? {}) };
@@ -5178,15 +4910,14 @@ const server = createServer(async (req, res) => {
 
     // The bot's terminal. Same filesystem as its desktop and browser.
     //
-    // The caller may be the engine's computer MCP, which only knows its own
-    // `mb-<threadId>` id — accept either identity rather than making the MCP
-    // guess the harness's.
+    // A caller may know the bot only by its `mb-<threadId>` room id (the shape
+    // group membership and the UI speak) — accept either identity.
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/exec$/);
     if (m && method === "POST") {
-      const asEngineThread = threadIdOfEngineBot(m[1]);
+      const asMemberThread = threadIdOfGroupMember(m[1]);
       const botId = store.bot(m[1])
         ? m[1]
-        : (asEngineThread ? store.botByThread(asEngineThread)?.id : undefined);
+        : (asMemberThread ? store.botByThread(asMemberThread)?.id : undefined);
       if (!botId) return json(res, 404, { error: "no such bot" });
       const body = await readBody(req);
       const command = String(body.command ?? "");
@@ -5228,11 +4959,25 @@ const server = createServer(async (req, res) => {
   }
 });
 
-// ── multibot: silnik — generyczny proxy `/api/engine/*` + pipe WS ──────
-// Wszystkie trasy silnika (łącznie z przelotką BYOK z F2, pod tym samym URL-em)
-// obsługuje `server/engine/proxy.ts`; montuje się opakowaniem listenera, więc
-// handler wyżej zostaje nietknięty.
-mountEngineProxy(server, { harnessWebhook: harnessWebhookInbound });
+// multibot: `POST /webhooks/<id>` odpala rutynę webhookową. Siedzi PRZED
+// bramką auth celowo: autoryzacją jest HMAC sekretu rutyny, nie token dostępu,
+// bo adres webhooka podaje się obcym systemom. Owijamy listener, bo główny
+// handler jedzie już za `mountAuth`.
+{
+  const app = server.listeners("request")[0] as (req: IncomingMessage, res: ServerResponse) => void;
+  server.removeAllListeners("request");
+  server.on("request", (req, res) => {
+    const hook = req.method === "POST"
+      ? /^\/webhooks\/([^/]+)$/.exec(new URL(req.url ?? "/", "http://127.0.0.1").pathname)
+      : null;
+    if (!hook) return app(req, res);
+    void harnessWebhookInbound(req, res, decodeURIComponent(hook[1]))
+      .catch(() => false) // padnięty handler nie może wywrócić żądania
+      .then((handled) => {
+        if (!handled && !res.headersSent) json(res, 404, { error: "no such webhook" });
+      });
+  });
+}
 // multibot (H4): the bot's screen. Mounted before auth so one gate covers it.
 mountVncUpgrade(server, (req, botId) => canAccessBot(store.bot(botId), actorForRequest(req)));
 // Kanał zdarzeń po WS — ta sama ścieżka co SSE, ta sama bramka auth (montaż
@@ -5255,8 +5000,8 @@ mountEventsWs(server, (url, send, req) => {
   };
 });
 
-// Auth mounts after the proxy so one wrapper covers harness HTTP, proxied
-// engine HTTP, and both engine WS upgrade paths.
+// Auth mounts after the WS upgrades so one wrapper covers harness HTTP and
+// every WS upgrade path.
 let revokeAuthSessions = (_except?: import("node:stream").Duplex) => {};
 revokeAuthSessions = mountAuth(
   server,
@@ -5273,24 +5018,6 @@ revokeAuthSessions = mountAuth(
     return Boolean(identityActorForRequest(req) || refreshSession || (id && verifyDeviceSession(id)));
   },
 ).revokeSessions;
-
-// ── multibot: uwaga bota silnika (D7) ─────────────────────────────────
-// Silnik ogłasza `attention` po WS (bot czeka na login/captcha/odpowiedź);
-// harness zamienia to na `needsAttention` w store i rozsyła jak każdą inną
-// zmianę bota. Gaśnie przy następnej turze usera — patrz `startTurn`.
-watchEngineAttention({
-  engineBotIds: () => store.bots.map((b) => engineBotIdFor(b.threadId)),
-  onAttention: (engineBotId, reason) => {
-    const threadId = threadIdOfEngineBot(engineBotId);
-    const bot = threadId ? store.botByThread(threadId) : null;
-    if (!bot || (bot.needsAttention ?? null) === reason) return;
-    store.patchBot(bot.id, { needsAttention: reason });
-    broadcast({ kind: "bot", bot: store.bot(bot.id) });
-    // multibot (U28): telefon dostaje push, gdy bot czegoś chce (login, captcha,
-    // decyzja). Odporność: błąd wysyłki nie przerywa obsługi uwagi.
-    pushForBot(bot.id, "attention", reason || "Bot czeka na Twoją decyzję.");
-  },
-});
 
 // multibot (H1): every bot has a computer, so boot makes that true again.
 // Containers survive a harness restart on their own restart policy; this only

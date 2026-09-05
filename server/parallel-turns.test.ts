@@ -97,7 +97,6 @@ describe("parallel turns + coalesced user messages (fake ACP fleet)", () => {
         OMB_ONBOARDING_TURN: "0",
         OMB_HOST: "127.0.0.1",
         MULTIBOT_COMPUTER: "off",
-        ENGINE_URL: "http://127.0.0.1:1",
         // krótkie okno sklejania — test nie ma czekać domyślnych 1,5 s na turę
         OMB_TURN_DEBOUNCE_MS: String(DEBOUNCE_MS),
         FAKE_ACP_TURN_MS: String(TURN_MS),

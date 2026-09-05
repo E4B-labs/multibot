@@ -24,7 +24,6 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { approvalRule } from "../approval-rules.ts";
 import { augmentedPath, resolveCliSpawn } from "../env-path.ts";
-import { COMPUTER_TOOLS_VERSION } from "../engine/computer-mcp.ts";
 import { AGENTS_TOOLS_VERSION } from "../turn-tools.ts";
 import { COMPUTER_MCP_TOOLS } from "../turn-tools.ts"; // multibot (A4): whitelist narzędzi komputera
 import { killTree } from "../kill-tree.ts";
@@ -177,6 +176,13 @@ export function codexMcpConfig(turn: SendTurnInput): { config?: { mcp_servers: R
 // stronie codeksa przy każdej zmianie zestawu (i przy każdym bumpie
 // AGENTS_TOOLS_VERSION) — to bolało, więc świeży wątek dostaje teraz
 // `turn.transcript` w pierwszej turze (patrz `historyBlock` w ./history.ts).
+/** Wersja zestawu narzędzi komputera bota, wpisywana w klucz kursora Codeksa.
+ * Mieszkała przy serwerze MCP komputera (silnik Hermesa); po jego usunięciu nikt
+ * `integrations.localComputer` nie ustawia, ale plumbing driverów zostaje — gdy
+ * wróci serwer komputera w TS, PODNIEŚ tę liczbę, żeby wątki nie wznowiły się ze
+ * starym zestawem narzędzi. */
+export const COMPUTER_TOOLS_VERSION = 5;
+
 export function cursorMcpKey(cfg: ReturnType<typeof codexMcpConfig>): string {
   return Object.keys(cfg.config?.mcp_servers ?? {})
     // Codex zapamiętuje w wątku także LISTĘ narzędzi serwera, nie tylko sam

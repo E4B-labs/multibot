@@ -29,7 +29,7 @@ describe("Windows one-command server installer", () => {
     expect(plan.task.createArgs.join(" ")).not.toMatch(/HIGHEST|\/RU\s+SYSTEM/i);
     expect(plan.task.createArgs.at(-1)).toBe(`"${packagedExe}" --server-only`);
     expect(plan.task.sourceCreateArgs.at(-1)).toContain("-WindowStyle Hidden");
-    expect(plan.runtimeDir.startsWith("D:\\tmp\\")).toBe(true);
+    expect(plan.tempDir.startsWith("D:\\tmp\\")).toBe(true);
     expect(existsSync(home)).toBe(false);
     expect(existsSync(localAppData)).toBe(false);
   });
@@ -42,12 +42,9 @@ describe("Windows one-command server installer", () => {
     expect(main).toContain('OMB_HOST: "127.0.0.1"');
     expect(main).toContain('OMB_SERVER_SERVICE: SERVER_ONLY ? "1" : ""');
     expect(main).toContain("body?.service === true");
-    expect(main).toContain("await provisionEngineRuntime()");
     expect(main).toContain("#access_token=");
     expect(auth).toContain('history.replaceState(null, ""');
     expect(main).toMatch(/if \(SERVER_ONLY\)[\s\S]+startServerPackaged\(\)[\s\S]+return;/);
     expect(builder).toContain("from: dist-server");
-    expect(builder).toContain("from: scripts/provision-engine.mjs");
-    expect(builder).toContain("from: engine/requirements.txt");
   });
 });
