@@ -17,13 +17,13 @@ function rule(selector: string): string {
 describe("menu akcji w nagłówku czatu", () => {
   it("niesie wszystkie funkcje, bez powtórzeń", () => {
     expect([...CHAT_HEADER_ACTIONS].sort()).toEqual(
-      ["computer", "find", "inspector", "mail", "routines", "skills", "team"],
+      ["computer", "find", "inspector", "rooms", "routines", "skills", "team"],
     );
   });
 
   it("kolejność jest ta sama co na telefonie", () => {
     expect([...CHAT_HEADER_ACTIONS]).toEqual(
-      ["computer", "routines", "skills", "find", "inspector", "mail", "team"],
+      ["computer", "routines", "skills", "find", "inspector", "rooms", "team"],
     );
   });
 

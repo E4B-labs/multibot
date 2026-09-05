@@ -401,7 +401,7 @@ describe("comms e2e (fake ACP fleet)", () => {
 
 
   it(
-    "delivers asynchronous mail to a fresh target turn and keeps it durable",
+    "delivers an asynchronous peer message to a fresh target turn and keeps it in the room",
     async () => {
       const senderSelection = { instanceId: "grokMailSend", model: "fake-model" };
       // Both sides send mail. This covers the real round trip A -> B -> A,
@@ -424,13 +424,28 @@ describe("comms e2e (fake ACP fleet)", () => {
         await new Promise((r) => setTimeout(r, 250));
       }
 
-      const thread = (await api("GET", "/api/mail")).body.threads.find((t: any) => t.messages?.some((m: any) => m.text === "async ping"));
-      expect(thread).toBeTruthy();
+      // The room is the only ledger: both directions land in one transcript.
+      // The fleet is chatty, so pin the room by its two bots, not by text alone.
+      // The reply is dispatched after the target turn completes, so poll for it
+      // rather than reading the ledger the moment the target stops being busy.
+      let room: any;
+      const roomDeadline = Date.now() + 10_000;
+      for (;;) {
+        room = (await api("GET", "/api/rooms")).body.rooms.find(
+          (r: any) =>
+            r.bot_ids?.includes(sender.id)
+            && r.bot_ids?.includes(receiver.id)
+            && r.transcript?.some((m: any) => m.from === sender.id && m.text === "async ping"),
+        );
+        if (room?.transcript.some((m: any) => m.from === receiver.id && m.text === "async ping")) break;
+        if (Date.now() > roomDeadline) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      expect(room).toBeTruthy();
       // Round trip, not an exact count: the fake mails on EVERY turn, so a
-      // reply that starts one more turn legitimately adds one more letter.
-      expect(thread.messages.length).toBeGreaterThanOrEqual(2);
-      expect(thread.messages[0]).toMatchObject({ from: sender.id, to: receiver.id, text: "async ping", status: "delivered" });
-      expect(thread.messages.some((m: any) => m.from === receiver.id && m.to === sender.id && m.text === "async ping" && m.status === "delivered")).toBe(true);
+      // reply that starts one more turn legitimately adds one more line.
+      expect(room.transcript.length).toBeGreaterThanOrEqual(2);
+      expect(room.transcript.some((m: any) => m.from === receiver.id && m.text === "async ping")).toBe(true);
       expect(receiverBot.messages.some((m: any) => m.text?.includes("[Message from @Mail Sender"))).toBe(true);
       const senderBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === sender.id);
       expect(senderBot.messages.some((m: any) => m.text?.includes("[Message from @Mail Receiver"))).toBe(true);

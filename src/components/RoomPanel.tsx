@@ -2,8 +2,8 @@
 // clicking the "X texted Y" chip in a conversation; the user watches the bots
 // work on the task together but cannot post. Live updates ride the SSE "room"
 // frames into store.roomOpen.
-import { useEffect, useRef, useState, Fragment } from "react";
-import { ArrowLeftRight, Eye, Loader2, Users, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Eye, Loader2, Users, X } from "lucide-react";
 import { useStore, formatTime, type Room } from "@/state/store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { formatPeerEnvelope } from "@/lib/peerEnvelope";
@@ -81,22 +81,18 @@ export function RoomPanel() {
       <div data-shell-header className="flex items-center px-5 py-3">
         <div className="flex min-w-0 items-center gap-2.5">
           {members.length > 0 ? (
-            // multibot 0.1.44: nagłówek "[avatar] Klaus ⇄ [avatar] Motion" —
-            // awatar + nazwa każdego bota, strzałka między nimi; pokój z botem,
-            // który zniknął, pokazuje tylko żywych zamiast surowego UUID.
+            // Any number of bots: stacked avatars plus the names as one list.
+            // The old header hard-coded a pair ("[avatar] A ⇄ [avatar] B") and
+            // hid everyone past the second, which a three-bot room needs.
             <div className="flex min-w-0 items-center gap-2">
-              {members.slice(0, 2).map((bot, i) => (
-                <Fragment key={bot.id}>
-                  {i > 0 && <ArrowLeftRight size={14} className="shrink-0 text-ink-secondary" />}
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={stateForBot(bot)} size={24} animated={false} />
-                    <span className="truncate text-[15px] font-semibold text-ink">{botDisplayName(bot, polish ? "pl" : "en")}</span>
-                  </span>
-                </Fragment>
-              ))}
-              {members.length > 2 && (
-                <span className="shrink-0 text-[12px] text-ink-secondary">+{members.length - 2}</span>
-              )}
+              <span className="flex shrink-0 items-center -space-x-2">
+                {members.slice(0, 5).map((bot) => (
+                  <MausAvatar key={bot.id} color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={stateForBot(bot)} size={24} animated={false} />
+                ))}
+              </span>
+              <span className="truncate text-[15px] font-semibold text-ink">
+                {members.map((bot) => botDisplayName(bot, polish ? "pl" : "en")).join(" · ")}
+              </span>
             </div>
           ) : (
             <div className="flex min-w-0 items-center gap-2">
@@ -181,10 +177,17 @@ export function RoomPanel() {
                 </div>
               );
             })}
-            {room.status === "running" && (
+            {room.status === "running" ? (
               <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
                 <Loader2 size={12} className="animate-spin" />
                 {polish ? "Boty pracują…" : "The bots are working…"}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-hairline/40 bg-card/60 px-3.5 py-2.5 text-[12.5px] text-ink-secondary">
+                <div className="mb-0.5 font-semibold text-ink">{polish ? "Raport dla właściciela" : "Owner report"}</div>
+                {polish
+                  ? `Rozmowa ${statusLabel}. Podsumowanie trafiło do czatu ${nameOf(room.ownerBotId)}.`
+                  : `This room is ${statusLabel}. The summary went to ${nameOf(room.ownerBotId)}'s chat.`}
               </div>
             )}
           </div>

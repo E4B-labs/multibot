@@ -901,28 +901,20 @@ Bot może uznać, że zadanie wymaga specjalisty. Może wtedy:
 Komunikacja jest kontrolowana przez harness. Bot nie otwiera samodzielnie
 nieautoryzowanego połączenia sieciowego do innego procesu.
 
-### 11.2. Agent mail
+### 11.2. Wiadomości bot-do-bota
 
-Agent mail to trwały kanał 1:1 między dwoma botami. Każda wiadomość ma:
+Wiadomość od bota do bota to tura w pokoju, nie osobna skrzynka. Każde
+`send_bot_mail`, `ask_bot`, `start_collab`, wiadomość grupowa i `@mention`
+przechodzi przez `deliverPeerMessage`, dopisuje się do transkryptu pokoju i
+trafia na główny wątek adresata. Pojedynczy tekst ma limit `8 000` znaków.
 
-- ID;
-- nadawcę;
-- odbiorcę;
-- tekst;
-- czas;
-- status `queued`, `delivered` albo `failed`;
-- depth;
-- opcjonalne `replyToId`.
+Doręczenie jest asynchroniczne. Jeśli odbiorca jest zajęty w turze
+użytkownika, wiadomość jest wsterowana w trwającą turę albo kolejkowana.
+Odpowiedź może obudzić odbiorcę w nowej turze.
 
-Wątek jest identyfikowany przez uporządkowaną parę botów. Mail przechowuje do
-`500` ostatnich wiadomości w wątku, a pojedynczy tekst ma limit `8 000`
-znaków.
-
-Mail działa asynchronicznie. Jeśli odbiorca jest zajęty w turze użytkownika,
-wiadomość trafia do FIFO queue. Odpowiedź może obudzić odbiorcę w nowej turze.
-
-Mail jest zapisywany na dysku w `bot-mail.json`, więc lista i historia nie
-znikają po reloadzie aplikacji ani restarcie serwera.
+`read_bot_mail` (nazwa została dla starszych promptów) czyta wiadomości,
+które inne boty napisały w pokojach tego bota od jego ostatniego odczytu.
+Kursor odczytu żyje w procesie harness; historia jest w `rooms.json`.
 
 ### 11.3. Pokoje współpracy
 
@@ -1415,7 +1407,6 @@ Najważniejsze magazyny harness:
 - `config.json` — konfiguracja instalacji, providerów, auth i workspace;
 - `workspace.json` — pamięć workspace, skills, autonomy, permissions,
   approval rules i usage;
-- `bot-mail.json` — trwałe wątki agent mail;
 - `rooms.json` — trwałe pokoje współpracy;
 - `groups.json` — grupy i ich transcript;
 - `goals.json` — postęp i stan goals;
@@ -1672,8 +1663,6 @@ problem po stronie samego komponentu UI.
 
 ### 25.5. Współpraca
 
-- `/api/mail`;
-- `/api/mail/:id`;
 - `/api/groups`;
 - `/api/groups/:id`;
 - `/api/groups/:id/members`;
