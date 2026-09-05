@@ -496,8 +496,12 @@ export class Store {
     const known = new Set(targets.map((target) => target.instanceId));
     // A custom endpoint is a model the user configured by hand, so it still
     // wins over the generic default — see defaultSelectionTarget.
+    // `models.default` jest tu warunkiem, nie ozdobą: instancja
+    // `openaiImage` istnieje wyłącznie po to, żeby przechować klucz API i nie
+    // ma ani adresu, ani modelu — bot przeniesiony na nią nigdy by nie
+    // odpowiedział.
     const fallback =
-      targets.find((target) => target.driverKind === "openaiCompatible") ??
+      targets.find((target) => target.driverKind === "openaiCompatible" && Boolean(target.models.default)) ??
       defaultSelectionTarget(targets);
     let changed = 0;
     for (const bot of this.bots) {

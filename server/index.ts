@@ -4971,13 +4971,39 @@ const server = createServer(async (req, res) => {
       ? /^\/webhooks\/([^/]+)$/.exec(new URL(req.url ?? "/", "http://127.0.0.1").pathname)
       : null;
     if (!hook) return app(req, res);
-    void harnessWebhookInbound(req, res, decodeURIComponent(hook[1]))
-      .catch(() => false) // padnięty handler nie może wywrócić żądania
+    // `decodeURIComponent` rzuca na zepsutym escape'ie (`/webhooks/%zz`). Ta
+    // trasa jest PRZED bramką auth, a listener nie ma nad sobą nikogo, kto by
+    // to złapał — nieobsłużony wyjątek ubijał cały serwer. Zły escape to po
+    // prostu nieznane id.
+    let id: string | null = null;
+    try {
+      id = decodeURIComponent(hook[1]);
+    } catch {
+      id = null;
+    }
+    if (id === null) return json(res, 404, { error: "no such webhook" });
+    void harnessWebhookInbound(req, res, id)
+      .catch((error) => {
+        console.warn("[multibot] webhook handler failed:", error instanceof Error ? error.message : error);
+        if (!res.headersSent) json(res, 500, { error: "webhook failed" });
+        return true;
+      })
       .then((handled) => {
         if (!handled && !res.headersSent) json(res, 404, { error: "no such webhook" });
       });
   });
 }
+// Gniazdo, którego nie weźmie żaden z handlerów niżej, trzeba zamknąć samemu:
+// Node sprząta automatycznie tylko wtedy, gdy listenerów `upgrade` NIE MA
+// wcale. Robiła to dotąd przelotka silnika (destroy dla obcych ścieżek); bez
+// tego każdy `Upgrade: websocket` na nieznany adres zostawiał otwarty
+// deskryptor. Lista ścieżek jest jawna, więc kolejność montażu nic tu nie
+// zmienia — obcy adres ginie, znany idzie dalej nietknięty.
+server.on("upgrade", (req, socket: import("node:stream").Duplex) => {
+  const path = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
+  if (matchVncRoute(path) || path === "/api/events") return;
+  if (!socket.destroyed) socket.destroy();
+});
 // multibot (H4): the bot's screen. Mounted before auth so one gate covers it.
 mountVncUpgrade(server, (req, botId) => canAccessBot(store.bot(botId), actorForRequest(req)));
 // Kanał zdarzeń po WS — ta sama ścieżka co SSE, ta sama bramka auth (montaż

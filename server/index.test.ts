@@ -165,6 +165,11 @@ describe("harness HTTP API", () => {
     expect((await fetch(`${BASE}/webhooks/routine-id`, { method: "POST" })).status).toBe(404);
     expect((await fetch(`${BASE}/webhooks/routine-id`)).status).toBe(401);
     expect((await fetch(`${BASE}/webhooks/routine-id/extra`, { method: "POST" })).status).toBe(401);
+    // Zepsuty escape w id: `decodeURIComponent` rzuca, a ta trasa siedzi przed
+    // bramką auth i nie ma nad sobą nikogo, kto by wyjątek złapał — bez guardu
+    // proces padał. Serwer ma odpowiedzieć i ŻYĆ dalej.
+    expect((await fetch(`${BASE}/webhooks/%zz`, { method: "POST" })).status).toBe(404);
+    expect((await fetch(`${BASE}/api/auth/check`)).status).toBe(401);
   });
 
   it("serves installable PWA files with update-safe MIME and cache headers", async () => {

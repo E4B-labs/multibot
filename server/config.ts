@@ -132,6 +132,20 @@ export function ensureDirs() {
   chmodPrivate(join(DATA_DIR, "config.json"), 0o600);
 }
 
+/** multibot: wpisy `driver: "slafy"` to modele skonfigurowane przez
+ * użytkownika sprzed usunięcia silnika Hermesa. Przepisujemy je na wejściu na
+ * `openaiCompatible` — i tu, i we `instanceConfigs()`, bo trasy
+ * `/api/models/custom` patrzą na `cfg.instances`, a flota na wynik
+ * `instanceConfigs()`. Plik na dysku zostaje nietknięty do pierwszego zapisu. */
+function migrateLegacyDrivers<T extends NonNullable<AppConfig["instances"]>>(instances: T): T {
+  return Object.fromEntries(
+    Object.entries(instances).map(([id, entry]) => [
+      id,
+      entry.driver === "slafy" ? { ...entry, driver: "openaiCompatible" } : entry,
+    ]),
+  ) as T;
+}
+
 export function loadConfig(): AppConfig {
   let cfg: AppConfig = {};
   try {
@@ -144,6 +158,7 @@ export function loadConfig(): AppConfig {
   cfg.composio = { key: process.env.COMPOSIO_KEY, ...cfg.composio };
   cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
   cfg.voice = { key: process.env.OMB_TTS_KEY, ...cfg.voice };
+  if (cfg.instances) cfg.instances = migrateLegacyDrivers(cfg.instances);
   return cfg;
 }
 
@@ -233,16 +248,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   const map: InstanceConfigMap = {};
   const configuredInstances: NonNullable<AppConfig["instances"]> = {
     ...DEFAULT_INSTANCE_CONFIGS,
-    // multibot: custom endpoints used to run on the Python engine as driver
-    // `slafy`. The engine is gone; the same config now drives the
-    // OpenAI-compatible chat-completions driver. Rewritten on read, so a
-    // config.json written by an older build keeps working untouched.
-    ...Object.fromEntries(
-      Object.entries(cfg.instances ?? {}).map(([id, entry]) => [
-        id,
-        entry.driver === "slafy" ? { ...entry, driver: "openaiCompatible" } : entry,
-      ]),
-    ),
+    ...migrateLegacyDrivers(cfg.instances ?? {}),
   };
   for (const [id, configured] of Object.entries(configuredInstances)) {
     // Legacy credential storage used a visible custom-model instance. Keep its key
