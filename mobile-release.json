@@ -1,7 +1,7 @@
 {
   "platform": "android",
-  "version": "0.3.6",
-  "versionCode": 19,
-  "apkUrl": "https://expo.dev/artifacts/eas/jVNlZ959MVCBFiOYw9Mk4d05e0ufwxxgboLPn2FKAZw.apk",
-  "notes": "Latest mobile build with hidden bot recovery, OpenCode model search, routines from chat history, and automatic APK installer updates."
+  "version": "0.3.9",
+  "versionCode": 22,
+  "apkUrl": "https://expo.dev/artifacts/eas/-op6_H4HfI--4maJECGhdB2ljbmx-x_T7j7jkSKkRgc.apk",
+  "notes": "Push notifications (FCM), group chat, bot rooms, blob mascots, sidebar sections. Runtime 1.4.0."
 }
