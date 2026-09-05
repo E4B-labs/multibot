@@ -3699,22 +3699,21 @@ const server = createServer(async (req, res) => {
       const message = String(body.message ?? "").trim();
       if (!message) return json(res, 422, { error: "message required" });
       try {
-        // multibot: bez silnika skład grupy bierzemy z trwałego zapisu harnessu —
-        // tury i tak liczy harness, więc pytanie silnika o membership było
-        // jedynym powodem, dla którego czat grupowy padał na 502 przy
-        // MULTIBOT_ENGINE=off.
-        let group: { bot_ids?: unknown[]; name?: unknown };
-        if (engineDisabled()) {
-          const stored = groupStore.get(gid);
-          if (!stored) return json(res, 404, { error: "no such group" });
-          group = stored;
-        } else {
+        // multibot: skład grupy bierzemy z trwałego zapisu harnessu — to ta sama
+        // lista, którą pokazuje GET /api/groups, więc każda grupa widoczna w UI
+        // da się otworzyć. Tury i tak liczy harness. Silnika pytamy dopiero
+        // wtedy, gdy harness nic o tym id nie wie (grupa założona poza nim);
+        // pytanie go jako pierwszego zabijało grupy sprzed tej zmiany (404) i
+        // czat grupowy przy MULTIBOT_ENGINE=off (502).
+        let group: { bot_ids?: unknown[]; name?: unknown } | null = groupStore.get(gid);
+        if (!group) {
+          if (engineDisabled()) return json(res, 404, { error: "no such group" });
           const base = await ensureEngine();
           const groupResponse = await fetch(`${base}/api/groups/${encodeURIComponent(gid)}`);
           if (!groupResponse.ok) return json(res, groupResponse.status === 404 ? 404 : 502, { error: "no such group" });
           group = await groupResponse.json() as { bot_ids?: unknown[] };
         }
-        const durable = groupStore.get(gid) ?? groupStore.upsert({ id: gid, name: String((group as { name?: unknown }).name ?? "Group"), bot_ids: (group.bot_ids ?? []).map(String) });
+        const durable = groupStore.get(gid) ?? groupStore.upsert({ id: gid, name: String(group.name ?? "Group"), bot_ids: (group.bot_ids ?? []).map(String) });
         if (!groupVisible(durable, actor)) return json(res, 404, { error: "no such group" });
         const roster = (group.bot_ids ?? [])
           .map((rawId) => store.botByThread(threadIdOfEngineBot(String(rawId)) ?? String(rawId)))
