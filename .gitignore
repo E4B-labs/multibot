@@ -10,11 +10,6 @@ build/
 release/
 clients/
 uploads/
-engine-data/
-engine/.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
 *.tsbuildinfo
 *.db
 *.db-*
@@ -24,6 +19,3 @@ __pycache__/
 .DS_Store
 
 electron/resources/speech-helper
-
-# hermes-agent klonowany przez install-linux.sh / Dockerfile.selfhost
-engine/hermes-agent/

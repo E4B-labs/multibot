@@ -167,9 +167,8 @@ function bail(socket, status, reason) {
 }
 
 /**
- * WebSocket bez biblioteki, tym samym sposobem co server/engine/proxy.ts:
- * powtarzamy handshake w stronę hosta, 101 przepisujemy z powrotem i od tej
- * chwili spinamy gniazda bajt w bajt. Subprotokół zostaje NIETKNIĘTY, bo to
+ * WebSocket bez biblioteki, ręcznie: powtarzamy handshake w stronę hosta,
+ * 101 przepisujemy z powrotem i od tej chwili spinamy gniazda bajt w bajt. Subprotokół zostaje NIETKNIĘTY, bo to
  * w nim jedzie token (`["multibot-auth", <token>]`).
  */
 function pipeWs(req, socket, head, remote, live) {

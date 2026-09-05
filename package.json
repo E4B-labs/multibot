@@ -12,7 +12,6 @@
   "scripts": {
     "dev": "vite",
     "dev:server": "node server/index.ts",
-    "dev:engine": "node scripts/dev-engine.mjs",
     "dev:desktop": "electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "lint": "git diff --check && tsc --noEmit --pretty false",
@@ -24,7 +23,6 @@
     "build:speech": "swiftc -O electron/resources/speech-helper.swift -o electron/resources/speech-helper",
     "build:updater": "node scripts/bundle-updater.mjs",
     "package": "pnpm build && pnpm build:server && pnpm build:speech && pnpm build:updater && electron-builder --mac --publish never && node scripts/make-latest-yml.mjs",
-    "provision:engine": "node scripts/provision-engine.mjs",
     "install:server:windows": "node scripts/install-server-windows.mjs",
     "package:win": "pnpm build && pnpm build:server && pnpm build:updater && electron-builder --win --publish never && node scripts/make-latest-yml.mjs"
   },

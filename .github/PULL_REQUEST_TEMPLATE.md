@@ -13,7 +13,7 @@ Jeden PR = jedno zadanie. Nie doklejaj niepowiązanych porządków.
 
 ## Dotknięte moduły
 
-<!-- src/ · server/ · engine/ · electron/ · scripts/ · docs/ · .github/ -->
+<!-- src/ · server/ · electron/ · scripts/ · docs/ · .github/ -->
 
 ## Poziom ryzyka
 
@@ -29,8 +29,6 @@ pnpm typecheck       →
 pnpm test            →
 pnpm exec vite build →
 ```
-
-<!-- Zmiana w engine/ dokłada: cd engine && python -m pytest -q -->
 
 ## Skutki migracyjne i dla danych
 

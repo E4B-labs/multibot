@@ -17,8 +17,6 @@ export function windowsServerPlan(env = process.env, packagedExe) {
   const home = env.USERPROFILE || homedir();
   const localAppData = env.LOCALAPPDATA || join(home, "AppData", "Local");
   const installDir = join(localAppData, "Multibot Server");
-  const runtimeDir = join(installDir, "engine-runtime");
-  const dataDir = join(installDir, "engine-data");
   const tempDir = join(installDir, "tmp");
   const runner = join(installDir, "start-server.ps1");
   const entry = join(ROOT, "dist-server", "index.js");
@@ -33,8 +31,6 @@ export function windowsServerPlan(env = process.env, packagedExe) {
   return {
     root: ROOT,
     installDir,
-    runtimeDir,
-    dataDir,
     tempDir,
     configFile: join(home, ".openmausbot", "config.json"),
     runner,
@@ -101,9 +97,6 @@ function runnerText(plan) {
     OMB_HOST: plan.host,
     OMB_PORT: String(plan.port),
     OMB_STATIC_DIR: plan.staticDir,
-    OMB_ENGINE_RUNTIME: plan.runtimeDir,
-    SLAFY_DATA_DIR: plan.dataDir,
-    PLAYWRIGHT_BROWSERS_PATH: join(plan.runtimeDir, "browsers"),
     TMP: plan.tempDir,
     TEMP: plan.tempDir,
   };
@@ -150,19 +143,6 @@ async function install() {
   }
 
   mkdirSync(plan.tempDir, { recursive: true });
-  await run(
-    process.execPath,
-    [join(plan.root, "scripts", "provision-engine.mjs"), "--target", plan.runtimeDir],
-    {
-      cwd: plan.root,
-      env: {
-        ...process.env,
-        TMP: plan.tempDir,
-        TEMP: plan.tempDir,
-        PLAYWRIGHT_BROWSERS_PATH: join(plan.runtimeDir, "browsers"),
-      },
-    },
-  );
 
   const token = accessToken(plan.configFile);
   writeFileSync(plan.runner, runnerText(plan));

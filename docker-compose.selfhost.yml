@@ -1,4 +1,4 @@
-# multibot: only authenticated harness port is published. Engine has no host port.
+# multibot: only the authenticated harness port is published, on loopback.
 services:
   app:
     build:

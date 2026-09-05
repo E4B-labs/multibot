@@ -5,11 +5,9 @@
 # keyboard over the whole desktop). What it does NOT ship is a Chromium-family
 # browser — it has Firefox, which speaks no CDP.
 #
-# CDP is not optional here: engine/server/computer.py drives the browser over it
-# and engine/server/teach.py records "Record a skill" demonstrations by injecting
-# JS through it. Swapping to Firefox would mean rewriting both. Adding Chrome to
-# the image keeps every existing browser code path working unchanged, so that is
-# what we do.
+# CDP is not optional here: the harness drives the browser over it. Swapping to
+# Firefox would mean rewriting every browser code path. Adding Chrome to the
+# image keeps them all working unchanged, so that is what we do.
 #
 # Ubuntu 22.04's `chromium` package is a snap shim that cannot run in a
 # container, so we install Google's own Chrome .deb instead — same engine, same
