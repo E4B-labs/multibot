@@ -289,6 +289,111 @@ describe("peer conversation: a message is a real turn", () => {
     30_000,
   );
 
+
+  // Every entry point into bot↔bot funnels through deliverPeerMessage, so the
+  // workspace rules are checked in ONE place. These four are the ways a message
+  // must NOT go through; each one has to leave the recipient's chat untouched.
+  it(
+    "refuses a peer message the workspace does not allow",
+    async () => {
+      const gotEnvelope = async (id: string, senderName: string) =>
+        Boolean((await h.bot(id)).messages?.some((m: any) => m.role === "user" && m.text?.includes(`[Message from @${senderName}`)));
+      const handOver = async (fromId: string, toId: string, task: string) => {
+        const created = await h.api("POST", "/api/rooms", { task, bot_ids: [fromId, toId] });
+        await new Promise((r) => setTimeout(r, 1_200));
+        return created;
+      };
+
+      // 1. a private bot is not in a team bot's workspace at all: the room
+      // route stops the pair before delivery, and canBotContact stops it again
+      // inside deliverPeerMessage for callers that skip the route.
+      const teamSender = await h.newBot("Team Sender", "happy");
+      const secret = (await h.api("POST", "/api/bots", { visibility: "private" })).body.bot;
+      await h.api("PATCH", `/api/bots/${secret.id}`, { name: "Sekret", modelSelection: { instanceId: "happy", model: "fake-model" } });
+      expect((await handOver(teamSender, secret.id, "let me in")).status).toBe(404);
+      expect(await gotEnvelope(secret.id, "Team Sender")).toBe(false);
+
+      // 2. read-only access: the bot may look, not delegate work to others.
+      const reader = await h.newBot("Reader", "happy");
+      const readerPeer = await h.newBot("Reader Peer", "happy");
+      expect((await h.api("PATCH", `/api/bots/${reader}/access`, { access: "read-only" })).status).toBe(200);
+      const readerRoom = await handOver(reader, readerPeer, "do this for me");
+      expect(readerRoom.status).toBe(201);
+      expect((await h.room(readerRoom.body.id)).transcript).toHaveLength(0);
+      expect(await gotEnvelope(readerPeer, "Reader")).toBe(false);
+
+      // 3. delegation switched off for that one bot.
+      const muted = await h.newBot("Muted", "happy");
+      const mutedPeer = await h.newBot("Muted Peer", "happy");
+      expect((await h.api("PATCH", `/api/bots/${muted}/permissions`, { toolset: "delegation", enabled: false })).status).toBe(200);
+      const mutedRoom = await handOver(muted, mutedPeer, "take this over");
+      expect(mutedRoom.status).toBe(201);
+      expect((await h.room(mutedRoom.body.id)).transcript).toHaveLength(0);
+      expect(await gotEnvelope(mutedPeer, "Muted")).toBe(false);
+
+      // 4. a chief of staff runs its own section and nobody else's.
+      const chief = await h.newBot("Chief", "happy");
+      const outsider = await h.newBot("Outsider", "happy");
+      await h.api("PATCH", `/api/bots/${chief}`, { section: "sales", chiefOfStaff: true });
+      await h.api("PATCH", `/api/bots/${outsider}`, { section: "legal" });
+      const chiefRoom = await handOver(chief, outsider, "reassign yourself");
+      expect(chiefRoom.status).toBe(201);
+      expect((await h.room(chiefRoom.body.id)).transcript).toHaveLength(0);
+      expect(await gotEnvelope(outsider, "Chief")).toBe(false);
+    },
+    60_000,
+  );
+
+  // The safety net is a delivery like any other: a bot whose delegation is off
+  // still READS a peer message, but its answer must not go out through the back
+  // door of turn.completed.
+  it(
+    "the automatic reply obeys the same permissions as the tools",
+    async () => {
+      const asker = await h.newBot("Asker", "happy");
+      const silenced = await h.newBot("Silenced", "happy");
+      expect((await h.api("PATCH", `/api/bots/${silenced}/permissions`, { toolset: "delegation", enabled: false })).status).toBe(200);
+
+      const created = await h.api("POST", "/api/rooms", { task: "answer me", bot_ids: [asker, silenced] });
+      expect(created.status).toBe(201);
+      // it reads the message and works
+      await h.waitFor("Silenced to read the message", 25_000, async () => Boolean(await h.bot(silenced)));
+      await h.waitFor("Silenced to answer in its own chat", 30_000, async () =>
+        Boolean((await h.bot(silenced))?.messages?.some((m: any) => m.role === "bot" && m.kind === "text" && m.text)));
+      await h.waitFor("Silenced to finish", 20_000, async () => !(await h.bot(silenced))?.busy);
+      await new Promise((r) => setTimeout(r, 1_000));
+      // ...and its answer stays there: the room only ever heard the asker
+      const room = await h.room(created.body.id);
+      expect(room.transcript.map((m: any) => m.from)).toEqual([asker]);
+    },
+    70_000,
+  );
+
+  // Two bots writing to the same recipient inside one window: keying the
+  // pending answer by recipient alone dropped the first sender on the floor.
+  it(
+    "two senders in one window both get an answer",
+    async () => {
+      const first = await h.newBot("First Sender", "happy");
+      const second = await h.newBot("Second Sender", "happy");
+      const busy = await h.newBot("Two Ways", "slow");
+
+      expect((await h.api("POST", `/api/bots/${busy}/messages`, { text: "pracuj" })).status).toBe(202);
+      await h.waitFor("Two Ways to be busy", 20_000, async () => Boolean((await h.bot(busy))?.busy));
+
+      const one = await h.api("POST", "/api/rooms", { task: "pierwsza sprawa", bot_ids: [first, busy] });
+      const two = await h.api("POST", "/api/rooms", { task: "druga sprawa", bot_ids: [second, busy] });
+      expect([one.status, two.status]).toEqual([201, 201]);
+
+      // Both messages queued behind the running turn, so the turn that answers
+      // them is the one the drain starts — and it answers BOTH.
+      for (const [room, sender] of [[one, first], [two, second]] as const) {
+        await h.waitFor(`${sender} to hear back`, 45_000, async () =>
+          (await h.room(room.body.id)).transcript.some((m: any) => m.from === busy));
+      }
+    },
+    90_000,
+  );
   it(
     "a peer message reaches a live GPT-6 Astra turn by steering it, not by waiting",
     async () => {
@@ -322,10 +427,12 @@ describe("peer conversation: budgets and the first turn of a new bot", () => {
     const booted = await boot(
       "peerbudget",
       // Onboarding stays ON here: a brand new bot must speak first by itself.
-      { OMB_COLLAB_MAX_MESSAGES: "4" },
+      // The watchdog ceiling is 70 s in production; no test waits that out.
+      { OMB_COLLAB_MAX_MESSAGES: "4", OMB_BUSY_WATCHDOG_MS: "5000" },
       {
         happy: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "happy" }, config: { cli: FAKE_CLI, fullAuto: true } },
         relay: relayInstance(relayHome),
+        hangs: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "hang" }, config: { cli: FAKE_CLI, fullAuto: true } },
       },
     );
     h = booted.harness;
@@ -356,6 +463,35 @@ describe("peer conversation: budgets and the first turn of a new bot", () => {
     45_000,
   );
 
+
+  // The watchdog is the only teardown a dead provider ever gets. It used to
+  // clear `busy` and nothing else, so the peer marker outlived the turn and the
+  // bot's NEXT, unrelated answer was posted to yesterday's sender.
+  it(
+    "the busy watchdog forgets the peer message it was answering",
+    async () => {
+      const sender = await h.newBot("Cierpliwy", "happy");
+      const stuck = await h.newBot("Zawieszony", "hangs");
+      await h.waitFor("Zawieszony to stop hanging on its first turn", 25_000, async () => !(await h.bot(stuck))?.busy);
+
+      const created = await h.api("POST", "/api/rooms", { task: "odezwij sie", bot_ids: [sender, stuck] });
+      expect(created.status).toBe(201);
+      await h.waitFor("Zawieszony to hang on the peer turn", 25_000, async () => Boolean((await h.bot(stuck))?.busy));
+      await h.waitFor("the watchdog to free it", 25_000, async () => !(await h.bot(stuck))?.busy);
+
+      // A working provider from here on: the next turn is the user's, and its
+      // answer belongs to the user alone.
+      await h.api("PATCH", `/api/bots/${stuck}`, { modelSelection: { instanceId: "happy", model: "fake-model" } });
+      expect((await h.api("POST", `/api/bots/${stuck}/messages`, { text: "zyjesz?" })).status).toBe(202);
+      await h.waitFor("the next turn to answer", 30_000, async () =>
+        Boolean((await h.bot(stuck))?.messages?.some((m: any) => m.role === "bot" && m.kind === "text" && m.text)));
+      await h.waitFor("the next turn to finish", 20_000, async () => !(await h.bot(stuck))?.busy);
+      await new Promise((r) => setTimeout(r, 1_000));
+
+      expect((await h.room(created.body.id)).transcript.map((m: any) => m.from)).toEqual([sender]);
+    },
+    90_000,
+  );
   it(
     "OMB_COLLAB_MAX_MESSAGES=4 stops a ring that would otherwise never stop",
     async () => {
@@ -383,5 +519,45 @@ describe("peer conversation: budgets and the first turn of a new bot", () => {
       expect(owner.messages.some((m: any) => m.kind === "text" && m.text?.includes("message budget spent (4)"))).toBe(true);
     },
     90_000,
+  );
+});
+
+// The wall clock only ever fired when somebody tried to send, so a conversation
+// that simply went quiet stayed open forever: a live room in the UI, a live
+// budget, and no report to the bot that started it.
+describe("peer conversation: a quiet room still settles", () => {
+  let h: Harness;
+  let stop: () => Promise<void>;
+
+  beforeAll(async () => {
+    const booted = await boot(
+      "peerclock",
+      { OMB_ONBOARDING_TURN: "0", OMB_COLLAB_MAX_MS: "3000" },
+      { happy: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "happy" }, config: { cli: FAKE_CLI, fullAuto: true } } },
+    );
+    h = booted.harness;
+    stop = booted.stop;
+    for (const seeded of await h.bots()) await h.api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
+  }, 40_000);
+
+  afterAll(async () => {
+    await stop?.();
+  });
+
+  it(
+    "the sweep closes a room past its wall clock and reports it to the owner",
+    async () => {
+      const owner = await h.newBot("Zegar A", "happy");
+      const peer = await h.newBot("Zegar B", "happy");
+      const created = await h.api("POST", "/api/rooms", { task: "cisza", bot_ids: [owner, peer] });
+      expect(created.status).toBe(201);
+
+      await h.waitFor("the sweep to close the room", 30_000, async () => (await h.room(created.body.id)).status !== "running");
+      expect((await h.room(created.body.id)).status).toBe("done");
+      await h.waitFor("the owner to be told", 15_000, async () =>
+        Boolean((await h.bot(owner))?.messages?.some((m: any) => m.kind === "text" && m.text?.includes("time budget spent"))));
+
+    },
+    60_000,
   );
 });

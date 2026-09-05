@@ -57,8 +57,8 @@ beforeAll(async () => {
           grok: {
             driver: "grokAgent",
             // multibot: licznik w pliku, bo każda tura to osobny proces —
-            // pierwsza wkładka bez markera, druga domyka pokój. Dzięki temu
-            // runCollab przechodzi pełną rundę dwóch wymian, nie jedną.
+            // pierwsza wkładka bez markera, druga domyka pokój, więc rozmowa
+            // ma pełną wymianę w obie strony, nie jedną odpowiedź.
             environment: { FAKE_ACP_MODE: "room", FAKE_ACP_ROOM_COUNTER: join(home, "room-counter.txt") },
             config: { cli: FAKE_CLI, fullAuto: true },
           },

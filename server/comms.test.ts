@@ -426,9 +426,11 @@ describe("comms e2e (fake ACP fleet)", () => {
 
       const thread = (await api("GET", "/api/mail")).body.threads.find((t: any) => t.messages?.some((m: any) => m.text === "async ping"));
       expect(thread).toBeTruthy();
-      expect(thread.messages).toHaveLength(2);
+      // Round trip, not an exact count: the fake mails on EVERY turn, so a
+      // reply that starts one more turn legitimately adds one more letter.
+      expect(thread.messages.length).toBeGreaterThanOrEqual(2);
       expect(thread.messages[0]).toMatchObject({ from: sender.id, to: receiver.id, text: "async ping", status: "delivered" });
-      expect(thread.messages[1]).toMatchObject({ from: receiver.id, to: sender.id, text: "async ping", status: "delivered" });
+      expect(thread.messages.some((m: any) => m.from === receiver.id && m.to === sender.id && m.text === "async ping" && m.status === "delivered")).toBe(true);
       expect(receiverBot.messages.some((m: any) => m.text?.includes("[Message from @Mail Sender"))).toBe(true);
       const senderBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === sender.id);
       expect(senderBot.messages.some((m: any) => m.text?.includes("[Message from @Mail Receiver"))).toBe(true);
@@ -445,7 +447,10 @@ describe("comms e2e (fake ACP fleet)", () => {
     async () => {
       // izolacja: rozmowy botów z wcześniejszych testów toczą się dalej w tle,
       // a `list_bots` bierze pierwszego WIDOCZNEGO — bez tego Curious dostaje
-      // cudzą wiadomość w środku własnego pytania do człowieka
+      // cudzą wiadomość w środku własnego pytania do człowieka. Ukrycie, nie
+      // zamykanie pokojów: `agents.list` filtruje ukryte, więc świeży bot nie
+      // trafia nikomu do rosteru, a zamknięty pokój nie zatrzymuje dostawy —
+      // `deliverPeerMessage` po prostu otworzyłby następny.
       for (const b of (await api("GET", "/api/bots")).body.bots) {
         await api("PATCH", `/api/bots/${b.id}`, { hidden: true });
       }

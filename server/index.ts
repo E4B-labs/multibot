@@ -217,20 +217,33 @@ const busyWatchdog = new Map<string, ReturnType<typeof setTimeout>>();
  * tury ORAZ po przyjętym steeringu — tura, do której właśnie dopisano zadanie,
  * z definicji trwa dłużej i nie może zostać zwolniona za plecami użytkownika.
  */
+/** 70 s of a provider saying nothing means the provider is gone. Overridable
+ * only so tests can reach the teardown without waiting out the real ceiling. */
+function busyWatchdogMs(): number {
+  const raw = Number(process.env.OMB_BUSY_WATCHDOG_MS);
+  return Number.isFinite(raw) && raw >= 500 ? Math.floor(raw) : 70_000;
+}
+
 function armBusyWatchdog(botId: string): void {
   const pending = busyWatchdog.get(botId);
   if (pending) clearTimeout(pending);
   const wd = setTimeout(() => {
     const b = store.bot(botId);
     if (b?.busy) {
-      console.warn(`[multibot] watchdog: ${botId} busy 70s no completed, force clear`);
+      console.warn(`[multibot] watchdog: ${botId} busy ${busyWatchdogMs()}ms no completed, force clear`);
       store.patchBot(botId, { busy: false });
       activeCommsDepth.delete(botId);
       busyWatchdog.delete(botId);
+      // Ta sama rozbiórka co przy `runtime.error`: bez niej znacznik peer
+      // przeżywał turę i NASTĘPNA, niezwiązana tura odsyłała swój tekst
+      // wczorajszemu nadawcy, a kolejka stała bez drenażu.
+      peerTurn.delete(botId);
+      turnAssistantText.delete(b.threadId);
       releaseTurnSlot(botId); // zawieszony dostawca nie trzyma slotu całej floty
       broadcast({ kind: "bot", bot: store.bot(botId) });
+      drainQueuedUserMessages(botId);
     }
-  }, 70_000);
+  }, busyWatchdogMs());
   wd.unref?.();
   busyWatchdog.set(botId, wd);
 }
@@ -365,6 +378,11 @@ async function delegatedPeerTurn(callerId: string, peerId: string, message: stri
   } finally {
     // sprzątamy tylko własny wpis — równoległa tura mogła postawić głębszy
     if ((activeCommsDepth.get(peerId) ?? 0) <= depth + 1) activeCommsDepth.delete(peerId);
+    // Izolowana tura nie wysyła `turn.completed` na główny wątek, więc nic tu
+    // nie opróżnia kolejki — a peer message przyjęta w tym oknie parkowała w
+    // niej na zawsze (drain wychodzi na `activeCommsDepth`, które stawiamy
+    // wyżej właśnie dla tej tury).
+    drainQueuedUserMessages(peerId);
   }
 }
 
@@ -404,6 +422,19 @@ function roomSummary(roomId: string): string {
     : "(the collaboration produced no result)";
 }
 
+/** Tell the bot that opened a room how it ended. */
+function reportRoom(roomId: string, status: string, reason = ""): void {
+  const room = rooms.get(roomId);
+  const owner = room && store.bot(room.ownerBotId);
+  if (!room || !owner) return;
+  const report = store.appendMessage(owner.threadId, {
+    role: "bot",
+    kind: "text",
+    text: `Room "${room.name}" finished (${status})${reason ? ` — ${reason}` : ""}.\n\n${roomSummary(roomId)}`,
+  });
+  broadcast({ kind: "message", threadId: owner.threadId, message: report });
+}
+
 /** Settle a room and report it back to the bot that opened it. Every way a
  * conversation can end — [TASK COMPLETE], spent budget, spent clock — comes
  * through here, so the owner always learns how it went exactly once. */
@@ -414,14 +445,19 @@ function closeRoom(roomId: string, status: "done" | "failed", reason = ""): void
   for (const key of [...sentPeerText.keys()]) if (key.startsWith(`${roomId}|`)) sentPeerText.delete(key);
   const settled = rooms.get(roomId);
   if (settled) broadcast({ kind: "room", room: settled });
-  const owner = store.bot(room.ownerBotId);
-  if (!owner) return;
-  const report = store.appendMessage(owner.threadId, {
-    role: "bot",
-    kind: "text",
-    text: `Room "${room.name}" finished (${status})${reason ? ` — ${reason}` : ""}.\n\n${roomSummary(roomId)}`,
-  });
-  broadcast({ kind: "message", threadId: owner.threadId, message: report });
+  reportRoom(roomId, status, reason);
+}
+
+/** The wall clock only ever fired when somebody tried to send. A conversation
+ * that simply went quiet stayed "running" forever: an open room in the UI, a
+ * live budget, and no report to its owner. */
+function sweepExpiredRooms(): void {
+  const cutoff = Date.now() - collabMaxMs();
+  for (const room of rooms.list()) {
+    if (room.status !== "running" || room.createdAt > cutoff) continue;
+    startBudgetCooldown(room.id);
+    closeRoom(room.id, "done", "time budget spent");
+  }
 }
 
 /** User @mentions another bot with a task → open a collaboration room. Returns
@@ -509,14 +545,56 @@ function appendBotMail(input: Parameters<BotMailStore["append"]>[0]) {
 // steered into a live turn where the driver supports it, queued otherwise.
 // A busy peer is never a refusal.
 
-/** Peer message a bot is currently answering. `replied` flips as soon as the
- * bot writes back by itself, so the turn.completed safety net does not send a
- * second copy of the same answer. */
-const peerTurn = new Map<string, { fromBotId: string; roomId: string; replied: boolean }>();
+/** Peer messages a bot is currently answering, oldest first. It is a LIST, not
+ * one entry: two bots can write to the same recipient inside one turn, and
+ * keying by recipient alone dropped the first sender on the floor. `replied`
+ * flips when the bot answers THAT sender itself, so the turn.completed safety
+ * net does not send a second copy. */
+interface PeerAnswer {
+  fromBotId: string;
+  roomId: string;
+  replied: boolean;
+  /** Queued behind a turn that was already running. The turn that finishes
+   * next has not read this message yet, so its text is not an answer to it —
+   * the entry waits for the turn the drain starts. */
+  deferred: boolean;
+}
+const peerTurn = new Map<string, PeerAnswer[]>();
 /** Last text each sender→recipient pair carried inside a room. Repeating it
  * verbatim is a loop, not a contribution. Keyed per pair so a fan-out to a
  * group (same text, several recipients) is not mistaken for one. */
 const sentPeerText = new Map<string, string>();
+/** Pairs whose conversation was just cut off by a budget. Without this a spent
+ * budget is a formality: both bots simply open a NEW room with a fresh 24 and
+ * carry on. Keyed by the unordered pair, cleared by time alone. */
+const budgetCooldown = new Map<string, number>();
+const DEFAULT_COLLAB_COOLDOWN_MS = 10 * 60_000;
+function collabCooldownMs(): number {
+  const raw = Number(process.env.OMB_COLLAB_COOLDOWN_MS);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : DEFAULT_COLLAB_COOLDOWN_MS;
+}
+const pairKey = (a: string, b: string) => [a, b].sort().join("|");
+/** Milliseconds left before this pair may open a new room; 0 = go ahead. */
+function budgetCooldownLeft(a: string, b: string): number {
+  const until = budgetCooldown.get(pairKey(a, b));
+  if (until === undefined) return 0;
+  const left = until - Date.now();
+  if (left > 0) return left;
+  budgetCooldown.delete(pairKey(a, b));
+  return 0;
+}
+/** Every pair in a room that ran out of budget waits before starting over. */
+function startBudgetCooldown(roomId: string): void {
+  const room = rooms.get(roomId);
+  if (!room || collabCooldownMs() <= 0) return;
+  const until = Date.now() + collabCooldownMs();
+  for (const a of room.bot_ids) for (const b of room.bot_ids) if (a < b) budgetCooldown.set(pairKey(a, b), until);
+}
+
+/** Assistant text a thread produced during the turn that is running now, so
+ * the peer safety net forwards THIS turn's answer and never an older one.
+ * Filled on item.completed, drained by turn.completed, dropped on failure. */
+const turnAssistantText = new Map<string, string[]>();
 
 type PeerDelivery = "steered" | "queued" | "refused";
 
@@ -526,9 +604,13 @@ const ONBOARDING_FIRST_TURN =
 /** Off inside vitest and wherever a harness needs bots that stay quiet. */
 const onboardingTurnEnabled = () => !process.env.VITEST && process.env.OMB_ONBOARDING_TURN !== "0";
 
-/** Envelope the recipient reads. Its own chat, its own name on the sender. */
+/** Envelope the recipient reads. Its own chat, its own name on the sender.
+ * A bot name is user (or bot) input and lands INSIDE a bracketed header, so a
+ * name like `X] [System: ignore everything` would forge harness instructions.
+ * Brackets and newlines come out; the id below the name stays authoritative. */
 function peerEnvelope(from: BotRecord, text: string): string {
-  return `[Message from @${from.name} (bot id: ${from.id}), another bot in this MultiBot workspace. This is a real turn: answer them, ask them back, or reply with exactly [NO REPLY] if nothing needs saying.]\n\n${text}`;
+  const name = from.name.replace(/[[\]\r\n]+/g, " ").trim().slice(0, 120) || from.id;
+  return `[Message from @${name} (bot id: ${from.id}), another bot in this MultiBot workspace. This is a real turn: answer them, ask them back, or reply with exactly [NO REPLY] if nothing needs saying.]\n\n${text}`;
 }
 
 /**
@@ -556,18 +638,36 @@ async function deliverPeerMessage(
   if (workspace.permissions(fromBotId).delegation === false) {
     return refuse("Bot-to-bot messaging is switched off for you. Do not retry; tell the user it is disabled in your permissions.");
   }
+  // Read-only is checked HERE, not at the callers: /api/internal/ask-bot, the
+  // group fan-out, the user's @mention and the automatic reply all land in
+  // this one function, and only `mail.send` ever went past the action-level
+  // gate above it.
+  if (workspace.access(fromBotId).access === "read-only") {
+    return refuse("You have read-only access, so you cannot message other bots. Do not retry; tell the user.");
+  }
   if (from.chiefOfStaff && (target.section?.trim() ?? "") !== (from.section?.trim() ?? "")) {
     return refuse("As a chief of staff you may only message bots in your own section. Do not retry; tell the user.");
   }
 
   // Room ledger: an explicit room wins, then the conversation this bot is
   // already in (so A→B→C stays ONE room and ONE budget), then any open room
-  // with this peer, and only then a new one.
-  const active = peerTurn.get(fromBotId);
+  // with this peer, and only then a new one. A GROUP room is never inherited:
+  // a bot answering in a group that then writes to an outsider would drag that
+  // outsider into the group's transcript.
+  const inherited = (peerTurn.get(fromBotId) ?? [])
+    .map((entry) => rooms.get(entry.roomId))
+    .find((candidate) => candidate?.status === "running" && !candidate.groupId) ?? null;
+  const existing = (roomId ? rooms.get(roomId) : null) ?? inherited ?? rooms.runningWith([fromBotId, toBotId]);
+  if (!existing) {
+    const cooling = budgetCooldownLeft(fromBotId, toBotId);
+    if (cooling > 0) {
+      return refuse(
+        `Your last conversation with that bot ran out of budget ${Math.ceil(cooling / 60_000)} minute(s) ago. Do not open another one; report to the user instead.`,
+      );
+    }
+  }
   const room =
-    (roomId ? rooms.get(roomId) : null) ??
-    (active ? rooms.get(active.roomId) : null) ??
-    rooms.runningWith([fromBotId, toBotId]) ??
+    existing ??
     (() => {
       const opened = rooms.create({
         task: message.slice(0, 200),
@@ -586,10 +686,12 @@ async function deliverPeerMessage(
 
   const max = collabMaxMessages();
   if (budgetLeft(room, max) <= 0) {
+    startBudgetCooldown(room.id);
     closeRoom(room.id, "done", `message budget spent (${max})`);
     return refuse(`Conversation budget spent (${max} messages) - wrap up and report to the user. Do not retry.`);
   }
   if (Date.now() - room.createdAt >= collabMaxMs()) {
+    startBudgetCooldown(room.id);
     closeRoom(room.id, "done", "time budget spent");
     return refuse("This conversation ran out of time - wrap up and report to the user. Do not retry.");
   }
@@ -603,29 +705,54 @@ async function deliverPeerMessage(
   if (!isDuplicateOfLast(room, fromBotId, message)) rooms.append(room.id, fromBotId, message);
   broadcast({ kind: "room", room: rooms.get(room.id) });
   appendBotMail({ from: fromBotId, to: toBotId, text: message, status: "delivered" });
-  if (active) active.replied = true;
+  // Answered only the bot we are actually writing TO: forwarding work to a
+  // third bot is not an answer, and marking it as one left the original sender
+  // waiting on a reply that never came.
+  for (const entry of peerTurn.get(fromBotId) ?? []) if (entry.fromBotId === toBotId) entry.replied = true;
 
   const envelope = peerEnvelope(from, message);
   const bubble = store.appendMessage(target.threadId, { role: "user", kind: "text", text: envelope });
   broadcast({ kind: "message", threadId: target.threadId, message: bubble });
-  peerTurn.set(toBotId, { fromBotId, roomId: room.id, replied: false });
+  // A live turn is `activeCommsDepth`, not `busy`: accepting a message lights
+  // `busy` on its own, and a turn that has not started yet still reads what is
+  // waiting for it.
+  const answer: PeerAnswer = { fromBotId, roomId: room.id, replied: false, deferred: activeCommsDepth.has(toBotId) };
+  peerTurn.set(toBotId, [...(peerTurn.get(toBotId) ?? []), answer]);
   const status = await deliverToActiveTurnOrQueue(toBotId, envelope, "bot", { attachments: [], origin: "bot" });
+  // Steering puts the text INSIDE the running turn, so that turn does answer it.
+  if (status === "steered") answer.deferred = false;
   return { status, roomId: room.id, note: "" };
 }
 
+/** Both markers count only as the CLOSING line of a reply. Matched anywhere,
+ * a bot quoting the protocol ("end with [TASK COMPLETE] when we are done")
+ * would close the room mid-conversation. */
+const DONE_MARKER_AT_END = new RegExp(`\\n?\\[${ROOM_DONE_MARKER.slice(1, -1)}\\]\\s*$`);
+const NO_REPLY_MARKER = "[NO REPLY]";
+
 /** A finished turn that was answering a peer routes its prose back — unless
- * the bot chose silence ([NO REPLY]) or declared the whole task done. */
-async function routePeerReply(botId: string, peer: { fromBotId: string; roomId: string }, text: string): Promise<void> {
+ * the bot chose silence ([NO REPLY]) or declared the whole task done.
+ * `mayDelegate` is the verdict of the turn that just ended: it is read in the
+ * bus handler, because `clearTurnPolicy` runs right after this is scheduled. */
+async function routePeerReply(
+  botId: string,
+  peer: PeerAnswer,
+  text: string,
+  mayDelegate: boolean,
+): Promise<void> {
   const room = rooms.get(peer.roomId);
-  const markerAt = text.indexOf(ROOM_DONE_MARKER);
-  const visible = (markerAt >= 0 ? text.slice(0, markerAt) : text).trim();
-  if (markerAt >= 0) {
+  const done = DONE_MARKER_AT_END.test(text);
+  const visible = (done ? text.replace(DONE_MARKER_AT_END, "") : text).trim();
+  if (done) {
     if (visible && room && !isDuplicateOfLast(room, botId, visible)) rooms.append(peer.roomId, botId, visible);
     closeRoom(peer.roomId, "done");
     return;
   }
   // eliza: silence is a valid contribution — no thank-you turns.
-  if (!visible || /\[NO REPLY\]/i.test(text)) return;
+  if (!visible || visible === NO_REPLY_MARKER) return;
+  // A bot whose delegation was off for this turn does not get to answer a peer
+  // through the back door of the safety net.
+  if (!mayDelegate) return;
   await deliverPeerMessage(botId, peer.fromBotId, visible, peer.roomId);
 }
 
@@ -1146,6 +1273,7 @@ bus.subscribe((event: RuntimeEvent) => {
         pendingBotAttachments.delete(event.threadId);
         const replyModel = turnModelByThread.get(event.threadId);
         turnModelByThread.delete(event.threadId);
+        turnAssistantText.set(event.threadId, [...(turnAssistantText.get(event.threadId) ?? []), event.text]);
         pushMessage({
           role: "bot",
           kind: "text",
@@ -1251,6 +1379,7 @@ bus.subscribe((event: RuntimeEvent) => {
       // z nią — inaczej NASTĘPNA, niezwiązana tura wysłałaby swój tekst do
       // nadawcy sprzed awarii.
       peerTurn.delete(bot.id);
+      turnAssistantText.delete(event.threadId);
       pushMessage({ role: "bot", kind: "activity", tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false } });
       endTurnPush(bot.id, "failed", event.message.slice(0, 120));
       // watchdog: provider padl bez turn.completed -> zwolnij busy
@@ -1281,10 +1410,27 @@ bus.subscribe((event: RuntimeEvent) => {
       // peer and did not call a peer tool itself still gets its prose routed
       // back. Without it the most natural thing a model does — just write the
       // answer — would end the conversation in silence.
-      const answering = peerTurn.get(bot.id);
-      peerTurn.delete(bot.id);
-      if (answering && !answering.replied) {
-        void routePeerReply(bot.id, answering, lastReply).catch((error) =>
+      //
+      // Only text THIS turn produced may go back. `lastReply` walks the whole
+      // thread, so a peer turn that ended in tool calls alone would forward the
+      // bot's previous, unrelated answer to a bot that never asked for it.
+      const saidThisTurn = (turnAssistantText.get(event.threadId) ?? []).join("\n").trim();
+      turnAssistantText.delete(event.threadId);
+      const waiting = (peerTurn.get(bot.id) ?? []).filter((entry) => !entry.replied);
+      // A message that queued behind THIS turn is read by the next one; it is
+      // held over instead of being answered with text written before it landed.
+      const answering = waiting.filter((entry) => !entry.deferred);
+      const held = waiting.filter((entry) => entry.deferred);
+      for (const entry of held) entry.deferred = false;
+      if (held.length) peerTurn.set(bot.id, held);
+      else peerTurn.delete(bot.id);
+      if (answering.length) {
+        const mayDelegate = canUseIntegration(bot.threadId, "delegation");
+        void (async () => {
+          // Every bot still waiting on this turn gets the answer; sequential so
+          // the room ledger and the budget see one message at a time.
+          for (const entry of answering) await routePeerReply(bot.id, entry, saidThisTurn, mayDelegate);
+        })().catch((error) =>
           console.warn(`[multibot] peer reply from ${bot.id} failed:`, error instanceof Error ? error.message : error),
         );
       }
@@ -2050,6 +2196,7 @@ opts?: {
         clearTurnPolicy(bot.threadId);
         activeCommsDepth.delete(bot.id); // multibot (F9): tura padła — licznik też
         peerTurn.delete(bot.id);
+        turnAssistantText.delete(turnThreadId);
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
         drainQueuedUserMessages(bot.id);
       }
@@ -3083,7 +3230,6 @@ const server = createServer(async (req, res) => {
             if (!group || !group.bot_ids.every((botId) => canBotContact(caller, store.bot(botId)))) return json(res, 404, { error: "no such group" });
             const message = String(body.message ?? "").trim();
             if (!message) return json(res, 422, { error: "message required" });
-            groupStore.append(group.id, { from: fromBotId, text: message });
             const groupBots = group.bot_ids
               .map((engineId) => store.botByThread(threadIdOfEngineBot(engineId) ?? ""))
               .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot) && bot?.id !== fromBotId);
@@ -3102,6 +3248,10 @@ const server = createServer(async (req, res) => {
             const sent = [];
             for (const target of targets) sent.push(await deliverPeerMessage(fromBotId, target.id, message, room.id));
             const refused = sent.find((one) => one.status === "refused");
+            // The group log records what was actually delivered: appending
+            // before the ACL check wrote refused messages into the room's
+            // history as if they had been sent.
+            if (sent.some((one) => one.status !== "refused")) groupStore.append(group.id, { from: fromBotId, text: message });
             return json(res, 202, {
               accepted: true,
               roomId: room.id,
@@ -3870,6 +4020,7 @@ const server = createServer(async (req, res) => {
       clearTurnPolicy(bot.threadId);
       activeCommsDepth.delete(bot.id);
       peerTurn.delete(bot.id); // przerwana tura nie odpisuje koledze
+      turnAssistantText.delete(bot.threadId);
       stopScreenPoller(bot.id);
       releaseTurnSlot(bot.id);
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
@@ -4842,6 +4993,14 @@ server.listen(PORT, HOST, () => {
   // multibot (A2): rozgrzewka rusza PO podniesieniu HTTP i nie czeka na nic —
   // serwer odpowiada od pierwszej sekundy, a workery wstają w tle.
   void warmBots().catch((e) => console.warn("[multibot] warmup failed:", e));
+  // A conversation whose bots simply went quiet must still settle and report;
+  // the wall clock cannot wait for the next message that may never come.
+  // ponytail: jedno zamiatanie na minutę na CAŁĄ listę pokojów — pokojów są
+  // dziesiątki, nie miliony; przy większej skali należy się kolejka terminów.
+  setInterval(sweepExpiredRooms, Math.min(60_000, Math.max(1_000, collabMaxMs()))).unref?.();
+  // A room whose turn died with the previous process comes back "failed";
+  // its owner still deserves to hear how far it got.
+  for (const roomId of rooms.recovered) reportRoom(roomId, "failed", "the server restarted mid-conversation");
   // multibot: w trybie „każdy bot zawsze active" worker potrafi zniknąć bez
   // naszego udziału — Android przy braku pamięci ubija bezczynne procesy (LMK),
   // a wtedy bot cicho wraca do zimnego startu. Co minutę sprawdzamy więc, kto

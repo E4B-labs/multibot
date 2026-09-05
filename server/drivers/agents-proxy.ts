@@ -53,7 +53,7 @@ const TOOLS = [
   {
     name: "list_bots",
     description:
-      "List the other bots (agents) in this MultiBot workspace you can message, with what each one does, its model and whether it's busy. Call this before ask_bot to discover who's available and pick the bot whose description matches the task.",
+      "List the other bots (agents) in this MultiBot workspace you can message, with what each one does and its model. Call it before send_bot_mail to pick the bot whose description matches the task - address one bot at a time, and choose by what it does, never by name alone. Busy does not matter: a message reaches a working bot just as well, as a turn it takes when it gets there.",
     inputSchema: { type: "object", properties: {} },
   },
   {

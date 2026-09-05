@@ -204,8 +204,8 @@ function handle(msg: any) {
       if (mode === "room") {
         // collaboration-room turn: one contribution per process, so progress
         // lives in a counter file (FAKE_ACP_ROOM_COUNTER) — the first turn
-        // contributes plain work, the second ends with the done marker. That
-        // gives runCollab a full two-turn round before the room settles.
+        // contributes plain work, the second ends with the done marker, so a
+        // room gets a full exchange both ways before it settles.
         const counterFile = process.env.FAKE_ACP_ROOM_COUNTER;
         let n = 0;
         if (counterFile) {

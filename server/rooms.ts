@@ -57,6 +57,9 @@ const ROOMS_FILE = join(DATA_DIR, "rooms.json");
 export class RoomStore {
   private rooms = new Map<string, RoomRecord>();
   private readonly filePath: string;
+  /** Rooms whose turn died with the previous process. The harness reports them
+   * to their owners at boot; the store itself has no way to reach a chat. */
+  readonly recovered: string[] = [];
 
   constructor(filePath = ROOMS_FILE) {
     this.filePath = filePath;
@@ -72,6 +75,7 @@ export class RoomStore {
           // No worker resumes after a restart; preserve transcript, mark turn stopped.
           status: room.status === "running" ? "failed" : room.status,
         });
+        if (room.status === "running") this.recovered.push(room.id);
       }
     } catch {
       // First run or unreadable old file: start with no rooms.

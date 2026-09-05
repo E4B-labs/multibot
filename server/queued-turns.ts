@@ -15,6 +15,10 @@ export function combineQueuedMessages(texts: string[]): string {
 }
 
 export class QueuedUserMessages {
+  // ponytail: kolejka żyje tylko w pamięci - restart gubi wiadomość peera,
+  // która została prżyjeta, ale jeszcze nie zdrenowana. Świadomie: treść i tak
+  // zostaje w `BotMailStore` i w transkrypcie pokoju, więc nic nie znika bez
+  // śladu; trwała kolejka dopiero gdyby restarty zdarzały się w trakcie tury.
   private queues = new Map<string, string[]>();
 
   push(botId: string, text: string): void {

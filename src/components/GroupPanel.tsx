@@ -97,7 +97,12 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
   // multibot: odpowiedzi NIE czekamy. Bot dostaje zwykłą turę i odpisuje we
   // własnym czasie, a wymiana leci ramkami SSE `room` do wspólnego pokoju
   // grupy — trzymanie tu `await` na sumę tur wieszało panel na minuty.
-  const roomEntries: Entry[] = (state.rooms.find((room) => room.groupId === group.id)?.transcript ?? []).map(
+  // Rooms accumulate: a finished one keeps its groupId, so `find` would pin
+  // the panel to the oldest conversation forever. Newest open room wins.
+  const groupRoom = state.rooms
+    .filter((room) => room.groupId === group.id && room.status === "running")
+    .at(-1);
+  const roomEntries: Entry[] = (groupRoom?.transcript ?? []).map(
     (message) => ({ from: message.from, text: message.text, at: message.at }),
   );
 
