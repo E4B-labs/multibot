@@ -25,7 +25,7 @@ function normalizeAccess(value: unknown): ComposerAccess {
   return value === "read-only" || value === "full" ? value : "approval";
 }
 
-function ComposerAccessPill({ bot }: { bot: Bot }) {
+function ComposerAccessPill({ bot, collapsed }: { bot: Bot; collapsed: boolean }) {
   const polish = useLanguage() === "pl";
   const [access, setAccess] = useState<ComposerAccess>("approval");
   const [ready, setReady] = useState(false);
@@ -81,13 +81,19 @@ function ComposerAccessPill({ bot }: { bot: Bot }) {
         aria-expanded={open}
         aria-haspopup="menu"
         className={cn(
-          "flex h-8 items-center gap-1 rounded-full px-2 text-[11px] font-medium",
+          "flex items-center rounded-full text-[11px] font-medium",
+          composerPillShape(collapsed),
           open ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised hover:text-ink",
         )}
         title={`${polish ? "Dostęp" : "Access"}: ${polish ? ACCESS_LABELS[access].pl : ACCESS_LABELS[access].en}`}
+        aria-label={`${polish ? "Dostęp" : "Access"}: ${polish ? ACCESS_LABELS[access].pl : ACCESS_LABELS[access].en}`}
       >
         <Shield size={14} />
-        <span className="hidden lg:inline">{polish ? ACCESS_LABELS[access].pl : ACCESS_LABELS[access].en}</span>
+        {/* multibot: podpis chowa `collapsed`, nie osobna bramka `lg:`. Przy
+            dwóch warunkach naraz poniżej 1024 px wychodziła pigułka bez
+            podpisu, ale wciąż z `px-2` — 30 px obok 32-pikselowych kwadratów
+            sąsiadów. Jeden warunek = jeden kształt. */}
+        {!collapsed && <span>{polish ? ACCESS_LABELS[access].pl : ACCESS_LABELS[access].en}</span>}
       </button>
       {open && (
         <div role="menu" className="absolute bottom-full right-0 z-30 mb-2 min-w-44 overflow-hidden rounded-xl border border-hairline/40 bg-card p-1 shadow-xl">
@@ -237,6 +243,38 @@ const supportsMaxReasoning = (model: string) => model === "gpt-6-astra" || model
  * projekty tsconfig, więc ta jedna linia zostaje zduplikowana. */
 export function fastModeAvailable(driverKind: string | undefined, model: string): boolean {
   return driverKind === "codex" && model !== "gpt-5.4-mini";
+}
+
+/** multibot: czy z prawej stoi otwarty panel boczny, czyli czy kolumna czatu
+ * jest zwężona. Wtedy pigułki composera (rozumowanie, tryb szybki, dostęp)
+ * zwijają się do samej ikony — podpis mówi `title` i `aria-label`.
+ *
+ * Liczą się WYŁĄCZNIE panele będące `<aside>` obok czatu (App.tsx): ustawienia
+ * bota, inspektor, komputer, rutyny, skille. `pluginsOpen` i `teamMapOpen` to
+ * nakładki na całą powłokę (`absolute inset-0`), a grupa, pokój, poczta
+ * i ustawienia aplikacji renderują się ZAMIAST ChatView — pod żadnym z nich
+ * composera nie widać, więc nie mają czego zwijać. */
+export function sidePanelOpen(panels: {
+  settingsOpen: boolean;
+  inspectorOpen: boolean;
+  computerOpen: boolean;
+  routinesOpen: boolean;
+  skillsOpen: boolean;
+}): boolean {
+  return (
+    panels.settingsOpen ||
+    panels.inspectorOpen ||
+    panels.computerOpen ||
+    panels.routinesOpen ||
+    panels.skillsOpen
+  );
+}
+
+/** Pigułka composera: pełna (ikona + podpis) albo zwinięta do kwadratu 32 px.
+ * Ten sam obrys co przyciski mikrofonu i załącznika, więc zwinięty rząd jest
+ * równy, a odstępy między ikonami nie rozjeżdżają się o wewnętrzny padding. */
+export function composerPillShape(collapsed: boolean): string {
+  return collapsed ? "size-8 justify-center px-0" : "h-8 gap-1 px-2";
 }
 
 export function reasoningLevels(model: string) {
@@ -583,7 +621,13 @@ export function Composer({ bot }: { bot: Bot }) {
     });
   };
 
+  // multibot: otwarty panel boczny zwęża kolumnę czatu — pigułki idą wtedy
+  // na same ikony (patrz sidePanelOpen).
+  const pillsCollapsed = sidePanelOpen(state);
   const availableReasoning = reasoningLevels(bot.modelSelection.model);
+  const reasoningLabel =
+    availableReasoning.find((item) => item.id === reasoning)?.label ?? (polish ? "Domyślny" : "Default");
+  const reasoningTitle = `${polish ? "Rozumowanie" : "Reasoning"}: ${reasoningLabel}`;
   const fastAvailable = fastModeAvailable(
     state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.driverKind,
     bot.modelSelection.model,
@@ -902,7 +946,12 @@ export function Composer({ bot }: { bot: Bot }) {
             ))}
           </div>
         )}
-        <div className="relative flex min-h-12 items-center gap-2 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5">
+        {/* multibot: `gap-1.5` (6 px) zamiast `gap-2` — 8 px odstępu plus po
+            8 px wewnętrznego paddingu z każdej strony pigułki dawało między
+            samymi ikonami ~24 px pustki i rząd wyglądał na rozstrzelony
+            (Kacper). Zwinięte pigułki są teraz kwadratami 32 px jak mikrofon
+            i spinacz, więc cały rząd trzyma jeden rytm. */}
+        <div className="relative flex min-h-12 items-center gap-1.5 rounded-2xl border border-hairline/40 bg-raised/60 py-2 pl-3 pr-2.5">
         {/* Pasek: maksymalnie jeden bot, animowany, i tylko gdy ma co pokazać. */}
         {strip && (
           <div className="pointer-events-none absolute bottom-[calc(100%+8px)] left-0 z-20 hidden size-[40px] items-center justify-center md:flex" title={botDisplayName(bot, polish ? "pl" : "en")}>
@@ -1004,17 +1053,23 @@ export function Composer({ bot }: { bot: Bot }) {
           <button
             onClick={() => setReasoningOpen((open) => !open)}
             aria-expanded={reasoningOpen}
-            aria-label={polish ? "Poziom rozumowania" : "Reasoning effort"}
-            className="flex h-8 items-center gap-1 rounded-full px-2 text-[11px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
-            title={`${polish ? "Rozumowanie" : "Reasoning"}: ${availableReasoning.find((item) => item.id === reasoning)?.label ?? (polish ? "Domyślny" : "Default")}`}
+            // multibot: poziom MUSI siedzieć w `aria-label`, nie tylko w `title`.
+            // aria-label wygrywa nazwę dostępną i spycha `title` do roli opisu,
+            // którego duża część czytników nie czyta — a przy zwiniętej pigułce
+            // to jedyne miejsce, z którego da się poznać ustawiony poziom.
+            aria-label={reasoningTitle}
+            className={cn(
+              "flex shrink-0 items-center rounded-full text-[11px] font-medium text-ink-secondary hover:bg-raised hover:text-ink",
+              composerPillShape(pillsCollapsed),
+            )}
+            title={reasoningTitle}
           >
             <Brain size={15} />
-            {/* multibot: przy otwartym panelu bota kolumna czatu robi się wąska
-                i podpis poziomu wypychał resztę wiersza — zostaje sama ikona,
-                a poziom mówi dymek i etykieta dla czytników (Kacper 29.08). */}
-            {!state.settingsOpen && (
-              <span>{availableReasoning.find((item) => item.id === reasoning)?.label ?? (polish ? "Domyślny" : "Default")}</span>
-            )}
+            {/* multibot: przy otwartym panelu bocznym kolumna czatu robi się
+                wąska i podpis poziomu wypychał resztę wiersza — zostaje sama
+                ikona, a poziom mówi dymek i etykieta dla czytników
+                (Kacper 29.08, rozszerzone na wszystkie panele boczne). */}
+            {!pillsCollapsed && <span>{reasoningLabel}</span>}
           </button>
           {reasoningOpen && (
             <div className="absolute bottom-full right-0 z-30 mb-2 min-w-32 overflow-hidden rounded-xl border border-hairline/40 bg-card p-1 shadow-xl">
@@ -1043,7 +1098,8 @@ export function Composer({ bot }: { bot: Bot }) {
             aria-pressed={bot.fastMode === true}
             aria-label={polish ? "Tryb szybki" : "Fast mode"}
             className={cn(
-              "flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium",
+              "flex shrink-0 items-center rounded-full text-[11px] font-medium",
+              composerPillShape(pillsCollapsed),
               bot.fastMode ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink",
             )}
             title={
@@ -1053,11 +1109,11 @@ export function Composer({ bot }: { bot: Bot }) {
             }
           >
             <Zap size={15} />
-            {!state.settingsOpen && <span>{polish ? "Szybko" : "Fast"}</span>}
+            {!pillsCollapsed && <span>{polish ? "Szybko" : "Fast"}</span>}
           </button>
         )}
         {/* multibot: szybki przełącznik dostępu bota, obok poziomu rozumowania */}
-        <ComposerAccessPill bot={bot} />
+        <ComposerAccessPill bot={bot} collapsed={pillsCollapsed} />
         <button
           onClick={toggleMic}
           className={cn(

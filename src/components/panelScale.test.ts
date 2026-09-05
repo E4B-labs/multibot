@@ -84,7 +84,11 @@ describe("skala prawego panelu i czatu", () => {
   });
 
   it("podpis poziomu rozumowania znika przy otwartym panelu", () => {
-    expect(composer).toContain("{!state.settingsOpen && (");
+    // warunek przeniósł się z samych ustawień bota na KAŻDY panel boczny —
+    // resztę pilnuje Composer.test.ts („zwijanie pigułek composera")
+    expect(composer).toContain("const pillsCollapsed = sidePanelOpen(state);");
+    expect(composer).toContain("{!pillsCollapsed && <span>{reasoningLabel}</span>}");
+    expect(composer).not.toContain("{!state.settingsOpen && (");
   });
 
   it("przycisk ustawień ma symetryczny obszar podświetlenia", () => {

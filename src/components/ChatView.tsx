@@ -161,7 +161,16 @@ function Bubble({
           // 15 → 11 → 17 → 13 → 15 → 14px, a interlinia zeszła z `leading-relaxed`
           // (1.625) na 1.45: przy otwartym panelu bota kolumna jest wąska i
           // rozstrzelony tekst mieścił po trzy słowa w wierszu.
-          "max-w-[90%] rounded-2xl px-2 py-[5px] text-[14px] leading-[1.45]",
+          //
+          // multibot: `min-w-0 break-words` = koniec poziomego paska w czacie.
+          // Dymek jest elementem flexa, a taki ma `min-width:auto`, więc NIE
+          // kurczy się poniżej swojej szerokości min-content — jeden długi token
+          // bez spacji (URL, ścieżka, base64) rozpychał dymek ponad te 90%,
+          // wiersz `w-full` wystawał poza listę i lista dostawała suwak poziomy.
+          // `min-w-0` zdejmuje blokadę, `break-words` łamie sam token.
+          // `overflow-wrap` dziedziczy się w dół, więc obejmuje też markdown;
+          // bloki kodu zostają nietknięte, bo `white-space:pre` nie zawija.
+          "min-w-0 max-w-[90%] break-words rounded-2xl px-2 py-[5px] text-[14px] leading-[1.45]",
           user ? "whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
           message.pending && "opacity-60",
         )}
@@ -323,7 +332,7 @@ function StreamingBubble({ text }: { text: string }) {
     <div className="flex w-full justify-start">
       {/* multibot: ten sam rozmiar co Bubble — inaczej tekst „skakałby" po
           zakończeniu strumienia */}
-      <div className="max-w-[90%] rounded-2xl bg-card px-2 py-[5px] text-[14px] leading-[1.45] text-ink">
+      <div className="min-w-0 max-w-[90%] break-words rounded-2xl bg-card px-2 py-[5px] text-[14px] leading-[1.45] text-ink">
         <ChatMarkdown text={text} streaming compact />
         <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-ink-secondary align-middle" />
       </div>
@@ -599,7 +608,11 @@ export function ChatView({ bot }: { bot: Bot }) {
           if (!follow && atEnd()) setFollow(true);
         }}
       >
-        <div className="flex w-full flex-col gap-1 pb-10">
+        {/* multibot: `pb-16` (64 px) zamiast `pb-10` — przy dojechaniu na sam
+            dół ostatnia wiadomość kleiła się do pola pisania. Composer stoi
+            w tym samym wierszu flexa, nie na nakładce, więc te 24 px ponad
+            dotychczasowe 40 to czysty oddech pod ostatnim dymkiem. */}
+        <div className="flex w-full min-w-0 flex-col gap-1 pb-16">
           {bot.messages.map((m) => {
             let child: ReactNode;
             switch (m.kind) {
@@ -655,7 +668,7 @@ export function ChatView({ bot }: { bot: Bot }) {
                 {/* SKILL.md stays outside and above its message, on sender side. */}
                 {!!m.attachments?.some((f) => f.name.toLowerCase() === "skill.md") && (
                   <div className={cn("flex w-full", m.role === "user" ? "justify-end" : "justify-start")}>
-                    <div className="mb-2 flex w-full max-w-[70%] flex-col gap-2">
+                    <div className="mb-2 flex w-full min-w-0 max-w-[70%] flex-col gap-2">
                       {m.attachments
                         .filter((f) => f.name.toLowerCase() === "skill.md")
                         .map((f) => (

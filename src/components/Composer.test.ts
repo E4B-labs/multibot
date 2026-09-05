@@ -4,7 +4,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { fastModeAvailable, reasoningLevels, slashVisible, withCommand, type SlashRow } from "./Composer";
+import {
+  composerPillShape,
+  fastModeAvailable,
+  reasoningLevels,
+  sidePanelOpen,
+  slashVisible,
+  withCommand,
+  type SlashRow,
+} from "./Composer";
 
 const row = (kind: SlashRow["kind"], label: string): SlashRow => ({
   id: `${kind}-${label}`,
@@ -123,5 +131,61 @@ describe("pasek nad composerem", () => {
   it("stan awatara liczy stripMascotState, nie samo `bot.busy`", () => {
     expect(composer).toContain("stripMascotState(");
     expect(composer).toContain("state={strip}");
+  });
+});
+
+// multibot: pigułki composera (rozumowanie, tryb szybki, dostęp) zwijają się do
+// samej ikony, kiedy z prawej stoi panel boczny i kolumna czatu jest wąska.
+const PANELS_CLOSED = {
+  settingsOpen: false,
+  inspectorOpen: false,
+  computerOpen: false,
+  routinesOpen: false,
+  skillsOpen: false,
+};
+
+describe("zwijanie pigułek composera", () => {
+  it("bez panelu pigułki zostają pełne", () => {
+    expect(sidePanelOpen(PANELS_CLOSED)).toBe(false);
+  });
+
+  it("KAŻDY panel boczny zwija pigułki, nie tylko ustawienia bota", () => {
+    for (const key of Object.keys(PANELS_CLOSED) as Array<keyof typeof PANELS_CLOSED>) {
+      expect(sidePanelOpen({ ...PANELS_CLOSED, [key]: true })).toBe(true);
+    }
+  });
+
+  it("zwinięta pigułka to kwadrat 32 px bez paddingu, pełna ma podpis i odstęp", () => {
+    expect(composerPillShape(true)).toBe("size-8 justify-center px-0");
+    expect(composerPillShape(false)).toBe("h-8 gap-1 px-2");
+  });
+
+  it("wszystkie trzy pigułki i rząd używają wspólnego warunku", () => {
+    expect(composer).toContain("const pillsCollapsed = sidePanelOpen(state);");
+    // Asercje na obecność, nie na globalną liczbę wystąpień: licznik wywracał
+    // się przy każdym kolejnym poprawnym użyciu flagi.
+    expect(composer).toContain("{!pillsCollapsed && <span>{reasoningLabel}</span>}");
+    expect(composer).toContain('{!pillsCollapsed && <span>{polish ? "Szybko" : "Fast"}</span>}');
+    expect(composer).toContain("<ComposerAccessPill bot={bot} collapsed={pillsCollapsed} />");
+    expect(composer).toContain("{!collapsed && <span>{polish ? ACCESS_LABELS[access].pl");
+    // każda z trzech pigułek bierze kształt ze wspólnego helpera
+    expect(composer.match(/composerPillShape\((?:pillsCollapsed|collapsed)\)/g) ?? []).not.toHaveLength(0);
+    expect(composer).not.toMatch(/className="flex h-8 (?:shrink-0 )?items-center gap-1 rounded-full px-2/);
+  });
+
+  it("zwinięta pigułka rozumowania mówi czytnikowi POZIOM, nie samą nazwę pola", () => {
+    // aria-label wygrywa nazwę dostępną i spycha `title` do opisu, którego
+    // część czytników nie czyta — poziom musi być w obu.
+    expect(composer).toContain("const reasoningTitle = `${polish ? \"Rozumowanie\" : \"Reasoning\"}: ${reasoningLabel}`;");
+    expect(composer).toContain("aria-label={reasoningTitle}");
+    expect(composer).toContain("title={reasoningTitle}");
+    // tryb szybki niesie stan w aria-pressed, więc jemu wystarcza stała nazwa
+    expect(composer).toContain('aria-label={polish ? "Tryb szybki" : "Fast mode"}');
+    expect(composer).toContain("aria-pressed={bot.fastMode === true}");
+  });
+
+  it("odstęp w rzędzie composera zszedł do 6 px", () => {
+    expect(composer).toContain("flex min-h-12 items-center gap-1.5 rounded-2xl");
+    expect(composer).not.toContain("flex min-h-12 items-center gap-2 rounded-2xl");
   });
 });
