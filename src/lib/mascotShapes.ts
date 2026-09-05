@@ -93,8 +93,19 @@ const SHAPES: Record<Exclude<MascotShape, "cursor">, CursorShape> = {
   drop: simple("drop", '<path d="M114 12C94 44 45 83 45 133c0 43 30 70 69 70s69-27 69-70c0-50-49-89-69-121Z" fill="{{GRADIENT}}"/>'),
 };
 
+/**
+ * Nazwa kształtu, którą wolno narysować.
+ *
+ * Nieznana nazwa (bot ustawił sobie `wave`, `gear`, `shield`) spadała na
+ * `SHAPE` — surową sylwetkę kursora z `fill="#000000"`, bez gradientu — więc
+ * maskotka wychodziła czarna. Nieznane wraca teraz na `blob`, czyli na to
+ * samo, co dostaje świeżo utworzony bot.
+ */
+export function resolveShape(value: string | null | undefined): MascotShape {
+  return value === "cursor" || (typeof value === "string" && value in SHAPES) ? (value as MascotShape) : "blob";
+}
+
 export function mascotShape(value: string | null | undefined): CursorShape {
-  return value && value !== "cursor" && value in SHAPES
-    ? SHAPES[value as Exclude<MascotShape, "cursor">]
-    : SHAPE;
+  const name = resolveShape(value);
+  return name === "cursor" ? SHAPE : SHAPES[name];
 }
