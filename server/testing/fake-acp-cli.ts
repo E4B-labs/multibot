@@ -11,6 +11,11 @@
 //                   | ask-peer/send-mail (spawn the injected "agents" MCP server from
 //                     session/new's mcpServers, call list_bots + ask_bot on a
 //                     peer, and reply with what the peer said — the comms e2e)
+//                   | relay (forward to the next bot named for THIS bot in
+//                     FAKE_ACP_RELAY_MAP, then end with [TASK COMPLETE] once
+//                     its hops run out — the peer-conversation ring e2e)
+//   FAKE_ACP_RELAY_MAP  path to a JSON file {botId: [nextBotId, ...]} plus the
+//                   per-bot turn counters the relay mode keeps beside it
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
 //                   argv shape (agent/stdio flags) and env hygiene
 //   FAKE_ACP_PROMPT_DUMP  path to append every received session/prompt as a
@@ -145,9 +150,15 @@ function handle(msg: any) {
       result(msg.id, { sessionId: "fake-acp-session" });
       break;
     }
-    case "session/load":
+    case "session/load": {
+      // A resumed session carries the same mcpServers as a new one; without
+      // capturing them here a restarted process loses its peer tools halfway
+      // through a conversation.
+      const loaded: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
+      agentsMcp = loaded.find((s: any) => s?.name === "agents") ?? agentsMcp;
       result(msg.id, {});
       break;
+    }
     case "session/prompt": {
       // multibot: dowód dla testów, CO fake dostało w prompcie — drivery CLI
       // nie czytają pola `transcript`, więc prompt to jedyny kanał treści.
@@ -193,8 +204,8 @@ function handle(msg: any) {
       if (mode === "room") {
         // collaboration-room turn: one contribution per process, so progress
         // lives in a counter file (FAKE_ACP_ROOM_COUNTER) — the first turn
-        // contributes plain work, the second ends with the done marker. That
-        // gives runCollab a full two-turn round before the room settles.
+        // contributes plain work, the second ends with the done marker, so a
+        // room gets a full exchange both ways before it settles.
         const counterFile = process.env.FAKE_ACP_ROOM_COUNTER;
         let n = 0;
         if (counterFile) {
@@ -246,6 +257,53 @@ function handle(msg: any) {
           params: { update: { sessionUpdate: "agent_message_chunk", content: { text: done ? "goal work from fake step 2\n[GOAL COMPLETE]" : "goal work from fake step 1" } } },
         });
         complete();
+        return;
+      }
+      // relay: the peer-conversation e2e. Each turn looks up its OWN bot id in
+      // the agents MCP env, reads the hop list for it from FAKE_ACP_RELAY_MAP
+      // (a JSON file the test writes once the bots exist) and forwards to the
+      // next bot. When its hops run out it ends the conversation with the done
+      // marker, so a ring A→B→C→A terminates on its own.
+      if (mode === "relay") {
+        const chunk = (text: string) =>
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text } } } });
+        const self = (agentsMcp?.env ?? []).find((e) => e.name === "OMB_BOT_ID")?.value ?? "";
+        const mapFile = process.env.FAKE_ACP_RELAY_MAP ?? "";
+        let hops: string[] = [];
+        let turn = 0;
+        try {
+          hops = (JSON.parse(readFileSync(mapFile, "utf8")) as Record<string, string[]>)[self] ?? [];
+        } catch {
+          hops = [];
+        }
+        const counterFile = `${mapFile}.${self}.count`;
+        try {
+          turn = Number.parseInt(readFileSync(counterFile, "utf8"), 10) || 0;
+        } catch {
+          turn = 0;
+        }
+        try {
+          writeFileSync(counterFile, String(turn + 1));
+        } catch {
+          /* counter is best effort */
+        }
+        const next = hops[turn];
+        if (!next || !agentsMcp) {
+          chunk(`relay ${self} has nothing left to forward\n[TASK COMPLETE]`);
+          complete();
+          return;
+        }
+        void driveMcp(agentsMcp!, [
+          { name: "send_bot_mail", args: () => ({ bot_id: next, message: `relay hop ${turn} from ${self}` }) },
+        ])
+          .then((ack) => {
+            chunk(`forwarded to ${next}: ${ack}`);
+            complete();
+          })
+          .catch((e) => {
+            chunk(`relay error: ${(e as Error).message}`);
+            complete();
+          });
         return;
       }
       if (mode === "send-mail" && agentsMcp) {

@@ -184,6 +184,7 @@ describe("computer on a claude-style driver (live harness)", () => {
         HOME: home,
         USERPROFILE: home,
         OMB_PORT: String(PORT),
+        OMB_ONBOARDING_TURN: "0",
       // multibot (H2): a spawned harness gets a minimal env, so VITEST does not
       // reach it — without this the server would provision REAL containers for
       // every throwaway test bot.

@@ -146,6 +146,7 @@ describe("comms e2e (fake ACP fleet)", () => {
         HOME: home,
         USERPROFILE: home,
         OMB_PORT: String(PORT),
+        OMB_ONBOARDING_TURN: "0",
       // multibot (H2): a spawned harness gets a minimal env, so VITEST does not
       // reach it — without this the server would provision REAL containers for
       // every throwaway test bot.
@@ -207,16 +208,15 @@ describe("comms e2e (fake ACP fleet)", () => {
   });
 
   it(
-    "carries a question from bot A through the agents proxy to bot B and back",
+    "carries a question from bot A through the agents proxy into a real turn of bot B",
     async () => {
       // deterministic roster: hide the seeded bot, add Asker + Helper
       const seeded = (await api("GET", "/api/bots")).body.bots[0];
       await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
-      const selection = { instanceId: "grok", model: "fake-model" };
       const helper = (await api("POST", "/api/bots")).body.bot;
-      await api("PATCH", `/api/bots/${helper.id}`, { name: "Helper", modelSelection: selection });
+      await api("PATCH", `/api/bots/${helper.id}`, { name: "Helper", modelSelection: { instanceId: "grokMail", model: "fake-model" } });
       const asker = (await api("POST", "/api/bots")).body.bot;
-      await api("PATCH", `/api/bots/${asker.id}`, { name: "Asker", modelSelection: selection });
+      await api("PATCH", `/api/bots/${asker.id}`, { name: "Asker", modelSelection: { instanceId: "grok", model: "fake-model" } });
       helperId = helper.id;
       askerId = asker.id;
 
@@ -234,16 +234,18 @@ describe("comms e2e (fake ACP fleet)", () => {
         if (settled && !askerBot.busy) break;
         if (Date.now() > deadline) {
           throw new Error(
-            `A never got the peer reply. messages: ${JSON.stringify(askerBot.messages.slice(-6))}\nstderr: ${stderr.slice(-2000)}`,
+            `A never delivered to the peer. messages: ${JSON.stringify(askerBot.messages.slice(-6))}\nstderr: ${stderr.slice(-2000)}`,
           );
         }
         await new Promise((r) => setTimeout(r, 250));
       }
 
-      // A's answer contains B's actual reply, via the proxy's wrapper
-      const reply = askerBot.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
-      expect(reply.text).toContain("Helper replied:");
-      expect(reply.text).toContain("hello from fake acp"); // B's happy-path turn text
+      // ask_bot no longer blocks: A's own turn ends with the delivery receipt
+      // and B's answer arrives afterwards, as a turn of A's.
+      const receipt = askerBot.messages.find(
+        (m: any) => m.kind === "text" && m.role === "bot" && m.text?.includes("peer says:"),
+      );
+      expect(receipt.text).toContain('"delivered":true');
 
       // visibility: A's thread carries the clickable room chip instead of the
       // old grey activity pill — the pill hid B's reply forever (tokens paid,
@@ -252,18 +254,28 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(chip).toBeTruthy();
       expect(chip.room.ownerBotId).toBe(asker.id);
 
+      // B's turn is started by the harness, not awaited by A, so wait for it
+      const helperDeadline = Date.now() + 25_000;
+      for (;;) {
+        const bot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === helper.id);
+        if (!bot.busy && bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"))) break;
+        if (Date.now() > helperDeadline) throw new Error(`B never took its turn. stderr: ${stderr.slice(-2000)}`);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
       // multibot: koperta JAKO WEJŚCIE tury B jest przypięta przez zrzut promptów
       // fake CLI — to, co bot dostaje, nie zależy od tego, co widać w UI.
       const prompts = readFileSync(join(home, "acp-prompts.ndjson"), "utf8");
       expect(prompts).toContain("[Message from @Asker");
       expect(prompts).toContain("ping from fake");
 
-      // B ran a real turn, but its own chat stays EMPTY for the exchange:
-      // the whole conversation lives in the room (regression guard below).
+      // B ran a REAL turn on its own thread: the envelope is a message in B's
+      // own chat with A's name on it, and B's answer is B's own reply there.
+      // That is the whole point - B can answer, ask back, or pull in a third
+      // bot, none of which an isolated one-shot thread could do.
       const helperBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === helper.id);
-      expect(helperBot.messages.some((m: any) => m.role === "user")).toBe(false);
-      expect(helperBot.messages.some((m: any) => m.kind === "text" && m.text?.includes("hello from fake acp"))).toBe(false);
-      expect(helperBot.busy).toBeFalsy();
+      expect(helperBot.messages.some((m: any) => m.role === "user" && m.text?.includes("[Message from @Asker"))).toBe(true);
+      expect(helperBot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.includes("hello from fake acp"))).toBe(true);
     },
     40_000,
   );
@@ -312,9 +324,16 @@ describe("comms e2e (fake ACP fleet)", () => {
       // wołający dostaje ODPOWIEDŹ, a nie ciszę: treść nieistotna, liczy się powrót
       const reply = askerBot.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
       expect(reply?.text ?? "").not.toBe("");
-      // pytany bot nie zostaje zablokowany jako zajęty po własnej awarii
-      const crasherBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === crasher.id);
-      expect(crasherBot.busy).toBeFalsy();
+      // pytany bot nie zostaje zablokowany jako zajety po wlasnej awarii -
+      // jego tura rusza teraz NIEZALEZNIE od wolajacego, wiec na jej koniec
+      // czeka sie osobno
+      const crashDeadline = Date.now() + 25_000;
+      for (;;) {
+        const crasherBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === crasher.id);
+        if (!crasherBot.busy) break;
+        if (Date.now() > crashDeadline) throw new Error("pytany bot zostal zajety po wlasnej awarii");
+        await new Promise((r) => setTimeout(r, 250));
+      }
     },
     45_000,
   );
@@ -351,7 +370,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       for (;;) {
         const bots = (await api("GET", "/api/bots")).body.bots;
         const t2 = bots.find((b: any) => b.id === target.id);
-        const dostal = t2.messages.some((m: any) => m.role === "user" && m.text?.includes("Agent mail from"));
+        const dostal = t2.messages.some((m: any) => m.role === "user" && m.text?.includes("[Message from @"));
         if (dostal) break;
         if (Date.now() > deadline) {
           throw new Error(
@@ -373,48 +392,13 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(room).toBeTruthy();
       expect(room.task).toBe("ping from fake");
       expect(room.transcript.length).toBeGreaterThanOrEqual(2);
-      // pytanie wołającego pierwsze, odpowiedź wołanego druga — w tej kolejności
+      // pytanie wołającego pierwsze, odpowiedź wołanego po nim
       expect(room.transcript[0]).toMatchObject({ from: askerId, text: "ping from fake" });
-      expect(room.transcript[1]).toMatchObject({ from: helperId, text: "hello from fake acp" });
+      expect(room.transcript.some((m: any) => m.from === helperId && m.text === "hello from fake acp")).toBe(true);
     },
     15_000,
   );
 
-  // multibot: właściciel chce ROZMOWY, nie jednej odpowiedzi — A daje zadanie,
-  // B robi, A ocenia, B poprawia. Pokój ask_bot przechodzi po pierwszej
-  // wymianie w ręce runCollab, więc transkrypt rośnie dalej i dopiero potem
-  // pokój zamyka się sam (marker [TASK COMPLETE] albo sufit rund).
-  it(
-    "the ask_bot room keeps alternating after the first answer, then settles to done",
-    async () => {
-      const roomOf = async () =>
-        (await api("GET", "/api/rooms")).body.rooms.find((r: any) => r.ownerBotId === askerId);
-
-      const deadline = Date.now() + 60_000;
-      for (;;) {
-        const room = await roomOf();
-        if ((room?.transcript?.length ?? 0) > 2 && room?.status !== "running") break;
-        if (Date.now() > deadline) {
-          throw new Error(
-            `pokój ask_bot nie kontynuował rozmowy: ${JSON.stringify({ status: room?.status, len: room?.transcript?.length })}
-stderr: ${stderr.slice(-2000)}`,
-          );
-        }
-        await new Promise((r) => setTimeout(r, 250));
-      }
-
-      const room = await roomOf();
-      // pełna wymiana PO pierwszej odpowiedzi: pytanie, odpowiedź, wkładka
-      // wołającego i wkładka wołanego — na starym kodzie transkrypt kończył
-      // się na dwóch (albo trzech) wpisach i statusie "done"
-      expect(room.transcript.length).toBeGreaterThanOrEqual(4);
-      // wołający wraca do rozmowy, nie tylko odbiorca
-      expect(room.transcript.slice(2).some((m: any) => m.from === askerId)).toBe(true);
-      // i pętla ma dno: pokój kończy się sam, więc wskaźnik "myśli" w UI gaśnie
-      expect(room.status).toBe("done");
-    },
-    70_000,
-  );
 
   it(
     "delivers asynchronous mail to a fresh target turn and keeps it durable",
@@ -435,77 +419,25 @@ stderr: ${stderr.slice(-2000)}`,
       let receiverBot: any;
       for (;;) {
         receiverBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === receiver.id);
-        if (!receiverBot?.busy && receiverBot?.messages.some((m: any) => m.text?.includes("[Agent mail from @Mail Sender]"))) break;
+        if (!receiverBot?.busy && receiverBot?.messages.some((m: any) => m.text?.includes("[Message from @Mail Sender"))) break;
         if (Date.now() > deadline) throw new Error(`mail target never settled. stderr: ${stderr.slice(-2000)}`);
         await new Promise((r) => setTimeout(r, 250));
       }
 
       const thread = (await api("GET", "/api/mail")).body.threads.find((t: any) => t.messages?.some((m: any) => m.text === "async ping"));
       expect(thread).toBeTruthy();
-      expect(thread.messages).toHaveLength(2);
+      // Round trip, not an exact count: the fake mails on EVERY turn, so a
+      // reply that starts one more turn legitimately adds one more letter.
+      expect(thread.messages.length).toBeGreaterThanOrEqual(2);
       expect(thread.messages[0]).toMatchObject({ from: sender.id, to: receiver.id, text: "async ping", status: "delivered" });
-      expect(thread.messages[1]).toMatchObject({ from: receiver.id, to: sender.id, text: "async ping", status: "delivered" });
-      expect(receiverBot.messages.some((m: any) => m.text?.includes("[Agent mail from @Mail Sender]"))).toBe(true);
+      expect(thread.messages.some((m: any) => m.from === receiver.id && m.to === sender.id && m.text === "async ping" && m.status === "delivered")).toBe(true);
+      expect(receiverBot.messages.some((m: any) => m.text?.includes("[Message from @Mail Sender"))).toBe(true);
       const senderBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === sender.id);
-      expect(senderBot.messages.some((m: any) => m.text?.includes("[Agent mail from @Mail Receiver]"))).toBe(true);
+      expect(senderBot.messages.some((m: any) => m.text?.includes("[Message from @Mail Receiver"))).toBe(true);
     },
     40_000,
   );
 
-  // multibot: wymiana bot→bot nie może zostawić ŻADNEGO śladu na głównym
-  // kanacie adresata — żadnej koperty "[Message from @…]", żadnej odpowiedzi,
-  // żadnej pigułki aktywności. Całość widoczna wyłącznie w pokoju współpracy.
-  it(
-    "keeps a bot-to-bot exchange entirely off the target's main chat",
-    async () => {
-      const selection = { instanceId: "grok", model: "fake-model" };
-      const helper = (await api("POST", "/api/bots")).body.bot;
-      await api("PATCH", `/api/bots/${helper.id}`, { name: "Quiet Helper", modelSelection: selection });
-      const asker = (await api("POST", "/api/bots")).body.bot;
-      await api("PATCH", `/api/bots/${asker.id}`, { name: "Quiet Asker", modelSelection: selection });
-
-      // licznik STARTOWY po rename'ach — każdy PATCH dokleja pigułkę "renamed"
-      const countHelperMessages = async () =>
-        (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === helper.id).messages.length;
-      const before = await countHelperMessages();
-
-      expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Quiet Helper ping once more" })).status).toBe(202);
-
-      // ten sam tor co w pierwszym e2e: A pyta przez proxy agents, B odpowiada
-      const deadline = Date.now() + 25_000;
-      for (;;) {
-        const askerBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
-        const settled =
-          askerBot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.includes("peer says:")) &&
-          !askerBot.busy;
-        if (settled) break;
-        if (Date.now() > deadline) {
-          throw new Error(
-            `second exchange never settled. messages: ${JSON.stringify(askerBot.messages.slice(-4))}\nstderr: ${stderr.slice(-2000)}`,
-          );
-        }
-        await new Promise((r) => setTimeout(r, 250));
-      }
-
-      // NIEPODWAŻALNE: główna nitka adresata zyskała ZERO wpisów
-      expect(await countHelperMessages()).toBe(before);
-
-      // ...a transkrypt pokoju ma obie strony wymiany, w kolejności
-      const room = (await api("GET", "/api/rooms")).body.rooms.findLast((r: any) => r.ownerBotId === asker.id);
-      expect(room).toBeTruthy();
-      expect(room.transcript.length).toBeGreaterThanOrEqual(2);
-      // fake ACP pyta peera hardcoded "ping from fake" — to on ląduje w pokoju
-      // jako strona wołającego, nie tekst użytkownika do A
-      expect(room.transcript[0]).toMatchObject({ from: asker.id, text: "ping from fake" });
-      expect(room.transcript[1]).toMatchObject({ from: helper.id, text: "hello from fake acp" });
-
-      // koperta dalej jest WEJŚCIEM tury adresata (zrzut promptów fake CLI)
-      const prompts = readFileSync(join(home, "acp-prompts.ndjson"), "utf8");
-      expect(prompts).toContain("[Message from @Quiet Asker");
-      expect(prompts).toContain("ping from fake");
-    },
-    40_000,
-  );
 
   // Regresja: `ask_user` niósł wyłącznie broker uprawnień claude'a, który
   // montuje się tylko przy włączonych zgodach i tylko u tego jednego drivera.
@@ -513,9 +445,19 @@ stderr: ${stderr.slice(-2000)}`,
   it(
     "carries a bot's question to the owner and folds the answer back into the turn",
     async () => {
+      // izolacja: rozmowy botów z wcześniejszych testów toczą się dalej w tle,
+      // a `list_bots` bierze pierwszego WIDOCZNEGO — bez tego Curious dostaje
+      // cudzą wiadomość w środku własnego pytania do człowieka. Ukrycie, nie
+      // zamykanie pokojów: `agents.list` filtruje ukryte, więc świeży bot nie
+      // trafia nikomu do rosteru, a zamknięty pokój nie zatrzymuje dostawy —
+      // `deliverPeerMessage` po prostu otworzyłby następny.
+      for (const b of (await api("GET", "/api/bots")).body.bots) {
+        await api("PATCH", `/api/bots/${b.id}`, { hidden: true });
+      }
       const asker = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${asker.id}`, {
         name: "Curious",
+        hidden: true,
         modelSelection: { instanceId: "grokAsk", model: "fake-model" },
       });
 
@@ -546,11 +488,12 @@ stderr: ${stderr.slice(-2000)}`,
       ).toBe(200);
 
       // odpowiedź człowieka wraca do modelu i domyka turę
+      const answerDeadline = Date.now() + 25_000;
       for (;;) {
         const bot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
         const reply = bot?.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
         if (reply?.text?.includes("owner says: Postgres") && !bot.busy) break;
-        if (Date.now() > deadline) throw new Error(`answer never reached the bot. stderr: ${stderr.slice(-2000)}`);
+        if (Date.now() > answerDeadline) throw new Error(`answer never reached the bot. stderr: ${stderr.slice(-2000)}`);
         await new Promise((r) => setTimeout(r, 250));
       }
     },
@@ -560,8 +503,14 @@ stderr: ${stderr.slice(-2000)}`,
   // multibot: karta przekazania komputera. Logowanie, 2FA i captcha to nie jest
   // pytanie w tekście — człowiek musi usiąść do TEGO ekranu, a bot ma czekać.
   const handoffCard = async (name: string) => {
+    // izolacja jak przy `ask_user`: rozmowy botów z wcześniejszych testów żyją
+    // dalej w tle i `list_bots` bierze pierwszego WIDOCZNEGO, więc świeży bot
+    // dostawałby cudzą wiadomość w środku własnego przekazania komputera
+    for (const b of (await api("GET", "/api/bots")).body.bots) {
+      await api("PATCH", `/api/bots/${b.id}`, { hidden: true });
+    }
     const bot = (await api("POST", "/api/bots")).body.bot;
-    await api("PATCH", `/api/bots/${bot.id}`, { name, modelSelection: { instanceId: "grokHandoff", model: "fake-model" } });
+    await api("PATCH", `/api/bots/${bot.id}`, { name, hidden: true, modelSelection: { instanceId: "grokHandoff", model: "fake-model" } });
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "open linkedin" })).status).toBe(202);
     const deadline = Date.now() + 25_000;
     for (;;) {
