@@ -414,7 +414,12 @@ function handle(msg: any) {
         const call =
           mode === "notify-user"
             ? { name: "notify_user", args: () => ({ title: "Raport gotowy", body: "Zebrałem dane z wczoraj." }) }
-            : { name: "request_connection", args: () => ({ connector: "google-workspace", why: "Muszę wysłać maila." }) };
+            : {
+              name: "request_connection",
+              // FAKE_ACP_CONNECTOR: the model names the APP it needs
+              // ("discord"), not one of the four fixed panel targets.
+              args: () => ({ connector: process.env.FAKE_ACP_CONNECTOR ?? "google-workspace", why: "Muszę wysłać maila." }),
+            };
         void driveMcp(agentsMcp, [call])
           .then((answer) => {
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `${mode}: ${answer}` } } } });

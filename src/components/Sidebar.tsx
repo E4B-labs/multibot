@@ -103,6 +103,14 @@ function preview(bot: Bot): string {
   if (last.kind === "options" && last.card) return last.card.title;
   if (last.kind === "activity" && last.tool) return last.tool.name;
   if (last.kind === "screen") return "Screen frame";
+  // A bot↔bot exchange is a chip with no text of its own; without this the
+  // sidebar row goes blank for the whole length of the conversation.
+  if (last.kind === "room" && last.room) {
+    const pl = getLanguage() === "pl";
+    return last.room.event === "replied"
+      ? (pl ? "Kolega odpisał" : "A colleague replied")
+      : (pl ? "Napisał do kolegi" : "Texted a colleague");
+  }
   // multibot: bot pisze markdownem, a to jest jedna linia zwykłego tekstu —
   // bez tego na liście widać `## Raport` i `**Pies**` zamiast treści.
   return last.text ? plainPreview(last.text) : "";

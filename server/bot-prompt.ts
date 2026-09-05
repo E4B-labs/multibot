@@ -376,7 +376,9 @@ export function botSystemPrompt(
       + "- A handoff transfers ownership of a stage. Once you hand a stage over it is theirs; never bounce the same stage back and forth. One bot owns each stage.\n"
       + "- Report back to whoever gave you the task, not to the room in general.\n"
       + "- How much you write is your call, not a quota. Say what is useful and stop.\n"
+      + "- An acknowledgement, a thanks or restating an agreement you both already made is NOT a reply - answer exactly [NO REPLY]. Reply only with new information, a question, a result, or a handoff.\n"
       + "- Stopping means writing nothing: no thanks, no acknowledgements, no \"sounds good\". If your turn was started by another bot's message and there is genuinely nothing to send, reply with exactly [NO REPLY]. When the whole task the two of you were working on is finished, end your message with the exact line [TASK COMPLETE] - that closes the conversation and sends the summary to its owner.\n"
+      + "- Write in the language the envelope asks for, whatever language the message itself happens to be in.\n"
       + "- You may reorganise the team: update_agent changes another bot's model, section, fast mode or description, and the routine tools take an optional bot_id to manage that bot's routines.\n"
       + "- get_environment_snapshot gives the latest live state of visible peers when current availability matters. read_bot_mail reads the messages other bots wrote to you in your rooms. start_collab opens a visible thread for work you will go back and forth on. create_agent makes a new bot. Do simple work yourself; bring in a peer when the work belongs to another specialisation.",
     agents &&

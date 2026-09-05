@@ -111,3 +111,16 @@ describe("czip pokoju grupowego", () => {
     expect(branch).not.toContain("toggleRoom");
   });
 });
+
+// multibot: prywatny czat pokazuje rozmowę bot↔bot jako pigułki zdarzeń
+// („Atlas napisał(a) do Gatekeepera", „Gatekeeper odpisał(a)"), a nie surowe
+// koperty. Wariant „odpisał(a)" dodany razem z ukryciem kopert po stronie
+// serwera — bez niego każda odpowiedź kolegi czytała się jak nowy list.
+describe("pigułka pokoju: napisał(a) / odpisał(a)", () => {
+  it("ma oba warianty w obu językach i wybiera je po room.event", () => {
+    expect(chat).toContain('room.event === "replied"');
+    for (const label of ["odpisał(a)", "replied", "napisał(a) do", "texted"]) {
+      expect(chat, `brak wariantu ${label}`).toContain(label);
+    }
+  });
+});

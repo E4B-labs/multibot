@@ -71,6 +71,16 @@ describe("comms e2e (fake ACP fleet)", () => {
   let askerId = "";
   let helperId = "";
 
+  /** The prompt dump only exists once some bot has taken a turn; "not there
+   * yet" means nothing reached a model, which is an answer, not a crash. */
+  const prompts = (): string => {
+    try {
+      return readFileSync(join(home, "acp-prompts.ndjson"), "utf8");
+    } catch {
+      return "";
+    }
+  };
+
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
       method,
@@ -254,28 +264,37 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(chip).toBeTruthy();
       expect(chip.room.ownerBotId).toBe(asker.id);
 
-      // B's turn is started by the harness, not awaited by A, so wait for it
+      // B's turn is started by the harness, not awaited by A, so wait for it —
+      // and wait on the ROOM, because a peer turn no longer writes bubbles into
+      // the private chat.
       const helperDeadline = Date.now() + 25_000;
       for (;;) {
-        const bot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === helper.id);
-        if (!bot.busy && bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("hello from fake acp"))) break;
+        const rooms = (await api("GET", "/api/rooms")).body.rooms as any[];
+        if (rooms.some((r) => r.transcript?.some((m: any) => m.from === helper.id && m.text?.includes("hello from fake acp")))) break;
         if (Date.now() > helperDeadline) throw new Error(`B never took its turn. stderr: ${stderr.slice(-2000)}`);
         await new Promise((r) => setTimeout(r, 250));
       }
 
       // multibot: koperta JAKO WEJŚCIE tury B jest przypięta przez zrzut promptów
       // fake CLI — to, co bot dostaje, nie zależy od tego, co widać w UI.
-      const prompts = readFileSync(join(home, "acp-prompts.ndjson"), "utf8");
-      expect(prompts).toContain("[Message from @Asker");
-      expect(prompts).toContain("ping from fake");
+      const envelopeLine = prompts()
+        .split(/\r?\n/)
+        .find((line) => line.includes("[Message from @Asker") && line.includes("ping from fake"));
+      expect(envelopeLine, "koperta Askera nie dotarla do modelu").toBeTruthy();
+      // ...carrying the language the conversation is actually in. "ping from
+      // fake" is English, so a Polish "Reply in" here would be the demo bug.
+      expect(envelopeLine).toContain("Reply in English.");
 
-      // B ran a REAL turn on its own thread: the envelope is a message in B's
-      // own chat with A's name on it, and B's answer is B's own reply there.
-      // That is the whole point - B can answer, ask back, or pull in a third
-      // bot, none of which an isolated one-shot thread could do.
+      // B ran a REAL turn on its own thread, but the user's chat with B shows
+      // NONE of it: no raw envelope bubble, no answer addressed to A. Both live
+      // in the room, which the chip in B's chat opens.
       const helperBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === helper.id);
-      expect(helperBot.messages.some((m: any) => m.role === "user" && m.text?.includes("[Message from @Asker"))).toBe(true);
-      expect(helperBot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.includes("hello from fake acp"))).toBe(true);
+      expect(helperBot.messages.some((m: any) => m.text?.includes("[Message from @Asker"))).toBe(false);
+      expect(helperBot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.includes("hello from fake acp"))).toBe(false);
+      // The user watching A sees the exchange as two chips and nothing else.
+      const askerAfter = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
+      expect(askerAfter.messages.some((m: any) => m.kind === "room" && m.room?.event === "texted")).toBe(true);
+      expect(askerAfter.messages.some((m: any) => m.kind === "room" && m.room?.event === "replied" && m.room?.ownerBotId === helper.id)).toBe(true);
     },
     40_000,
   );
@@ -366,13 +385,13 @@ describe("comms e2e (fake ACP fleet)", () => {
       // ...i w tym czasie nadawca wysyła do niego pocztę
       expect((await api("POST", `/api/bots/${sender.id}/messages`, { text: "wyslij" })).status).toBe(202);
 
+      // multibot: koperta nie jest już dymkiem w czacie, więc dowodem, że
+      // kolejka ruszyła, jest PROMPT, który zobaczyła atrapa adresata.
       const deadline = Date.now() + 25_000;
       for (;;) {
-        const bots = (await api("GET", "/api/bots")).body.bots;
-        const t2 = bots.find((b: any) => b.id === target.id);
-        const dostal = t2.messages.some((m: any) => m.role === "user" && m.text?.includes("[Message from @"));
-        if (dostal) break;
+        if (prompts().includes("[Message from @Nadawca")) break;
         if (Date.now() > deadline) {
+          const t2 = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === target.id);
           throw new Error(
             "poczta nie ruszyla po nieudanej turze adresata — zostala w kolejce bez sladu. " +
               `busy=${t2.busy} wiadomosci=${JSON.stringify(t2.messages.slice(-4))}`,
@@ -419,7 +438,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       let receiverBot: any;
       for (;;) {
         receiverBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === receiver.id);
-        if (!receiverBot?.busy && receiverBot?.messages.some((m: any) => m.text?.includes("[Message from @Mail Sender"))) break;
+        if (!receiverBot?.busy && prompts().includes("[Message from @Mail Sender")) break;
         if (Date.now() > deadline) throw new Error(`mail target never settled. stderr: ${stderr.slice(-2000)}`);
         await new Promise((r) => setTimeout(r, 250));
       }
@@ -446,9 +465,15 @@ describe("comms e2e (fake ACP fleet)", () => {
       // reply that starts one more turn legitimately adds one more line.
       expect(room.transcript.length).toBeGreaterThanOrEqual(2);
       expect(room.transcript.some((m: any) => m.from === receiver.id && m.text === "async ping")).toBe(true);
-      expect(receiverBot.messages.some((m: any) => m.text?.includes("[Message from @Mail Sender"))).toBe(true);
+      // Both directions reached a model, and NEITHER private chat shows the
+      // envelope: the room is the transcript, the chips are the chat.
+      expect(prompts()).toContain("[Message from @Mail Sender");
+      expect(prompts()).toContain("[Message from @Mail Receiver");
+      const receiverNow = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === receiver.id);
+      expect(receiverNow.messages.some((m: any) => m.text?.includes("[Message from @"))).toBe(false);
       const senderBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === sender.id);
-      expect(senderBot.messages.some((m: any) => m.text?.includes("[Message from @Mail Receiver"))).toBe(true);
+      expect(senderBot.messages.some((m: any) => m.text?.includes("[Message from @"))).toBe(false);
+      expect(senderBot.messages.some((m: any) => m.kind === "room" && m.room?.event === "texted")).toBe(true);
     },
     40_000,
   );

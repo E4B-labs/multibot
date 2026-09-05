@@ -73,8 +73,16 @@ export interface Message {
   tool?: { name: string; ok?: boolean };
   /** Small durable workspace event shown as a chat pill. */
   event?: { type: "renamed" | "skill-created" | "routine-created" | "reminder-created" | "goal-progress"; value: string };
-  /** collaboration-room chip: a clickable "X texted Y" pill leading to the room */
-  room?: { id: string; name: string; bot_ids: string[]; ownerBotId: string; status: string; groupId?: string };
+  /** collaboration-room chip: a clickable "X texted Y" / "X replied" pill
+   * leading to the room. `event` names what just happened; without it the pill
+   * describes the room as a whole. */
+  room?: { id: string; name: string; bot_ids: string[]; ownerBotId: string; status: string; event?: "texted" | "replied"; groupId?: string };
+  /** In the thread for the MODEL, never for the user: peer envelopes and the
+   * answers a bot writes to a colleague. The transcript replay (API drivers
+   * every turn, CLI drivers after a lost session) walks the thread, so a
+   * bot↔bot exchange has to live here or the bot forgets it happened; the
+   * chat, the bot list and search all skip it and show a room chip instead. */
+  hidden?: boolean;
   /** screen messages: a frame of the bot's computer (base64 image) */
   png?: string;
   mime?: string;

@@ -78,7 +78,7 @@ import * as googleWorkspace from "./google-workspace.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { HarnessRoutines, oneShotAt, routineTurnText, verifyWebhookSignature, type HarnessRoutine } from "./routines.ts";
 import { GroupStore, groupMemberId, threadIdOfGroupMember } from "./group-store.ts";
-import { budgetLeft, isDuplicateOfLast, RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
+import { budgetLeft, isAcknowledgement, isDuplicateOfLast, RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
@@ -234,6 +234,8 @@ function armBusyWatchdog(botId: string): void {
       peerTurn.delete(botId);
       groupTurn.get(botId)?.done(""); // wiszący dostawca nie trzyma czatu grupy
       turnAssistantText.delete(b.threadId);
+      turnUsedTool.delete(b.threadId);
+      turnUserText.delete(b.threadId);
       releaseTurnSlot(botId); // zawieszony dostawca nie trzyma slotu całej floty
       broadcast({ kind: "bot", bot: store.bot(botId) });
       drainQueuedUserMessages(botId);
@@ -389,14 +391,37 @@ async function delegatedPeerTurn(callerId: string, peerId: string, message: stri
 const IDLE_WAIT_MS = 2_000;
 const IDLE_ROUNDS_LIMIT = 30;
 
-/** Clickable "X texted Y" pill on the owner's thread pointing at the room. */
-function postRoomChip(ownerBotId: string, room: RoomRecord) {
-  const owner = store.bot(ownerBotId);
+/** What a CLIENT may see of a thread. Peer envelopes and the answers a bot
+ * writes to a colleague live on the thread for the transcript replay only;
+ * the chat shows a room chip instead. */
+const chatMessages = (threadId: string) => store.messagesFor(threadId).filter((m) => !m.hidden);
+
+/**
+ * Clickable "X texted Y" / "Y replied" pill on a bot's own thread, pointing at
+ * the room. This pill is ALL the user sees of a bot↔bot exchange in a private
+ * chat: the envelopes and the answers themselves live in the room transcript,
+ * which the pill opens. Without `chip` it names the whole room (group turns,
+ * legacy call sites).
+ */
+function postRoomChip(
+  threadBotId: string,
+  room: RoomRecord,
+  chip?: { from: string; to?: string; event: "texted" | "replied" },
+) {
+  const owner = store.bot(threadBotId);
   if (!owner) return;
   const message = store.appendMessage(owner.threadId, {
     role: "bot",
     kind: "room",
-    room: { id: room.id, name: room.name, bot_ids: [...room.bot_ids], ownerBotId, status: room.status, ...(room.groupId ? { groupId: room.groupId } : {}) },
+    room: {
+      id: room.id,
+      name: room.name,
+      bot_ids: chip ? [chip.from, ...(chip.to ? [chip.to] : [])] : [...room.bot_ids],
+      ownerBotId: chip?.from ?? threadBotId,
+      status: room.status,
+      ...(chip ? { event: chip.event } : {}),
+      ...(room.groupId ? { groupId: room.groupId } : {}),
+    },
   });
   broadcast({ kind: "message", threadId: owner.threadId, message });
 }
@@ -440,6 +465,8 @@ function closeRoom(roomId: string, status: "done" | "failed", reason = ""): void
   if (!room || room.status !== "running") return;
   rooms.setStatus(roomId, status);
   for (const key of [...sentPeerText.keys()]) if (key.startsWith(`${roomId}|`)) sentPeerText.delete(key);
+  ackStreak.delete(roomId);
+  rooms.setPending(roomId, null); // a closed room owes nobody a turn after a restart
   const settled = rooms.get(roomId);
   if (settled) broadcast({ kind: "room", room: settled });
   if (!room.groupId) reportRoom(roomId, status, reason);
@@ -456,6 +483,40 @@ function sweepExpiredRooms(): void {
     if (room.status !== "running" || room.groupId || room.createdAt > cutoff) continue;
     startBudgetCooldown(room.id);
     closeRoom(room.id, "done", "time budget spent");
+  }
+}
+
+/**
+ * Boot: a room that was mid-conversation when the process died. The transcript
+ * survived, so the only thing missing is the turn that was about to start —
+ * `pendingTo` names who owed it. Re-deliver that last message and the
+ * conversation carries on; write the room off only when its budget or its
+ * clock is genuinely spent (or nobody owed anything).
+ */
+function resumeRecoveredRooms(): void {
+  const max = collabMaxMessages();
+  for (const roomId of rooms.recovered) {
+    const room = rooms.get(roomId);
+    if (!room || room.status !== "running") continue;
+    // A group room is the user's own chat: it has no pending peer turn to
+    // resume and it is nobody's collaboration result to report.
+    if (room.groupId) continue;
+    const last = room.transcript.at(-1);
+    const stale = Date.now() - (last?.at ?? room.createdAt) >= collabMaxMs();
+    if (!room.pendingTo || !last || stale || budgetLeft(room, max) <= 0) {
+      closeRoom(roomId, "failed", "the server restarted mid-conversation");
+      continue;
+    }
+    const to = room.pendingTo;
+    void deliverPeerMessage(last.from, to, last.text, roomId)
+      .then((delivery) => {
+        // A recipient that is gone (deleted bot, revoked permission) can never
+        // take that turn: settle the room instead of leaving it open forever.
+        if (delivery.status === "refused") closeRoom(roomId, "failed", "the server restarted mid-conversation");
+      })
+      .catch((error) =>
+        console.warn(`[multibot] resuming room ${roomId} failed:`, error instanceof Error ? error.message : error),
+      );
   }
 }
 
@@ -605,6 +666,15 @@ function startBudgetCooldown(roomId: string): void {
  * the peer safety net forwards THIS turn's answer and never an older one.
  * Filled on item.completed, drained by turn.completed, dropped on failure. */
 const turnAssistantText = new Map<string, string[]>();
+/** Threads whose CURRENT turn called at least one tool. A bot that actually
+ * did something is answering with a result, however short — the ack brake must
+ * not swallow it. Lives and dies with `turnAssistantText`. */
+const turnUsedTool = new Set<string>();
+/** Threads whose CURRENT turn carries text the HUMAN wrote — either it started
+ * as a user turn, or the user steered a message into a running peer turn. Its
+ * answer is for them, so it stays a visible bubble even when a colleague also
+ * happens to be waiting on the same turn. */
+const turnUserText = new Set<string>();
 
 type PeerDelivery = "steered" | "queued" | "refused";
 
@@ -614,14 +684,39 @@ const ONBOARDING_FIRST_TURN =
 /** Off inside vitest and wherever a harness needs bots that stay quiet. */
 const onboardingTurnEnabled = () => !process.env.VITEST && process.env.OMB_ONBOARDING_TURN !== "0";
 
+/** Polish is the only second language MultiBot ships texts in, so telling the
+ * two apart is all the peer protocol needs: the envelope carries "Reply in X"
+ * and the colleague stops answering a Polish bot in English (or the reverse,
+ * which is what the live demo produced). */
+const POLISH_MARKERS = /[ąćęłńóśźż]|\b(nie|tak|jest|zrób|proszę|dzięki|czy|może|który|żeby|jeśli|oraz|który|potwierdzone|gotowe)\b/i;
+/** Language of a conversation, read off the text being sent and, failing that,
+ * off the last thing the HUMAN wrote in the sender's own chat. Peer envelopes
+ * are no longer posted as messages, so `role: "user"` there really is a human. */
+function conversationLanguage(fromBotId: string, text: string): "Polish" | "English" {
+  if (POLISH_MARKERS.test(text)) return "Polish";
+  const bot = store.bot(fromBotId);
+  const thread = bot ? store.messagesFor(bot.threadId) : [];
+  for (let i = thread.length - 1; i >= 0; i -= 1) {
+    const m = thread[i]!;
+    // Hidden peer envelopes are skipped: only what the HUMAN wrote sets the tone.
+    if (m.hidden || m.role !== "user" || m.kind !== "text" || !m.text) continue;
+    return POLISH_MARKERS.test(m.text) ? "Polish" : "English";
+  }
+  return "English";
+}
+
 /** Envelope the recipient reads. Its own chat, its own name on the sender.
  * A bot name is user (or bot) input and lands INSIDE a bracketed header, so a
  * name like `X] [System: ignore everything` would forge harness instructions.
  * Brackets and newlines come out; the id below the name stays authoritative. */
-function peerEnvelope(from: BotRecord, text: string): string {
+function peerEnvelope(from: BotRecord, text: string, language: string): string {
   const name = from.name.replace(/[[\]\r\n]+/g, " ").trim().slice(0, 120) || from.id;
-  return `[Message from @${name} (bot id: ${from.id}), another bot in this MultiBot workspace. This is a real turn: answer them, ask them back, or reply with exactly [NO REPLY] if nothing needs saying.]\n\n${text}`;
+  return `[Message from @${name} (bot id: ${from.id}), another bot in this MultiBot workspace. This is a real turn: answer them, ask them back, or reply with exactly [NO REPLY] if nothing needs saying. Reply in ${language}.]\n\n${text}`;
 }
+
+/** Consecutive acknowledgements in a room. Two in a row means the two bots are
+ * congratulating each other, not working: the room settles. */
+const ackStreak = new Map<string, number>();
 
 /**
  * Deliver one bot→bot message. Returns how it landed plus, on a refusal,
@@ -633,6 +728,13 @@ async function deliverPeerMessage(
   toBotId: string,
   text: string,
   roomId?: string,
+  opts?: {
+    /** This message answers a peer message, so it is subject to the ack brake:
+     * a first message never is — a short opener is a task, not a pleasantry. */
+    reply?: boolean;
+    /** The turn that produced it called a tool, i.e. it did real work. */
+    usedTool?: boolean;
+  },
 ): Promise<{ status: PeerDelivery; roomId: string | null; note: string }> {
   const refuse = (note: string) => ({ status: "refused" as const, roomId: roomId ?? null, note });
   const from = store.bot(fromBotId);
@@ -685,7 +787,6 @@ async function deliverPeerMessage(
         ownerThread: from.threadId,
         ownerBotId: fromBotId,
       });
-      postRoomChip(fromBotId, opened);
       return opened;
     })();
   if (room.status !== "running") {
@@ -711,25 +812,66 @@ async function deliverPeerMessage(
   }
   sentPeerText.set(ledgerKey, message);
 
-  // The same text fanned out to several bots is ONE line in the ledger.
-  if (!isDuplicateOfLast(room, fromBotId, message)) rooms.append(room.id, fromBotId, message);
-  broadcast({ kind: "room", room: rooms.get(room.id) });
+  /** Record this message in the room ledger and show it on the UI. The same
+   * text fanned out to several bots is ONE line. */
+  const recordInRoom = () => {
+    if (!isDuplicateOfLast(room, fromBotId, message)) rooms.append(room.id, fromBotId, message);
+    broadcast({ kind: "room", room: rooms.get(room.id) });
+  };
+
+  // The ack brake. "Confirmed." / "Potwierdzone." bounced eleven times in a
+  // live demo before the budget died: an answer that adds nothing is worth a
+  // line in the transcript, never another turn. Two in a row and the two bots
+  // are done talking, so the room settles by itself instead of idling until
+  // the wall clock.
+  if (opts?.reply && !opts.usedTool && isAcknowledgement(room, fromBotId, message)) {
+    recordInRoom();
+    postRoomChip(toBotId, room, { from: fromBotId, event: "replied" });
+    for (const entry of peerTurn.get(fromBotId) ?? []) if (entry.fromBotId === toBotId) entry.replied = true;
+    const streak = (ackStreak.get(room.id) ?? 0) + 1;
+    ackStreak.set(room.id, streak);
+    if (streak >= 2) closeRoom(room.id, "done", "both sides only acknowledged");
+    return refuse("An acknowledgement is not a reply. It was recorded; do not send another one.");
+  }
+  ackStreak.delete(room.id);
+
+  recordInRoom();
   // Answered only the bot we are actually writing TO: forwarding work to a
   // third bot is not an answer, and marking it as one left the original sender
   // waiting on a reply that never came.
   for (const entry of peerTurn.get(fromBotId) ?? []) if (entry.fromBotId === toBotId) entry.replied = true;
 
-  const envelope = peerEnvelope(from, message);
-  const bubble = store.appendMessage(target.threadId, { role: "user", kind: "text", text: envelope });
-  broadcast({ kind: "message", threadId: target.threadId, message: bubble });
+  // What the user sees of this exchange in a private chat: a chip, never the
+  // envelope. "X texted Y" in the sender's own thread; the answer coming back
+  // shows as "Y replied" in the thread of whoever asked. The words themselves
+  // live in the room the chip opens.
+  if (opts?.reply) postRoomChip(toBotId, room, { from: fromBotId, event: "replied" });
+  else postRoomChip(fromBotId, room, { from: fromBotId, to: toBotId, event: "texted" });
+
+  // The envelope goes to the MODEL, never to the user's chat: a raw
+  // "[Message from @X (bot id: …)]" bubble is the noise this design exists to
+  // remove. It is still STORED on the thread, hidden, because the transcript
+  // replay walks the thread — without it an API driver would start the next
+  // turn with no memory of what the colleague asked. Not broadcast, so no
+  // client ever renders it.
+  const envelope = peerEnvelope(from, message, conversationLanguage(fromBotId, message));
+  store.appendMessage(target.threadId, { role: "user", kind: "text", text: envelope, hidden: true });
   // A live turn is `activeCommsDepth`, not `busy`: accepting a message lights
   // `busy` on its own, and a turn that has not started yet still reads what is
   // waiting for it.
   const answer: PeerAnswer = { fromBotId, roomId: room.id, replied: false, deferred: activeCommsDepth.has(toBotId) };
   peerTurn.set(toBotId, [...(peerTurn.get(toBotId) ?? []), answer]);
+  // Persisted BEFORE delivery: a crash between here and the recipient's turn
+  // is exactly the case boot-time resume has to repair.
+  rooms.setPending(room.id, toBotId);
   const status = await deliverToActiveTurnOrQueue(toBotId, envelope, "bot", { attachments: [], origin: "bot" });
-  // Steering puts the text INSIDE the running turn, so that turn does answer it.
-  if (status === "steered") answer.deferred = false;
+  // Steering puts the text INSIDE the running turn, so that turn does answer
+  // it — and its `startTurn` is long past, so clear the debt here or a restart
+  // would deliver a message the bot has already read.
+  if (status === "steered") {
+    answer.deferred = false;
+    rooms.setPending(room.id, null);
+  }
   return { status, roomId: room.id, note: "" };
 }
 
@@ -748,6 +890,7 @@ async function routePeerReply(
   peer: PeerAnswer,
   text: string,
   mayDelegate: boolean,
+  usedTool: boolean,
 ): Promise<void> {
   const room = rooms.get(peer.roomId);
   const done = DONE_MARKER_AT_END.test(text);
@@ -763,9 +906,26 @@ async function routePeerReply(
   // eliza: silence is a valid contribution — no thank-you turns.
   if (!visible || visible === NO_REPLY_MARKER) return;
   // A bot whose delegation was off for this turn does not get to answer a peer
-  // through the back door of the safety net.
+  // through the back door of the safety net. Its answer stays in its own chat,
+  // where the bubble is kept visible for exactly this case.
   if (!mayDelegate) return;
-  await deliverPeerMessage(botId, peer.fromBotId, visible, peer.roomId);
+  const delivery = await deliverPeerMessage(botId, peer.fromBotId, visible, peer.roomId, { reply: true, usedTool });
+  // The bubble was suppressed on the assumption this text would reach the room.
+  // A refusal breaks that assumption — read-only access, a chief-of-staff
+  // section mismatch, a room the other side already closed, a spent budget or
+  // clock — and the answer would exist nowhere at all. Put it back in the
+  // bot's own chat, with the reason, rather than lose it. An acknowledgement
+  // is the one refusal that IS recorded in the room, so it stays quiet.
+  // ponytail: this leaves the same text on the thread twice (once hidden, once
+  // visible) on a path that only fires when a delivery is refused; dedupe it if
+  // refusals ever become common enough to bloat a transcript.
+  if (delivery.status === "refused" && !delivery.note.startsWith("An acknowledgement")) {
+    const author = store.bot(botId);
+    if (author) {
+      const kept = store.appendMessage(author.threadId, { role: "bot", kind: "text", text: visible });
+      broadcast({ kind: "message", threadId: author.threadId, message: kept });
+    }
+  }
 }
 
 // ── group chat: one room, the user writes to everyone, members pick who answers ──
@@ -785,9 +945,10 @@ const GROUP_MEMBER_TURN_MS = 4 * 60_000;
 function groupEnvelope(groupName: string, roster: BotRecord[], room: RoomRecord): string {
   const safe = (raw: string) => raw.replace(/[[\]\r\n]+/g, " ").trim().slice(0, 120);
   const nameOf = (from: string) => (from === ROOM_USER_SENDER ? "User" : safe(store.bot(from)?.name ?? from));
+  const transcript = room.transcript.map((m) => m.text).join("\n");
   const header = `[Group chat "${safe(groupName)}" with ${roster.map((b) => `@${safe(b.name)}`).join(", ")}. `
     + "The user writes to the whole group. The conversation so far follows; answer it, hand it over with @Name, "
-    + "or reply with exactly [NO REPLY] if someone else already covered it.]";
+    + `or reply with exactly [NO REPLY] if someone else already covered it. Reply in ${conversationLanguage(roster[0]?.id ?? "", transcript)}.]`;
   return `${header}\n\n${room.transcript.map((m) => `${nameOf(m.from)}: ${m.text}`).join("\n\n")}`;
 }
 
@@ -1236,6 +1397,15 @@ const CONNECTION_TARGETS: Record<ConnectorTarget, { pl: string; en: string }> = 
 };
 const isConnectorTarget = (value: string): value is ConnectorTarget =>
   Object.prototype.hasOwnProperty.call(CONNECTION_TARGETS, value);
+/** A Composio toolkit slug — `discord`, `slack`, `gmail`, `google_sheets`…
+ * Models name the APP they need, not the panel it lives behind, and refusing
+ * them ("I did not recognize the connector name") is a dead end for the user
+ * as much as for the bot. Anything slug-shaped routes to the Composio card
+ * with the app named on it; the four fixed targets keep their own panels. */
+const TOOLKIT_SLUG = /^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/i;
+/** "google_sheets" → "Google Sheets" for the card title. */
+const toolkitLabel = (slug: string): string =>
+  slug.split(/[_-]/).map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
 
 // Kto zaczął turę: tury bot-bot (`ask_bot`, runda grupy, cel) nie pushują
 // startu ani końca — rozmowa trzech botów dałaby sześć powiadomień. Rozgrzewka
@@ -1359,7 +1529,23 @@ bus.subscribe((event: RuntimeEvent) => {
         // peerów czyta `turnAssistantText` POWYŻEJ, więc dostaje sentinel dalej
         // i dalej zamienia go na milczenie (routePeerReply). Załączniki wygrywają:
         // tura, która wysłała plik, zostaje widoczna mimo sentinela.
-        if (event.text.trim() !== NO_REPLY_MARKER || pending?.length) {
+        //
+        // A turn a COLLEAGUE started is hidden in the other sense: what the
+        // bot writes there is addressed to that colleague, so it belongs in
+        // the room transcript (routePeerReply puts it there) plus a "replied"
+        // chip — not as a bubble in the user's private chat, which is what
+        // made the chat read like a raw mail relay. It is still STORED hidden,
+        // so the next turn's transcript replay remembers what this bot said.
+        //
+        // Three exclusions, each because the text would otherwise be visible
+        // NOWHERE: an entry already `replied` to (the bot answered that peer
+        // with a tool, so this prose is for the user), a turn the user also
+        // wrote into (steering), and delegation switched off (routePeerReply
+        // drops the answer, so the bot's own chat is the only place left).
+        const answeringPeer = (peerTurn.get(bot.id) ?? []).some((entry) => !entry.deferred && !entry.replied)
+          && !turnUserText.has(event.threadId)
+          && canUseIntegration(bot.threadId, "delegation");
+        if ((event.text.trim() !== NO_REPLY_MARKER && !answeringPeer) || pending?.length) {
           pushMessage({
             role: "bot",
             kind: "text",
@@ -1367,6 +1553,8 @@ bus.subscribe((event: RuntimeEvent) => {
             ...(replyModel ? { model: replyModel } : {}),
             ...(pending?.length ? { attachments: pending } : {}),
           });
+        } else if (answeringPeer) {
+          store.appendMessage(event.threadId, { role: "bot", kind: "text", text: event.text, hidden: true });
         }
       } else if (event.itemType === "tool" && event.itemId) {
         const messageId = toolMessageByItem.get(event.itemId);
@@ -1383,6 +1571,7 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "item.started":
       if (event.itemType === "tool") {
+        turnUsedTool.add(event.threadId);
         const message = pushMessage({ role: "bot", kind: "activity", tool: { name: event.title ?? "tool" } });
         if (event.itemId) toolMessageByItem.set(event.itemId, message.id);
       }
@@ -1468,6 +1657,8 @@ bus.subscribe((event: RuntimeEvent) => {
       peerTurn.delete(bot.id);
       groupTurn.get(bot.id)?.done("");
       turnAssistantText.delete(event.threadId);
+      turnUsedTool.delete(event.threadId);
+      turnUserText.delete(event.threadId);
       pushMessage({ role: "bot", kind: "activity", tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false } });
       endTurnPush(bot.id, "failed", event.message.slice(0, 120));
       // watchdog: provider padl bez turn.completed -> zwolnij busy
@@ -1503,7 +1694,10 @@ bus.subscribe((event: RuntimeEvent) => {
       // thread, so a peer turn that ended in tool calls alone would forward the
       // bot's previous, unrelated answer to a bot that never asked for it.
       const saidThisTurn = (turnAssistantText.get(event.threadId) ?? []).join("\n").trim();
+      const usedTool = turnUsedTool.has(event.threadId);
       turnAssistantText.delete(event.threadId);
+      turnUsedTool.delete(event.threadId);
+      turnUserText.delete(event.threadId);
       // A group turn has no peer to answer: the loop that asked is waiting.
       // A turn that was ALREADY running when the envelope queued did not read
       // it, so it only clears the flag; the turn the drain starts answers.
@@ -1523,7 +1717,7 @@ bus.subscribe((event: RuntimeEvent) => {
         void (async () => {
           // Every bot still waiting on this turn gets the answer; sequential so
           // the room ledger and the budget see one message at a time.
-          for (const entry of answering) await routePeerReply(bot.id, entry, saidThisTurn, mayDelegate);
+          for (const entry of answering) await routePeerReply(bot.id, entry, saidThisTurn, mayDelegate, usedTool);
         })().catch((error) =>
           console.warn(`[multibot] peer reply from ${bot.id} failed:`, error instanceof Error ? error.message : error),
         );
@@ -2128,7 +2322,16 @@ opts?: {
       approvalRules: workspace.approvalRules(bot.id),
     });
     activeCommsDepth.set(bot.id, commsDepth); // multibot (F9): patrz `activeCommsDepth`
+    // The peer message this turn reads is no longer "pending": its turn is
+    // running now, so a restart from here on is a dead turn, not a lost one.
+    // Only OUR debt is cleared — the same room may still owe somebody else.
+    for (const entry of peerTurn.get(bot.id) ?? []) {
+      if (rooms.get(entry.roomId)?.pendingTo === bot.id) rooms.setPending(entry.roomId, null);
+    }
     const origin: TurnOrigin = opts?.origin ?? "user";
+    // Whatever a user- or routine-started turn answers, the user is owed the
+    // bubble even if a colleague is waiting on the same turn (steering).
+    if (origin !== "bot") turnUserText.add(bot.threadId);
     turnOrigin.set(bot.id, origin);
     if (origin === "routine") scheduleStartedPush(bot.id, `rutyna ${opts?.routineName ?? ""} wystartowała`);
     else if (origin === "user") scheduleStartedPush(bot.id, `zaczyna pracę: ${text.slice(0, 80)}`);
@@ -2273,6 +2476,8 @@ opts?: {
         peerTurn.delete(bot.id);
         groupTurn.get(bot.id)?.done("");
         turnAssistantText.delete(turnThreadId);
+        turnUsedTool.delete(turnThreadId);
+        turnUserText.delete(turnThreadId);
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
         drainQueuedUserMessages(bot.id);
       }
@@ -3153,8 +3358,12 @@ const server = createServer(async (req, res) => {
           // Karta prowadzi w konkretne miejsce i NIE blokuje tury — bot kończy,
           // a następna tura widzi konektor w `connectionsBlock`.
           case "connection.request": {
-            const connector = String(body.connector ?? "").trim();
-            if (!isConnectorTarget(connector)) return json(res, 422, { error: "unknown connector" });
+            const asked = String(body.connector ?? "").trim().slice(0, 40).toLowerCase();
+            // An app name is a Composio toolkit: the card leads to the same
+            // panel, with the app the bot actually asked for on it.
+            const toolkit = !isConnectorTarget(asked) && TOOLKIT_SLUG.test(asked) ? toolkitLabel(asked) : null;
+            const connector: ConnectorTarget = isConnectorTarget(asked) ? asked : "composio";
+            if (!isConnectorTarget(asked) && !toolkit) return json(res, 422, { error: "unknown connector" });
             const label = CONNECTION_TARGETS[connector];
             const why = String(body.why ?? "").trim().slice(0, 300);
             const message = store.appendMessage(caller.threadId, {
@@ -3163,13 +3372,15 @@ const server = createServer(async (req, res) => {
               card: {
                 kind: "connect",
                 connector,
-                title: t(`Podłącz ${label.pl}`, `Connect ${label.en}`),
+                title: toolkit
+                  ? t(`Podłącz ${toolkit} (${label.pl})`, `Connect ${toolkit} (${label.en})`)
+                  : t(`Podłącz ${label.pl}`, `Connect ${label.en}`),
                 subtitle: why,
                 options: [],
               },
             });
             broadcast({ kind: "message", threadId: caller.threadId, message });
-            return json(res, 200, { ok: true, connector });
+            return json(res, 200, { ok: true, connector, ...(toolkit ? { toolkit: asked.toLowerCase() } : {}) });
           }
           case "memory.list": return json(res, 200, workspace.facts(fromBotId, String(body.query ?? "")));
           case "memory.graph": return json(res, 200, workspace.graph(fromBotId));
@@ -3433,7 +3644,7 @@ const server = createServer(async (req, res) => {
       return json(res, 200, {
         bots: store.bots
           .filter((b) => canAccessBot(b, actor))
-          .map((b) => ({ ...b, messages: store.messagesFor(b.threadId) })),
+          .map((b) => ({ ...b, messages: chatMessages(b.threadId) })),
       });
     }
     if (method === "GET" && path === "/api/environment") {
@@ -3582,7 +3793,11 @@ const server = createServer(async (req, res) => {
       if (!botSetVisible(botIds, actor)) return json(res, 404, { error: "no such bot" });
       const owner = store.bot(botIds[0])!;
       const room = rooms.create({ task, bot_ids: botIds, ownerThread: owner.threadId, ownerBotId: botIds[0] });
-      postRoomChip(botIds[0], room);
+      // No chip here for the normal case: `deliverPeerMessage` posts one
+      // "X texted Y" per recipient, which is more precise and is the only chip
+      // for a room opened straight from a bot tool. A room with nobody to
+      // write to gets the plain room pill, or it has no entry point at all.
+      if (botIds.length < 2) postRoomChip(botIds[0], room);
       // The first bot hands the task to the others; from there the room is
       // just their conversation, one real turn per message.
       for (const peerId of botIds.slice(1)) void deliverPeerMessage(botIds[0], peerId, task, room.id);
@@ -3612,7 +3827,7 @@ const server = createServer(async (req, res) => {
           console.warn(`[multibot] onboarding turn failed for ${bot.id}:`, error instanceof Error ? error.message : error),
         );
       }
-      return json(res, 201, { bot: { ...store.bot(bot.id)!, messages: store.messagesFor(bot.threadId) } });
+      return json(res, 201, { bot: { ...store.bot(bot.id)!, messages: chatMessages(bot.threadId) } });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/sharing$/);
     if (m) {
@@ -3992,7 +4207,7 @@ const server = createServer(async (req, res) => {
           ...(replyTarget ? { replyToId: replyTarget.id } : {}),
         });
         broadcast({ kind: "message", threadId: owner.threadId, message: userMessage });
-        postRoomChip(botId, collab.room);
+        // The chip comes from the delivery below, one per recipient.
         for (const peerId of collab.room.bot_ids.filter((id) => id !== botId)) {
           void deliverPeerMessage(botId, peerId, collab.task, collab.room.id);
         }
@@ -4035,6 +4250,9 @@ const server = createServer(async (req, res) => {
       let delivery: "steered" | "queued" = "queued";
       if (plainText) {
         delivery = await deliverToActiveTurnOrQueue(target.id, turnText, "user", queueOpts);
+        // Steered INTO a running turn: that turn now also answers the user, so
+        // its text stays a visible bubble even if a colleague started it.
+        if (delivery === "steered") turnUserText.add(target.threadId);
       } else {
         queueUserTurn(target.id, turnText, queueOpts);
       }
@@ -4083,6 +4301,8 @@ const server = createServer(async (req, res) => {
       peerTurn.delete(bot.id); // przerwana tura nie odpisuje koledze
       groupTurn.get(bot.id)?.done("");
       turnAssistantText.delete(bot.threadId);
+      turnUsedTool.delete(bot.threadId);
+      turnUserText.delete(bot.threadId);
       stopScreenPoller(bot.id);
       releaseTurnSlot(bot.id);
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
@@ -4532,7 +4752,7 @@ const server = createServer(async (req, res) => {
             results.push({ id: `routine:${bot.id}:${routine.id}`, kind: "routine", title: routine.name, subtitle: `${bot.name} · Routine`, botId: bot.id, at: routine.nextRunAt ?? 0 });
           }
         }
-        for (const message of store.messagesFor(bot.threadId)) {
+        for (const message of chatMessages(bot.threadId)) {
           if (message.text && searchText(query, message.text, bot.name)) {
             results.push({ id: `message:${bot.id}:${message.id}`, kind: "message", title: message.text.slice(0, 120), subtitle: bot.name, botId: bot.id, at: message.at });
             for (const match of message.text.matchAll(/https?:\/\/[^\s<>)]+/g)) {
@@ -5155,9 +5375,10 @@ server.listen(PORT, HOST, () => {
   // ponytail: jedno zamiatanie na minutę na CAŁĄ listę pokojów — pokojów są
   // dziesiątki, nie miliony; przy większej skali należy się kolejka terminów.
   setInterval(sweepExpiredRooms, Math.min(60_000, Math.max(1_000, collabMaxMs()))).unref?.();
-  // A room whose turn died with the previous process comes back "failed";
-  // its owner still deserves to hear how far it got.
-  for (const roomId of rooms.recovered) reportRoom(roomId, "failed", "the server restarted mid-conversation");
+  // A conversation cut off by a restart is not a failure — it is a turn that
+  // never started. Anything still inside its budget and its clock is picked up
+  // where it stopped; only the genuinely spent ones are written off.
+  resumeRecoveredRooms();
   // multibot: w trybie „każdy bot zawsze active" worker potrafi zniknąć bez
   // naszego udziału — Android przy braku pamięci ubija bezczynne procesy (LMK),
   // a wtedy bot cicho wraca do zimnego startu. Co minutę sprawdzamy więc, kto

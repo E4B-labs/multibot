@@ -299,6 +299,11 @@ describe("botSystemPrompt", () => {
     expect(text).toContain("The user writes to the whole group.");
     expect(text).toContain("write one line handing it over with @Name and stop");
     expect(text).toContain("reply exactly [NO REPLY]");
+    // multibot: hamulec na pętlę „confirmed / potwierdzone" — grzeczność nie
+    // jest odpowiedzią, więc protokół każe na nią milczeć.
+    expect(text).toContain("An acknowledgement, a thanks or restating an agreement");
+    expect(text).toContain("Reply only with new information, a question, a result, or a handoff.");
+    expect(text).toContain("Write in the language the envelope asks for");
     expect(text).toContain("One owner per task; do not repeat what others said.");
   });
 });
