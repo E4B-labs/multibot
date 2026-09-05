@@ -37,6 +37,10 @@ describe("SkillPill zniknął z całego czatu", () => {
   it("nie ma go ani w prozie, ani w pigułce zdarzenia, ani w panelu", () => {
     for (const [where, source] of [["ChatMarkdown", markdown], ["ChatView", chat], ["SkillsPanel", panel]] as const) {
       expect(source, where).not.toContain("SkillPill");
+    }
+    // SkillsPanel nie wymienia już skilla po nazwie w prozie (karta nagrywania
+    // zniknęła razem z silnikiem), więc SkillRef zostaje tylko w czacie.
+    for (const [where, source] of [["ChatMarkdown", markdown], ["ChatView", chat]] as const) {
       expect(source, where).toContain("SkillRef");
     }
   });

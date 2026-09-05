@@ -3,7 +3,6 @@ import { execFile } from "node:child_process";
 import { readdirSync, readFileSync, statfsSync } from "node:fs";
 import { cpus, freemem, hostname, loadavg, totalmem } from "node:os";
 
-import { enginePython } from "./engine/supervisor.ts";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 
 async function version(command: string, args: string[]): Promise<string | null> {
@@ -67,7 +66,6 @@ export async function deviceInfo() {
     pythonVersion,
     docker: Boolean(dockerVersion),
     dockerVersion,
-    engineInstalled: Boolean(enginePython()),
     android: Boolean(manufacturer || model || androidVersion),
     termux,
     manufacturer,

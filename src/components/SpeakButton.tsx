@@ -1,12 +1,6 @@
-// multibot: TTS speaker for assistant bubbles. Two sources of audio/mpeg:
-// POST /api/bots/<botId>/speak — the harness, whenever a `ttsKey` is set; works
-//   for every bot, including hosts with no engine (the phone).
-// POST /api/engine/bots/<engineBotId>/speak — the slafy engine's edge-tts, the
-//   fallback for engine bots on a host with no key.
-// So the button renders when the harness can speak OR the bot is on the engine.
-// Engine bot id `mb-<threadId>` mirrors decodeConfig's default botPrefix in
-// server/drivers/slafy.ts — a custom prefix needs a change here too (same
-// caveat as local runtime controls).
+// multibot: TTS speaker for assistant bubbles. One source of audio/mpeg:
+// POST /api/bots/<botId>/speak — the harness, whenever a `ttsKey` is set. No
+// key means no voice anywhere, so the button renders only once it is set.
 // Button styling copies the ChatMarkdown code-block copy button; visibility is
 // gated on bubble hover via the `group/msg` class added in ChatView's Bubble.
 import { useEffect, useRef, useState } from "react";
@@ -58,11 +52,8 @@ export function SpeakButton({ text }: { text: string }) {
 
   // messages render inside the selected bot's ChatView — same fallback as Shell
   const bot = state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0];
-  const slafy =
-    state.instances.find((i) => i.instanceId === bot?.modelSelection.instanceId)?.driverKind ===
-    "slafy";
   const harnessVoice = Boolean(state.config?.voice?.configured);
-  if (!bot || (!harnessVoice && !slafy) || !text.trim()) return null;
+  if (!bot || !harnessVoice || !text.trim()) return null;
 
   const fail = () => {
     setPhase("error");
@@ -77,10 +68,7 @@ export function SpeakButton({ text }: { text: string }) {
     abortRef.current = ctl;
     setPhase("loading");
     try {
-      const endpoint = harnessVoice
-        ? `/api/bots/${encodeURIComponent(bot.id)}/speak`
-        : `/api/engine/bots/${encodeURIComponent(`mb-${bot.threadId}`)}/speak`;
-      const res = await authFetch(endpoint, {
+      const res = await authFetch(`/api/bots/${encodeURIComponent(bot.id)}/speak`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text }),
@@ -97,8 +85,8 @@ export function SpeakButton({ text }: { text: string }) {
       await audio.play();
       setPhase("playing");
     } catch {
-      // engine down (503), unknown bot (404), edge-tts unreachable (502),
-      // or autoplay refusal — a short error state on the button, never a crash
+      // unknown bot (404), TTS provider unreachable (502), or autoplay
+      // refusal — a short error state on the button, never a crash
       if (ctl.signal.aborted) return;
       if (urlRef.current) {
         URL.revokeObjectURL(urlRef.current);

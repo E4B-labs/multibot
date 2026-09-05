@@ -5,7 +5,7 @@
 // toggleAppSettings / togglePlugins. Fuzzy filter = plain case-insensitive
 // subsequence match, no libraries.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Eye, FileText, GraduationCap, Link2, ListTodo, MessageSquare, Monitor, Plus, Puzzle, Search, Settings, SlidersHorizontal, Users, Wand2, Wrench } from "lucide-react";
+import { Eye, FileText, Link2, ListTodo, MessageSquare, Monitor, Plus, Puzzle, Search, Settings, SlidersHorizontal, Users, Wand2, Wrench } from "lucide-react";
 import { useStore } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
@@ -238,18 +238,6 @@ export function CmdK() {
       icon: <Puzzle size={16} />,
       run: close(() => dispatch({ type: "togglePlugins", open: true })),
     });
-    if (current) {
-      // Odpowiednik pozycji `learn-from-demonstration` ze spisu: nagrywanie
-      // mieszka w karcie pod ekranem komputera, więc paleta tam prowadzi.
-      // Osobna akcja, nie skill — na świeżej instalacji żadnych skilli nie ma.
-      cmds.push({
-        id: "teach",
-        label: polish ? "Nagraj umiejętność z demonstracji" : "Learn from demonstration",
-        hint: polish ? "Komputer bota" : "Bot's computer",
-        icon: <GraduationCap size={16} />,
-        run: close(() => dispatch({ type: "toggleComputer", open: true })),
-      });
-    }
     if (state.bots.some((b) => b.hidden)) {
       cmds.push({
         id: "hidden-bots",

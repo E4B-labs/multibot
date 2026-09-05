@@ -99,7 +99,7 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <OpenCodeMark size={size} className={className} />;
     case "boxAgent":
       return <ComputerMark size={size} className={className} />;
-    case "slafy":
+    case "openaiCompatible":
       return <LocalMark size={size} className={className} />;
     default:
       return <span className="text-[11px] font-semibold text-ink-secondary">{driverKind.slice(0, 2).toUpperCase()}</span>;

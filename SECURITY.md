@@ -11,7 +11,7 @@ required logs with secrets removed.
 
 ## Security boundaries
 
-- Keep the engine bound to loopback; expose only the authenticated harness.
+- Expose only the authenticated harness; keep every other listener on loopback.
 - Treat bearer tokens, provider keys, connector credentials, browser profiles,
   and transcripts as local secrets.
 - Never route user-controlled strings through a shell.

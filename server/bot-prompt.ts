@@ -109,7 +109,7 @@ export function currentTimeLine(now: Date, timeZone?: string): string {
  * nigdy nie obieca narzędzia, którego bot nie dostał. Nazwa drivera/silnika tu
  * NIE wchodzi — sekcja tożsamości zabrania ją ujawniać.
  *
- * Osobna funkcja, bo driver slafy `system` do silnika nie przekazuje: index.ts
+ * Osobna funkcja, żeby ten sam blok dało się dokleić do TREŚCI tury: index.ts
  * dokleja ten sam blok do treści tury (tak samo, jak robi to ze stanem floty).
  */
 export function connectionsBlock(
@@ -119,8 +119,8 @@ export function connectionsBlock(
   const mounted = mountedConnections(integrations);
   return [
     "# Your connections and tools",
-    // Bez id bota: blok jedzie też w TREŚCI tury drivera slafy, a tam żadna
-    // linia nie może wyglądać jak wpis floty o samym sobie (proxy.test.ts).
+    // Bez id bota: blok bywa doklejany do TREŚCI tury, a tam żadna linia nie
+    // może wyglądać jak wpis floty o samym sobie.
     `You are ${bot.name}, working in the user's MultiBot workspace.`,
     mounted.length
       ? `You ARE connected. Mounted for you in THIS turn:\n${mounted.map((line) => `- ${line}`).join("\n")}`
@@ -165,7 +165,7 @@ export function connectionsBlock(
  *
  * Blok mówi o narzędziach OGÓLNIE — po nazwach, bez ich parametrów i bez
  * kształtu zwracanych danych. Celowo: opisy narzędzi i ich sygnatury żyją
- * w `engine/server/computer_mcp.py` i zmieniają się osobno (refy, batch
+ * przez serwer MCP komputera i zmieniają się osobno (refy, batch
  * akcji), a prompt powtarzający sygnaturę rozjeżdża się z nimi po cichu
  * i zaczyna kłamać. Tu jest STRATEGIA, tam INTERFEJS.
  *
@@ -178,7 +178,7 @@ export function connectionsBlock(
  * dostał), a linie o sekretach dodatkowo na serwer `agents` — `request_credential`
  * i `hand_over_computer` są jego, nie komputera (regresja bc3d15ec).
  *
- * Osobna funkcja z tego samego powodu, co `connectionsBlock`: driver slafy
+ * Osobna funkcja z tego samego powodu, co `connectionsBlock`: bywa
  * `system` do silnika nie przekazuje, więc index.ts dokleja to do treści tury.
  */
 export function computerPlaybook(integrations: TurnIntegrationsLike | undefined): string {
@@ -265,8 +265,8 @@ export function botSystemPrompt(
   const computer = Boolean(integrations.localComputer);
   const currentUser = o.currentUser;
 
-  // Driver-neutral workspace context. Local engine also has native memory and
-  // skills; CLI/API drivers receive same durable notes and instructions here.
+  // Driver-neutral workspace context: every driver receives the same durable
+  // notes and instructions here.
   const botMemory = workspace.markdown(bot.id).content.trim();
   const botFacts = workspace.facts(bot.id).slice(0, 40).map((fact) => `- ${fact.text}`).join("\n");
   const teamMemory = workspace.teamMarkdown?.().content.trim() ?? "";
@@ -294,8 +294,7 @@ export function botSystemPrompt(
   ].filter(Boolean).join("\n");
 
   // multibot: bot stworzony przez innego bota ma wiedzieć kto i po co go powołał.
-  // To jest DRUGA ścieżka promptu (harness → drivery CLI). Driver slafy dostaje
-  // tożsamość z engine/server/bots.py — tam ląduje ten sam kontekst via SOUL.md.
+  // To jest ścieżka promptu harness → drivery.
   // Graceful: brak pól = bot od usera, zero wstrzyknięcia.
   const creationBlock = (() => {
     if (!bot.createdByBotId && !bot.creationContext) return "";
@@ -360,7 +359,10 @@ export function botSystemPrompt(
     // search pokazuje namespaces, nie pojedyncze narzędzia).
     computer &&
       "To open a URL call navigate(url) — prefer it over shell commands. The shell tools you may also have (bash, exec_command, run_command) run on the HOST machine, never inside your computer; for anything on the computer use only the computer tools listed for you above. If a computer tool is not visible, search for it in the mcp__computer tool namespace.",
-    "Web search and fetch — you have `web_search(query)` to search the internet and `web_extract(url)` to fetch and read a page (this is your `fetch`). Use them for any question needing current information, documentation, or URL content. If you need to interact with the page, use your computer's `browser_navigate`/`browser_snapshot` etc. instead of saying you cannot browse. Budget ~25 tool steps: try web search first, then computer, then CLI tools; say what blocked you only after all are exhausted.",
+    // multibot: zdanie o komputerze jest warunkowe razem z blokiem wyżej —
+    // obiecywanie `browser_navigate` botowi bez zamontowanego komputera każe mu
+    // szukać narzędzi, których nie dostał.
+    `Web search and fetch — you have \`web_search(query)\` to search the internet and \`web_extract(url)\` to fetch and read a page (this is your \`fetch\`). Use them for any question needing current information, documentation, or URL content.${computer ? " If you need to interact with the page, use your computer's `browser_navigate`/`browser_snapshot` etc. instead of saying you cannot browse." : ""} Budget ~25 tool steps: try web search${computer ? ", then computer," : ","} then CLI tools; say what blocked you only after all are exhausted.`,
     integrations.composio &&
       `Connected apps — Composio connectors (Gmail, calendar, CRM and the rest) are a dynamic toolset: before you tell the user you have no access to a service, look for its tool with COMPOSIO_SEARCH_TOOLS. If the service is not connected, say plainly that they have to connect it in Plugins — never pretend the action happened.${bot.composioAccounts && Object.keys(bot.composioAccounts).length ? ` This bot's selected connected accounts are ${JSON.stringify(bot.composioAccounts)}; pass matching connected_account_id when a Composio tool supports it.` : ""}`,
     agents &&
@@ -386,7 +388,7 @@ export function botSystemPrompt(
     // multibot (A3): reguła wytrwałości — dotyczy każdego drivera CLI/API. To
     // wytrwałość, nie obchodzenie zabezpieczeń: wyłączony toolset zostaje
     // wyłączony, tryb approval nadal pyta (turn-policy.ts).
-    "Persistence: do not give up after one failed tool — try another approach before concluding something is impossible. When the CLI-style tools (grep, read, search, run_command) cannot get the information, go to your computer and get it there: browse, read files, run commands in its terminal. Use the computer WITHOUT asking first — it is your machine for this, not something you need permission for. Budget roughly 25 tool steps per goal; only stop after web search, the computer and CLI tools are all exhausted, and then say what blocked you. Reserve `ask_user` for the few cases where you genuinely need a human decision or data you have no way to obtain (a password, a direction choice, consent for something irreversible). Any such question MUST be posed through `ask_user` — never as a plain-text `?`-terminated sentence. Persistence is not permission bypass: a disabled toolset stays disabled, and approval mode still asks.",
+    `Persistence: do not give up after one failed tool — try another approach before concluding something is impossible.${computer ? " When the CLI-style tools (grep, read, search, run_command) cannot get the information, go to your computer and get it there: browse, read files, run commands in its terminal. Use the computer WITHOUT asking first — it is your machine for this, not something you need permission for." : ""} Budget roughly 25 tool steps per goal; only stop after web search${computer ? ", the computer" : ""} and CLI tools are all exhausted, and then say what blocked you. Reserve \`ask_user\` for the few cases where you genuinely need a human decision or data you have no way to obtain (a password, a direction choice, consent for something irreversible). Any such question MUST be posed through \`ask_user\` — never as a plain-text \`?\`-terminated sentence. Persistence is not permission bypass: a disabled toolset stays disabled, and approval mode still asks.`,
     autonomous
       ? "Operate autonomously without asking for approval unless provider or platform requires it."
       : "Ask for approval before consequential actions. Irreversible ones — sending a mail or a message, paying, deleting, publishing — only after the user confirms.",

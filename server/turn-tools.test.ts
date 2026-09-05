@@ -1,12 +1,12 @@
-// multibot (A2): wyliczenie narzędzi w prompcie musi być mirrorem prawdziwych
-// serwerów — stąd testy czytające oba źródła z dysku (ten sam wzorzec, co test
-// CURSOR_COLORS w server/engine/computer-mcp.test.ts).
+// multibot (A2): wyliczenie narzędzi w prompcie musi być mirrorem prawdziwego
+// serwera agents — stąd test czytający źródło z dysku. Lustra serwera MCP
+// komputera nie ma, bo sam serwer zniknął razem z silnikiem Hermesa.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { AGENTS_MCP_TOOLS, COMPUTER_MCP_TOOLS, turnToolsText } from "./turn-tools.ts";
+import { AGENTS_MCP_TOOLS, turnToolsText } from "./turn-tools.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -57,13 +57,5 @@ describe("tool lists mirror their servers", () => {
     const fromSource = [...src.matchAll(/name:\s*"([a-z_0-9]+)"/g)].map((m) => m[1]);
     expect(fromSource.length).toBeGreaterThan(10);
     expect([...AGENTS_MCP_TOOLS].sort()).toEqual([...fromSource].sort());
-  });
-
-  it("COMPUTER_MCP_TOOLS matches @mcp.tool() functions in computer_mcp.py", () => {
-    const py = join(SERVER_DIR, "..", "engine", "server", "computer_mcp.py");
-    const src = readFileSync(py, "utf8");
-    const fromSource = [...src.matchAll(/@mcp\.tool\(\)\s*\nasync def ([a-z_0-9]+)\(/g)].map((m) => m[1]);
-    expect(fromSource.length).toBeGreaterThan(5);
-    expect([...COMPUTER_MCP_TOOLS].sort()).toEqual([...fromSource].sort());
   });
 });

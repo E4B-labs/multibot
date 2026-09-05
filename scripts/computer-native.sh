@@ -3,8 +3,8 @@
 #
 # Same desktop, same interface, no container: an X server, a window manager, a
 # Chromium with CDP, and websockify serving noVNC — on exactly the ports the
-# container publishes (cdp 9223, novnc 6901), so the harness proxy and
-# engine/server/computer.py work against either backend unchanged.
+# container publishes (cdp 9223, novnc 6901), so the harness proxy works
+# against either backend unchanged.
 #
 # This exists for hosts where Docker cannot run at all. The obvious one is
 # Termux on Android: Docker needs kernel privileges an unrooted phone will

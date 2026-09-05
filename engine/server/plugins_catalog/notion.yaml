@@ -1,9 +1,0 @@
-name: notion
-display_name: Notion
-description: Szukaj, czytaj i pisz strony oraz bazy w Notionie.
-url: https://mcp.notion.com/mcp
-transport: http
-auth: oauth
-tools_count: 15
-featured: false
-source: https://developers.notion.com/docs/mcp

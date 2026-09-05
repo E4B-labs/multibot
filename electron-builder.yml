@@ -29,22 +29,6 @@ extraResources:
     to: ui
   - from: dist-server
     to: server
-  # multibot: kod silnika jedzie w paczce, jego Python NIE — ten dociąga
-  # scripts/provision-engine.mjs do userData przy pierwszym starcie.
-  # Bez .venv (per-maszyna), bez testów, bez bytecodu.
-  - from: engine/server
-    to: engine/server
-    filter:
-      - "**/*"
-      - "!**/__pycache__/**"
-      - "!**/*.pyc"
-  - from: engine/requirements.txt
-    to: engine/requirements.txt
-  # multibot: provisioner runtime'u. Obok asara, nie w nim — main.mjs forkuje go
-  # przez utilityProcess tak samo jak `server/index.js`, a ta ścieżka jest tu
-  # sprawdzona.
-  - from: scripts/provision-engine.mjs
-    to: provision-engine.mjs
   # multibot: platform-aware Claude Code installer used by Settings → CLI.
   - from: scripts/install-claude.mjs
     to: install-claude.mjs

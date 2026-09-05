@@ -42,7 +42,7 @@ export interface AppConfig {
    * sidebar). Not a secret — echoed back by GET /api/config. */
   profile?: { name?: string; email?: string };
   // multibot (G1): model settings stay beside the existing instance envelope;
-  // instanceConfigs translates them into the slafy driver's opaque config.
+  // instanceConfigs translates them into the driver's opaque config.
   instances?: Record<string, InstanceConfig & { model?: { default?: string; baseUrl?: string } }>;
   // multibot (F7): id → konektor MCP użytkownika (tokeny w `env`/`headers`).
   mcpConnectors?: Record<string, Omit<McpConnector, "id">>;
@@ -132,6 +132,20 @@ export function ensureDirs() {
   chmodPrivate(join(DATA_DIR, "config.json"), 0o600);
 }
 
+/** multibot: wpisy `driver: "slafy"` to modele skonfigurowane przez
+ * użytkownika sprzed usunięcia silnika Hermesa. Przepisujemy je na wejściu na
+ * `openaiCompatible` — i tu, i we `instanceConfigs()`, bo trasy
+ * `/api/models/custom` patrzą na `cfg.instances`, a flota na wynik
+ * `instanceConfigs()`. Plik na dysku zostaje nietknięty do pierwszego zapisu. */
+function migrateLegacyDrivers<T extends NonNullable<AppConfig["instances"]>>(instances: T): T {
+  return Object.fromEntries(
+    Object.entries(instances).map(([id, entry]) => [
+      id,
+      entry.driver === "slafy" ? { ...entry, driver: "openaiCompatible" } : entry,
+    ]),
+  ) as T;
+}
+
 export function loadConfig(): AppConfig {
   let cfg: AppConfig = {};
   try {
@@ -144,6 +158,7 @@ export function loadConfig(): AppConfig {
   cfg.composio = { key: process.env.COMPOSIO_KEY, ...cfg.composio };
   cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
   cfg.voice = { key: process.env.OMB_TTS_KEY, ...cfg.voice };
+  if (cfg.instances) cfg.instances = migrateLegacyDrivers(cfg.instances);
   return cfg;
 }
 
@@ -200,9 +215,6 @@ export function saveConfig(patch: Partial<AppConfig>): void {
 // multibot (G1): stable built-in ids double as reserved custom-model ids and
 // the allow-list for CLI toggles. `computer` is not a command-line tool.
 export const DEFAULT_INSTANCE_CONFIGS = {
-  // multibot: embedded engine is first-class runtime, not a visible vendor.
-  // `driver: "slafy"` remains internal; UI label stays neutral.
-  local: { driver: "slafy", displayName: "Local model" },
   grok: { driver: "grokAgent" },
   gemini: { driver: "geminiAgent" },
   // multibot (G3): official ACP stdio CLIs.
@@ -236,16 +248,16 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   const map: InstanceConfigMap = {};
   const configuredInstances: NonNullable<AppConfig["instances"]> = {
     ...DEFAULT_INSTANCE_CONFIGS,
-    ...(cfg.instances ?? {}),
+    ...migrateLegacyDrivers(cfg.instances ?? {}),
   };
   for (const [id, configured] of Object.entries(configuredInstances)) {
-    // Legacy credential storage used a visible slafy instance. Keep its key
+    // Legacy credential storage used a visible custom-model instance. Keep its key
     // readable below, but never expose a second OpenCode rail entry.
     if (id === "opencodeGo") continue;
     const model = configured.model;
     const entry: InstanceConfig = {
       ...configured,
-      ...(configured.driver === "slafy" && model
+      ...(configured.driver === "openaiCompatible" && model
         ? { config: { ...((configured.config as object | undefined) ?? {}), model } }
         : {}),
     };

@@ -16,21 +16,33 @@
 // katalogu) — jeden login dla całej floty.
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { venvPython } from "./engine/supervisor.ts";
+import { join } from "node:path";
+import { augmentedPath } from "./env-path.ts";
 import { connectors, saveConnector } from "./mcp-connectors.ts";
 
 export const GOOGLE_WORKSPACE_ID = "google-workspace";
 export const GOOGLE_WORKSPACE_NAME = "Google Workspace";
 
-/** Konsolowy skrypt `workspace-mcp` z venvu silnika (dirname pythona = bin/Scripts). */
-export function workspaceMcpBin(engineDir?: string): string {
-  const dir = dirname(venvPython(engineDir));
-  return process.platform === "win32" ? join(dir, "workspace-mcp.exe") : join(dir, "workspace-mcp");
+/** Konsolowy skrypt `workspace-mcp`. Mieszkał w venvie silnika Hermesa; po jego
+ * usunięciu szukamy go na PATH (ta sama ścieżka, którą widzą pozostałe CLI —
+ * `augmentedPath`), więc liczy się każda instalacja: pipx, pip --user, venv
+ * dodany do PATH. Nie znaleziony → sama nazwa, a `workspaceMcpInstalled()`
+ * mówi UI, że trzeba go doinstalować. */
+function findWorkspaceMcp(): string | null {
+  const name = process.platform === "win32" ? "workspace-mcp.exe" : "workspace-mcp";
+  return augmentedPath()
+    .split(process.platform === "win32" ? ";" : ":")
+    .filter(Boolean)
+    .map((dir) => join(dir, name))
+    .find((candidate) => existsSync(candidate)) ?? null;
+}
+
+export function workspaceMcpBin(): string {
+  return findWorkspaceMcp() ?? (process.platform === "win32" ? "workspace-mcp.exe" : "workspace-mcp");
 }
 
 export function workspaceMcpInstalled(): boolean {
-  return existsSync(workspaceMcpBin());
+  return findWorkspaceMcp() !== null;
 }
 
 /** Wspólny katalog tokenów Google — override env, domyślnie przy configu harnessa. */
@@ -79,7 +91,26 @@ export function resetGoogleWorkspaceCredentials(): void {
   rmSync(credentialsDir(), { recursive: true, force: true });
 }
 
+/** multibot: konektor trzyma ABSOLUTNĄ ścieżkę do `workspace-mcp`, a ta u
+ * użytkowników sprzed usunięcia silnika wskazuje na `engine/.venv` — katalog,
+ * którego już nie ma. Konektor wygląda wtedy na skonfigurowany, a każde
+ * wywołanie narzędzia kończy się ENOENT. Przy odczycie statusu (a więc przy
+ * każdym wejściu do panelu Wtyczek) naprawiamy zapis, gdy stara ścieżka nie
+ * istnieje, a nowa owszem. */
+function repairStoredCommand(): void {
+  const connector = connectors().find((c) => c.id === GOOGLE_WORKSPACE_ID);
+  if (!connector || connector.transport.type !== "stdio") return;
+  const stored = connector.transport.command;
+  const found = findWorkspaceMcp();
+  if (!found || stored === found || existsSync(stored)) return;
+  saveConnector(GOOGLE_WORKSPACE_ID, {
+    name: connector.name,
+    transport: { ...connector.transport, command: found },
+  });
+}
+
 export function googleWorkspaceStatus() {
+  repairStoredCommand();
   const connector = connectors().find((c) => c.id === GOOGLE_WORKSPACE_ID);
   return {
     installed: workspaceMcpInstalled(),
@@ -89,8 +120,9 @@ export function googleWorkspaceStatus() {
   };
 }
 
-/** Komenda do wklejenia w terminalu hosta, gdy workspace-mcp brakuje. */
+/** Komenda do wklejenia w terminalu hosta, gdy workspace-mcp brakuje. `pipx`
+ * daje własny venv i wystawia skrypt na PATH — dokładnie to, czego szuka
+ * `workspaceMcpBin()`. */
 export function installHint(): string {
-  const pip = join(dirname(venvPython()), process.platform === "win32" ? "pip.exe" : "pip");
-  return `${pip} install workspace-mcp`;
+  return "pipx install workspace-mcp";
 }

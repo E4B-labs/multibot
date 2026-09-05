@@ -105,12 +105,6 @@ let serverReady = true;
 // window, opened on demand — it never replaces the harness UI window.
 let mainWindow = null;
 let pickerWindow = null;
-// multibot: runtime silnika (Python + Hermes + przeglądarka Playwrighta) NIE
-// jedzie w instalatorze — dociąga go scripts/provision-engine.mjs do userData
-// przy pierwszym starcie. Ten sam układ katalogów zna server/engine/supervisor.ts.
-const ENGINE_RUNTIME = path.join(app.getPath("userData"), "engine-runtime");
-const ENGINE_DATA = path.join(app.getPath("userData"), "engine-data");
-
 // multibot: zapamiętana geometria okna głównego — <userData>/window-state.json,
 // atomiczny zapis (tmp+rename), debounce 250 ms na resize/move, flush przy zamknięciu.
 function windowStateFile() {
@@ -234,12 +228,6 @@ async function startServerOn(port) {
       OMB_STATIC_DIR: path.join(process.resourcesPath, "ui"),
       OMB_HOST: "127.0.0.1", // Tailscale Serve terminates HTTPS on loopback.
       OMB_PORT: String(port),
-      // Silnik dziedziczy to przez spawn w supervisorze. PLAYWRIGHT_BROWSERS_PATH
-      // musi tu być: domyślny katalog przeglądarek leży na dysku systemowym,
-      // a provisioner instaluje je pod userData.
-      OMB_ENGINE_RUNTIME: ENGINE_RUNTIME,
-      SLAFY_DATA_DIR: process.env.SLAFY_DATA_DIR ?? ENGINE_DATA,
-      PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? path.join(ENGINE_RUNTIME, "browsers"),
       // Trusted packaged path; used only after explicit onboarding 24/7 choice.
       OMB_PACKAGED_EXE: app.isPackaged && process.platform === "win32" ? process.execPath : "",
       OMB_SERVER_SERVICE: SERVER_ONLY ? "1" : "",
@@ -317,19 +305,6 @@ async function ensureLocalHarness() {
   serverReady = await startServerPackaged();
   localHarnessStarted = serverReady;
   return serverReady;
-}
-
-function provisionEngineRuntime() {
-  if (fs.existsSync(path.join(ENGINE_RUNTIME, ".provisioned"))) return Promise.resolve();
-  const script = path.join(process.resourcesPath, "provision-engine.mjs");
-  const proc = utilityProcess.fork(
-    script,
-    ["--target", ENGINE_RUNTIME, "--requirements", path.join(process.resourcesPath, "engine", "requirements.txt")],
-    { stdio: "inherit" },
-  );
-  return new Promise((resolve, reject) => {
-    proc.once("exit", (code) => (code === 0 ? resolve() : reject(new Error(`provisioning exit ${code}`))));
-  });
 }
 
 const ERROR_PAGE =
@@ -689,14 +664,6 @@ app.whenReady().then(async () => {
     if (!app.isPackaged) {
       console.error("--server-only requires packaged app");
       return app.exit(1);
-    }
-    // Explicit server install may take minutes on first boot; no GUI or UAC.
-    try {
-      await provisionEngineRuntime();
-    } catch (e) {
-      console.error("[engine] provisioning failed:", e);
-      app.exit(1);
-      return;
     }
     serverReady = await startServerPackaged();
     if (!serverReady) app.exit(1);

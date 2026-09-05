@@ -33,7 +33,6 @@ import { cn } from "@/lib/cn";
 import { plainPreview } from "@/lib/plainPreview";
 import { authFetch } from "@/lib/auth";
 // multibot: F11 — status silnika dla warunkowej kropki w stopce
-import { engineOnline } from "@/lib/engineStatus";
 import { getLanguage, useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { groupAvatarSplit, groupRowTitle } from "@/lib/groupRow";
@@ -756,8 +755,8 @@ function GroupContextMenu({ menu, onClose }: { menu: GroupMenuState; onClose: ()
 
 // multibot: F9-FE — grupy w sidebarze: każdy bot ma trwałą reprezentację
 // `mb-<threadId>` w transporcie grupowym, niezależnie od wybranego drivera.
-// Jeden GET przy mount (wzorzec engineStatus) — zero pollingu; POST create
-// dopisuje do listy lokalnie. `null` = nie załadowano (silnik offline).
+// Jeden GET przy mount — zero pollingu; POST create dopisuje do listy
+// lokalnie. `null` = nie załadowano (harness nie odpowiedział).
 function useEngineGroups(workspaceVersion: unknown) {
   const [groups, setGroups] = useState<EngineGroup[] | null>(null);
   useEffect(() => {
@@ -1122,30 +1121,6 @@ export function Sidebar() {
     setAddMenuOpen(false);
     setGroupCreateOpen(false);
   }, [collapsed]);
-
-  // multibot: F11 — wskaźnik TYLKO gdy silnik offline a jakiś bot jeździ na
-  // slafy (dla reszty userów silnik nie istnieje — nic nie pokazujemy i nic
-  // nie odpytujemy). Boty i instancje hydratują się async, więc efekt na
-  // [hasLocalBot] odpala się raz, gdy flaga stanie się prawdą — to jest to
-  // "jedno sprawdzenie przy mount aplikacji"; kolejne robi AppSettingsPanel
-  // przy otwarciu. Zero pollingu.
-  const hasLocalBot = state.bots.some(
-    (b) =>
-      state.instances.find((i) => i.instanceId === b.modelSelection.instanceId)?.driverKind ===
-      "slafy",
-  );
-  const [engineOffline, setEngineOffline] = useState(false);
-  useEffect(() => {
-    if (!hasLocalBot) {
-      setEngineOffline(false);
-      return;
-    }
-    let alive = true;
-    void engineOnline().then((ok) => alive && setEngineOffline(!ok));
-    return () => {
-      alive = false;
-    };
-  }, [hasLocalBot]);
 
   // multibot: otwarty bot zostaje NA SWOIM MIEJSCU w liście pod wyszukiwarką.
   // Wcześniej dostawał osobny wiersz nad paskiem wyszukiwania i wypadał z listy,
@@ -1537,20 +1512,6 @@ export function Sidebar() {
       <div className={cn("pb-3 pt-2", collapsed ? "px-1" : "px-3")}>
         {/* multibot: Rozmowy botów i Mapa zespołu przeniesione do 3-kropek
             w nagłówku czatu (prawy górny róg) — tu celowo puste. */}
-        {/* multibot: F11 — subtelna kropka statusu silnika, tylko offline+slafy;
-            szara bg-raised-hover = konwencja "Service offline" */}
-        {engineOffline && (
-          <div
-            title={polish ? "Usługa lokalna offline — boty lokalnych modeli nie działają. Sprawdź ustawienia aplikacji." : "Local service offline — custom-model bots can't run. Check App Settings."}
-            className={cn(
-              "flex items-center py-1.5 text-[12px] text-ink-secondary",
-              collapsed ? "justify-center px-0" : "gap-2 px-3",
-            )}
-          >
-            <span className="size-1.5 shrink-0 rounded-full bg-raised-hover" />
-            {!collapsed && (polish ? "Usługa offline" : "Service offline")}
-          </div>
-        )}
         <button
           onClick={() => dispatch({ type: "togglePlugins", open: true })}
           title={collapsed ? (polish ? "Wtyczki" : "Plugins") : undefined}

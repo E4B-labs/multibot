@@ -59,7 +59,7 @@ pnpm test
 pnpm exec vite build
 ```
 
-Zmiana w `engine/` dokłada pytest. Te cztery komendy to dokładnie to, co
+Te cztery komendy to dokładnie to, co
 uruchamia CI (`.github/workflows/ci.yml`) na macOS, Ubuntu i Windows. Odpalenie
 ich lokalnie zanim wypchniesz gałąź jest jedyną rzeczą, która oddziela zielone
 CI od czerwonego — historia tego repo pokazuje, co się dzieje bez tego

@@ -12,6 +12,4 @@ fi
 
 export OMB_HOST="${OMB_HOST:-0.0.0.0}"
 export OMB_PORT="${OMB_PORT:-8799}"
-# Leave ENGINE_URL unset by default so harness can spawn its loopback engine
-# (127.0.0.1:8700). Set it explicitly only when an external local engine is managed.
 exec node "$ROOT/dist-server/index.js"

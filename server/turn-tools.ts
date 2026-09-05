@@ -7,11 +7,14 @@
 // Listy są statyczne — mirror z dwóch miejsc, żeby nie importować spawnerów
 // (agents-proxy.ts to skrypt z runem, nie moduł):
 //   - AGENTS_MCP_TOOLS  = TOOLS w server/drivers/agents-proxy.ts (28 narzędzi)
-//   - COMPUTER_MCP_TOOLS = @mcp.tool() w engine/server/computer_mcp.py (12)
-// Staleness pilnuje test, który czyta oba źródła z dysku (tak samo, jak test
-// pilnuje CURSOR_COLORS).
+//   - COMPUTER_MCP_TOOLS = narzędzia serwera MCP komputera (12)
+//
+// UWAGA: serwer MCP komputera jechał przez silnik Hermesa i zniknął razem z nim,
+// więc `integrations.localComputer` nie ma dziś producenta. Lista zostaje, bo
+// zostaje też plumbing driverów — patrz `COMPUTER_TOOLS_VERSION`
+// w server/drivers/codex.ts.
 
-/** Narzędzia serwera MCP komputera — mirror `engine/server/computer_mcp.py`. */
+/** Narzędzia serwera MCP komputera. */
 export const COMPUTER_MCP_TOOLS = [
   "screenshot",
   "navigate",
@@ -99,8 +102,7 @@ export interface TurnIntegrationsLike {
  * Nazwy połączeń zamontowanych W TEJ turze, każde ze swoimi narzędziami.
  * Generowane z `integrations` i ze stałych powyżej — nigdy wpisane na sztywno,
  * więc to, czego harness nie zamontował, nie ma prawa się tu pojawić. Używa
- * tego blok "Your connections and tools" w prompcie (i tura drivera slafy,
- * który `system` w ogóle nie dostaje).
+ * tego blok "Your connections and tools" w prompcie.
  */
 export function mountedConnections(integrations: TurnIntegrationsLike | undefined): string[] {
   const out: string[] = [];

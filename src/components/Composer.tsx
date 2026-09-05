@@ -153,7 +153,7 @@ export function withCommand(text: string, command: string): string {
   return !rest || rest.startsWith("/") ? `${command} ` : `${command} ${rest}`;
 }
 
-/** Wiersze pickera: kształt z GET /api/engine/skills (engine/server/skills.py). */
+/** Wiersze pickera: kształt z GET /api/bots/{id}/skills. */
 interface SlashSkill {
   name: string;
   command: string;
@@ -164,7 +164,7 @@ interface SlashSkill {
  *  (wstawienie `/komendy` do wiadomości, jak z palety "/"). */
 type MentionRow = { type: "bot"; peer: Bot } | { type: "skill"; skill: SlashSkill };
 
-// multibot: paleta "/" nie kończy się na skillach silnika — pokazuje też akcje
+// multibot: paleta "/" nie kończy się na skillach — pokazuje też akcje
 // harnessu, wtyczki, agentów i rutyny. Wzór wiersza z Grok Bota: nazwa, podpis
 // kontekstowy i etykieta typu przy prawej krawędzi. Skille i `/model` nadal
 // TYLKO wstawiają tekst (brak `run`), reszta odpala dispatch. Rutyna wyłącznie
@@ -398,9 +398,7 @@ export function Composer({ bot, onSend }: { bot: Bot; onSend?: (text: string) =>
   // multibot: F8 — picker skilli po "/" i po "@": mechanika 1:1 z @mention
   // (strzałki, Enter/Tab wstawia, Esc chowa do następnej zmiany tekstu).
   // ŹRÓDŁO SKILLI: harness per bot (`/api/bots/{id}/skills`) — ten sam, z którego
-  // czyta panel Umiejętności. Wcześniejszy odczyt z /api/engine/skills pod
-  // bramką slafyDriver zostawiał paletę i "@" puste, choć bot miał skille
-  // (harness trzyma je per bot i wstrzykuje w każdą turę, niezależnie od silnika).
+  // czyta panel Umiejętności; harness trzyma je per bot i wstrzykuje w każdą turę.
   // multibot: rutyny są per bot, więc cache trzyma id bota — bez tego
   // przełączenie bota zostawiłoby w palecie cudzą listę.
   const [slashSkills, setSlashSkills] = useState<{ botId: string; rows: SlashSkill[] } | null>(

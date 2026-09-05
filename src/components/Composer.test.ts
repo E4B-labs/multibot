@@ -104,7 +104,7 @@ describe("fastModeAvailable", () => {
 
   it("chowa go poza codeksem", () => {
     expect(fastModeAvailable("claude", "claude-sonnet-5")).toBe(false);
-    expect(fastModeAvailable("slafy", "hermes-agent")).toBe(false);
+    expect(fastModeAvailable("openaiCompatible", "gpt-4o")).toBe(false);
     expect(fastModeAvailable(undefined, "gpt-5.6-sol")).toBe(false);
   });
 });

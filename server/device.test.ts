@@ -12,7 +12,6 @@ describe("deviceInfo", () => {
     expect(info.memoryGb).toBeGreaterThan(0);
     expect(typeof info.python).toBe("boolean");
     expect(typeof info.docker).toBe("boolean");
-    expect(typeof info.engineInstalled).toBe("boolean");
     expect(typeof info.android).toBe("boolean");
     expect(typeof info.termux).toBe("boolean");
     if (info.pythonVersion) expect(info.pythonVersion).toMatch(/python/i);

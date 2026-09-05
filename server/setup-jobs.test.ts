@@ -55,10 +55,10 @@ describe("SetupJobs", () => {
       JSON.stringify([
         {
           id: "interrupted",
-          key: "engine-provision",
+          key: "cli-install",
           kind: "provision",
           title: "Install bot server",
-          command: "node provision-engine.mjs",
+          command: "node install-claude.mjs",
           status: "running",
           output: [],
           createdAt: 1,

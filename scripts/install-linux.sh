@@ -20,7 +20,7 @@ say() { printf '[multibot] %s\n' "$*"; }
 run() { if (( DRY_RUN )); then printf '+ %q' "$@"; printf '\n'; else "$@"; fi; }
 
 if [[ "$MODE" == docker ]]; then
-  say "Docker route: harness only on host port 8799; engine remains 127.0.0.1 inside same container."
+  say "Docker route: the harness is the only published port (8799, loopback)."
   command -v docker >/dev/null || { say "missing docker" >&2; exit 1; }
   run docker compose -f "$ROOT/docker-compose.selfhost.yml" up -d --build
   say "Public HTTPS: run scripts/tunnel.sh with a named Cloudflare Tunnel, or put a trusted reverse proxy in front of port 8799"
@@ -29,18 +29,7 @@ if [[ "$MODE" == docker ]]; then
 fi
 
 [[ "$(uname -s)" == Linux ]] || { say "systemd mode requires Linux" >&2; exit 1; }
-for tool in node pnpm python3 git systemctl; do command -v "$tool" >/dev/null || { say "missing $tool" >&2; exit 1; }; done
-
-say "prepare Python engine venv and editable Hermes dependency"
-run python3 -m venv "$ROOT/engine/.venv"
-run "$ROOT/engine/.venv/bin/python" -m pip install --upgrade pip
-run "$ROOT/engine/.venv/bin/pip" install -r "$ROOT/engine/requirements.txt"
-if [[ ! -d "$ROOT/engine/hermes-agent/.git" ]]; then
-  run git clone --filter=blob:none https://github.com/NousResearch/hermes-agent "$ROOT/engine/hermes-agent"
-  run git -C "$ROOT/engine/hermes-agent" checkout 17688f9
-fi
-run "$ROOT/engine/.venv/bin/pip" install -e "$ROOT/engine/hermes-agent"
-run "$ROOT/engine/.venv/bin/python" -m playwright install chromium
+for tool in node pnpm git systemctl; do command -v "$tool" >/dev/null || { say "missing $tool" >&2; exit 1; }; done
 
 say "build harness and PWA"
 run pnpm --dir "$ROOT" install --frozen-lockfile
@@ -67,8 +56,6 @@ WorkingDirectory=$ROOT
 Environment=HOME=%h
 Environment=OMB_HOST=0.0.0.0
 Environment=OMB_PORT=8799
-Environment=SLAFY_DATA_DIR=%h/.openmausbot/engine-data
-Environment=HERMES_HOME=%h/.openmausbot
 ExecStart=$BASH_BIN $ROOT/scripts/start-multibot.sh
 Restart=always
 RestartSec=5

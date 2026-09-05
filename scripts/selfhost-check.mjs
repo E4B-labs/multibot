@@ -15,17 +15,14 @@ const linux = read("scripts/install-linux.sh");
 const termux = read("scripts/install-termux.sh");
 
 must(existsSync(join(root, "public", "manifest.webmanifest")), "PWA manifest missing");
-must(dockerfile.includes("--host 127.0.0.1") || start.includes("127.0.0.1:8700"), "engine loopback pin missing");
-must(!compose.includes("8700:"), "compose publishes engine port");
+must(compose.includes('"127.0.0.1:8799:8799"'), "compose must publish the harness on loopback only");
 must(entrypoint.includes("start-multibot.sh"), "docker entrypoint bypasses common launcher");
 must(start.includes("dist-server/index.js"), "common launcher missing built harness");
 must(dockerfile.includes("pnpm build:server"), "container omits server build");
-must(dockerfile.includes("SLAFY_BROWSER_HEADLESS=1"), "container browser needs headless mode");
 must(linux.includes("--dry-run") && linux.includes("--self-test"), "linux dry-run/self-test missing");
 must(linux.includes('run docker compose -f "$ROOT/docker-compose.selfhost.yml" up -d --build'), "Docker installer only prints command");
 must(linux.includes('pnpm --dir "$ROOT" build:server'), "Linux installer omits server build");
 must(termux.includes("termux-services") && termux.includes(".termux/boot"), "Termux reboot persistence missing");
-must(termux.includes("python-ensurepip-wheels") && termux.includes("--system-site-packages"), "Termux native Python prerequisites missing");
 must(termux.includes("termux-services/svlogger"), "Termux service logger missing");
 must(termux.includes('pnpm --dir "$ROOT" build:server'), "Termux installer omits server build");
 must(linux.includes("scripts/tunnel.sh") && linux.includes("Cloudflare Tunnel"), "Linux HTTPS guidance missing");

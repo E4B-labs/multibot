@@ -167,19 +167,15 @@ export interface SelectionTarget {
 /** Which provider a bot lands on when nobody picked one (new bot, or a
  * selection whose instance disappeared).
  *
- * The `slafy` driver is the Hermes sidecar: runtime infrastructure, hidden from
- * the model picker, and absent on hosts that never run Hermes (the phone). A
- * bot parked there has no way back through the UI, so a CLI driver goes first.
- *
  * Only claude and codex count as that first choice. "Available" means the
  * driver loaded, not that it can answer: the key-based instances (opencode,
  * grok) report available with no key configured and would fail on turn one, so
- * they queue behind the engine rather than in front of it. */
+ * they queue behind the CLI drivers rather than in front of them. */
 export function defaultSelectionTarget<T extends SelectionTarget>(targets: readonly T[]): T | undefined {
   const cli = (list: readonly T[]) =>
     list.find((t) => t.driverKind === "claudeAgent") ?? list.find((t) => t.driverKind === "codex");
   const live = targets.filter((t) => t.snapshot.state === "available");
-  return cli(live) ?? live.find((t) => t.driverKind === "slafy") ?? live[0] ?? cli(targets) ?? targets[0];
+  return cli(live) ?? live[0] ?? cli(targets) ?? targets[0];
 }
 
 const BOTS_FILE = join(DATA_DIR, "bots.json");
@@ -498,11 +494,14 @@ export class Store {
    * empty selection. One write covers every migrated bot. */
   migrateOrphanedSelections(targets: SelectionTarget[]): number {
     const known = new Set(targets.map((target) => target.instanceId));
-    // A custom slafy entry is a model endpoint the user configured by hand, so
-    // it still wins; the built-in `local` engine does not — see
-    // defaultSelectionTarget.
+    // A custom endpoint is a model the user configured by hand, so it still
+    // wins over the generic default — see defaultSelectionTarget.
+    // `models.default` jest tu warunkiem, nie ozdobą: instancja
+    // `openaiImage` istnieje wyłącznie po to, żeby przechować klucz API i nie
+    // ma ani adresu, ani modelu — bot przeniesiony na nią nigdy by nie
+    // odpowiedział.
     const fallback =
-      targets.find((target) => target.driverKind === "slafy" && target.instanceId !== "local") ??
+      targets.find((target) => target.driverKind === "openaiCompatible" && Boolean(target.models.default)) ??
       defaultSelectionTarget(targets);
     let changed = 0;
     for (const bot of this.bots) {

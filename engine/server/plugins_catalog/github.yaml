@@ -1,9 +1,0 @@
-name: github
-display_name: GitHub
-description: Repozytoria, issues i pull requesty przez zdalny serwer MCP GitHuba.
-url: https://api.githubcopilot.com/mcp/
-transport: http
-auth: oauth
-tools_count: 30
-featured: true
-source: https://github.com/github/github-mcp-server

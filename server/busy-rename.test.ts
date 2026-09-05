@@ -70,7 +70,6 @@ beforeAll(async () => {
       // ten test pilnuje `busy` w trakcie tury, nie okna sklejania wiadomości
       OMB_TURN_DEBOUNCE_MS: "0",
       FAKE_ACP_MODE: "hang",
-      ENGINE_URL: "http://127.0.0.1:1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

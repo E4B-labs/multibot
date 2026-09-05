@@ -40,9 +40,6 @@ pnpm test:watch      # same, in watch mode
 pnpm exec vite build # production UI build
 ```
 
-Engine (`engine/`) changes also run the pytest suite — setup in
-[`engine/README.md`](engine/README.md).
-
 ## Repo map
 
 | Path | What lives there |

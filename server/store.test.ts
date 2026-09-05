@@ -165,7 +165,7 @@ describe("Store", () => {
   it("migrates orphaned selections to a custom model first", () => {
     const store = new Store(selection);
     const orphan = store.createBot();
-    store.patchBot(orphan.id, { modelSelection: { instanceId: "slafy", model: "hermes-agent" } });
+    store.patchBot(orphan.id, { modelSelection: { instanceId: "local", model: "hermes-agent" } });
 
     expect(
       store.migrateOrphanedSelections([
@@ -177,7 +177,7 @@ describe("Store", () => {
         },
         {
           instanceId: "local-qwen",
-          driverKind: "slafy",
+          driverKind: "openaiCompatible",
           models: { default: "qwen2.5" },
           snapshot: { state: "unavailable" },
         },
@@ -198,15 +198,13 @@ describe("Store", () => {
     expect(store.bot(orphan.id)?.modelSelection).toEqual({ instanceId: "", model: "" });
   });
 
-  // The `local` engine is hidden from the model picker, so a bot that lands
-  // there cannot be moved off it — and on hosts with no Hermes (the phone) it
-  // cannot answer at all. New bots go to a CLI driver instead.
+  // New bots go to a CLI driver: it is the one that can answer without a key.
   describe("defaultSelectionTarget", () => {
     const target = (instanceId: string, driverKind: string, state: "available" | "unavailable" = "available") =>
       ({ instanceId, driverKind, models: { default: `${instanceId}-model` }, snapshot: { state } });
 
-    it("picks the CLI driver over the engine", () => {
-      const pick = defaultSelectionTarget([target("local", "slafy"), target("codex", "codex")]);
+    it("picks the CLI driver over a configured endpoint", () => {
+      const pick = defaultSelectionTarget([target("local-qwen", "openaiCompatible"), target("codex", "codex")]);
       expect(pick?.instanceId).toBe("codex");
     });
 
@@ -218,10 +216,11 @@ describe("Store", () => {
     });
 
     // "available" only means the driver loaded — opencode says so with no key
-    // configured, and would fail on the first turn.
-    it("keeps a key-based driver behind the engine", () => {
-      const pick = defaultSelectionTarget([target("opencode", "opencode"), target("local", "slafy")]);
-      expect(pick?.instanceId).toBe("local");
+    // configured, and would fail on the first turn. With no claude or codex in
+    // the fleet the first live target wins, whatever it is.
+    it("falls back to the first live target when no CLI driver is there", () => {
+      const pick = defaultSelectionTarget([target("opencode", "opencode"), target("local-qwen", "openaiCompatible")]);
+      expect(pick?.instanceId).toBe("opencode");
     });
 
     it("prefers a live CLI driver over a dead one", () => {
@@ -229,8 +228,8 @@ describe("Store", () => {
       expect(pick?.instanceId).toBe("codex");
     });
 
-    it("falls back to the engine only when it is the whole fleet", () => {
-      expect(defaultSelectionTarget([target("local", "slafy")])?.instanceId).toBe("local");
+    it("takes whatever is there when it is the whole fleet, and nothing from nothing", () => {
+      expect(defaultSelectionTarget([target("local-qwen", "openaiCompatible")])?.instanceId).toBe("local-qwen");
       expect(defaultSelectionTarget([])).toBeUndefined();
     });
   });

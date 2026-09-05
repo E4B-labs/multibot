@@ -30,16 +30,11 @@ export default defineConfig({
     // packager output lands inside the repo — its HTML files must never
     // trigger dev full-page reloads
     watch: {
-      // multibot: engine-data/ i engine/.venv też są w repo. Profil przeglądarki
-      // bota trzyma pliki otwarte (Cookies, Network), więc watcher dostaje na
-      // nich EBUSY i ubija dev-serwer, gdy bot ma podniesioną przeglądarkę.
       ignored: [
         "**/release/**",
         "**/build/**",
         "**/dist/**",
         "**/electron/resources/**",
-        "**/engine-data/**",
-        "**/engine/.venv/**",
       ],
     },
     // the harness server owns every provider process; the app only ever
@@ -47,9 +42,8 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: `http://127.0.0.1:${process.env.OGB_PORT || 8799}`,
-        // multibot: pipe WS silnika (`/api/engine/ws`) też idzie tą przelotką —
-        // bez tego dev-serwer nie przepuszcza upgrade'u i kanał eventów działa
-        // wyłącznie w apce pakowanej
+        // multibot: harness ma własny WebSocket — bez tego dev-serwer nie
+        // przepuszcza upgrade'u i kanał eventów działa wyłącznie w apce pakowanej
         ws: true,
       },
     },

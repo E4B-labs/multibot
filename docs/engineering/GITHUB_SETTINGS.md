@@ -56,6 +56,13 @@ Nazwa kontekstu musi się zgadzać znak w znak, ze spacjami i nawiasami. Zmiana
 `name:` w workflow albo zmiana macierzy systemów rozjeżdża te napisy i każdy PR
 staje na „Expected”.
 
+> **UWAGA: żywy zestaw reguł na GitHubie nie aktualizuje się sam.** Zmiana tej
+> listy w `ruleset-main.json` nie zmienia niczego, dopóki właściciel nie wyśle
+> pliku ręcznie (PUT z punktu 4) albo nie poprawi listy w interfejsie GitHuba.
+> Skasowanie workflow bez wyrzucenia jego kontekstu z zestawu zostawia wymagany
+> check, którego nikt już nie wystawia — a taki check **blokuje każdy PR na
+> zawsze**, w stanie „Expected — waiting for status”.
+
 ---
 
 ## 2. Utworzenie zestawu reguł

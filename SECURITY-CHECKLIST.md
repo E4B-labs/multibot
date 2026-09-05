@@ -15,8 +15,8 @@ Date: 2026-08-18
 - Test-only secret-shaped literals replaced with generated test values.
 - Local auth/config files, templates, funding files, internal plans, and
   research artifacts moved to the external release archive.
-- Build output, dependency directories, local engine data, uploads, and local
-  environments excluded from Git.
+- Build output, dependency directories, uploads, and local environments
+  excluded from Git.
 
 ## History
 

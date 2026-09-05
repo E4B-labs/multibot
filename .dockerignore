@@ -1,12 +1,7 @@
 node_modules
 dist
 dist-server
-engine/.venv
-engine-data
 .git
-.pytest_cache
-__pycache__
-*.pyc
 *.local
 
 # multibot: sekrety nigdy nie wchodzą do obrazu (Dockerfile.selfhost robi COPY . .)

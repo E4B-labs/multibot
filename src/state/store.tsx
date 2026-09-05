@@ -161,9 +161,9 @@ export interface InstanceInfo {
   models: { default: string; options: Array<{ id: string; label: string }>; updatedAt?: string };
 }
 
-// multibot: F9-FE — grupa silnika (engine `groups.py`): {id, name, bot_ids}.
-// Obiekt siedzi w stanie, bo GroupPanel potrzebuje nazwy i składu, a listę grup
-// trzyma Sidebar lokalnie (wzorzec engineOffline) — store zna tylko otwartą.
+// multibot: F9-FE — grupa harnessu: {id, name, bot_ids}. Obiekt siedzi w stanie,
+// bo GroupPanel potrzebuje nazwy i składu, a listę grup trzyma Sidebar lokalnie
+// — store zna tylko otwartą.
 export interface EngineGroup {
   id: string;
   name: string;
@@ -219,9 +219,9 @@ interface AppState {
   pluginsConnector?: ConnectorTarget;
   computerOpen: boolean;
   appSettingsOpen: boolean;
-  // multibot: F6 — panel rutyn silnika slafy, ten sam prawy slot co settings/computer
+  // multibot: F6 — panel rutyn, ten sam prawy slot co settings/computer
   routinesOpen: boolean;
-  // multibot: F8 — panele pamięci i skilli silnika slafy, ten sam prawy slot
+  // multibot: F8 — panele pamięci i skilli, ten sam prawy slot
   memoryOpen: boolean;
   skillsOpen: boolean;
   // multibot: live team map (port z OpenMausBot)

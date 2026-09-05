@@ -10,13 +10,12 @@
 // the agent owns input by default; the user can take it, see-through
 // continues either way (agent can always watch, never blocked from reading).
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, GraduationCap, Hand, Loader2, Maximize2, MousePointer2, Settings, Square, X } from "lucide-react";
+import { AlertTriangle, Hand, Loader2, Maximize2, MousePointer2, Settings, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { authFetch, getAuthToken } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
-import { TeachCard } from "./SkillsPanel";
 
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await authFetch(path, { headers: { "content-type": "application/json" }, ...init });
@@ -212,17 +211,6 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
     setRemoteCursorHidden(screenRef.current?.contentDocument, owner === "agent");
   }, [owner, computerState, fullscreen]);
 
-  // K5: faza nagrywania skilla leci z TeachCard (karta pod ekranem) jako
-  // zdarzenie, żeby czerwona ramka i pasek nagrywania mogły siedzieć NA ekranie
-  // komputera, a nie tylko w karcie.
-  const [teachPhase, setTeachPhase] = useState<string>("idle");
-  useEffect(() => {
-    const onPhase = (e: Event) => setTeachPhase(((e as CustomEvent).detail as { phase: string }).phase);
-    window.addEventListener("mb:teach:phase", onPhase);
-    return () => window.removeEventListener("mb:teach:phase", onPhase);
-  }, []);
-  const teachRecording = teachPhase === "recording" || teachPhase === "stopping";
-
   const acquireControl = () => {
     setControlPending(true);
     api(`/api/bots/${bot.id}/computer/control/acquire`, { method: "POST" })
@@ -264,41 +252,6 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         <Hand size={16} />
       ) : (
         <MousePointer2 size={16} />
-      )}
-    </button>
-  );
-  // multibot: nagrywanie startuje z ikony przy „Przejmij sterowanie", a stan
-  // trzyma TeachCard pod ekranem — stąd zdarzenie zamiast wspólnego reduktora.
-  // Ta sama ikona zatrzymuje, więc jeden guzik zamiast dwóch obok siebie.
-  const teachButton = computerState === "ready" && (
-    <button
-      type="button"
-      onClick={() =>
-        window.dispatchEvent(new CustomEvent(teachRecording ? "mb:teach:stop" : "mb:teach:start"))
-      }
-      disabled={teachPhase === "starting" || teachPhase === "stopping"}
-      title={
-        teachRecording
-          ? polish ? "Zatrzymaj nagrywanie" : "Stop recording"
-          : polish ? "Naucz umiejętności — nagraj demonstrację" : "Teach a skill — record a demonstration"
-      }
-      aria-label={
-        teachRecording
-          ? polish ? "Zatrzymaj nagrywanie" : "Stop recording"
-          : polish ? "Naucz umiejętności" : "Teach a skill"
-      }
-      aria-pressed={teachRecording}
-      className={cn(
-        "rounded-lg p-2 disabled:opacity-50",
-        teachRecording ? "bg-danger text-white" : "bg-raised text-ink-secondary hover:bg-raised-hover hover:text-ink",
-      )}
-    >
-      {teachPhase === "starting" || teachPhase === "stopping" ? (
-        <Loader2 size={16} className="animate-spin" />
-      ) : teachRecording ? (
-        <Square size={16} />
-      ) : (
-        <GraduationCap size={16} />
       )}
     </button>
   );
@@ -383,16 +336,6 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
             className="absolute inset-0 cursor-zoom-in"
           />
         )}
-        {/* multibot: czerwona ramka dookoła nagrywanego obszaru (UI-SPEC §8) —
-            i nic poza nią. Pasek z napisem „Nagrywanie…" zasłaniał górę ekranu
-            bota dokładnie wtedy, gdy użytkownik pokazuje tam zadanie; stop
-            siedzi w ikonie nad ekranem, więc pasek nie niósł nic własnego.
-            Osobna warstwa, nie obramowanie kontenera: `pointer-events-none`
-            przepuszcza kliknięcia do ekranu, a ramka nie zabiera iframe'owi
-            pikseli, więc obraz nie skacze przy starcie nagrywania. */}
-        {teachRecording && (
-          <div className="pointer-events-none absolute inset-0 z-20 border-2 border-danger" />
-        )}
       </div>
     ) : (
       <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
@@ -466,21 +409,9 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
 
           {controlButton && (
             <div className="mt-3 flex items-center justify-end gap-2">
-              {teachButton}
               {controlButton}
             </div>
           )}
-
-          <TeachCard
-            botId={bot.id}
-            engineBotId={`mb-${bot.threadId}`}
-            onSkillCreated={() => {}}
-            polish={polish}
-            computerReady={computerState === "ready"}
-            notReadyLabel={computerStateLabel(computerState, polish)}
-            onStartControl={acquireControl}
-            onStopControl={releaseControl}
-          />
         </div>
       </aside>
 
@@ -492,7 +423,6 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
               obraz, a nazwa panelu i tak stoi w nagłówku panelu obok. */}
           <div className="flex items-center justify-end px-1 py-2">
             <div className="flex items-center gap-2">
-              {teachButton}
               {controlButton}
               <button
                 onClick={() => setFullscreen(false)}

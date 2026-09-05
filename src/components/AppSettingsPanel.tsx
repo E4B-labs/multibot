@@ -14,8 +14,6 @@ import { ApiKeyRow } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { cn } from "@/lib/cn";
 import { authFetch, clearAuthToken } from "@/lib/auth";
-// multibot: F11 — status silnika dla EngineStatusRow
-import { engineOnline } from "@/lib/engineStatus";
 import { languageLabel, setLanguage, useLanguage, type Language } from "@/lib/language";
 import { SkinPicker } from "./SkinPicker";
 import { MicrophoneRow } from "./MicrophoneRow";
@@ -26,22 +24,9 @@ import { readDesktopNotifications, requestBrowserNotifications, setDesktopNotifi
 const slug = (value: string) =>
   value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 64);
 
-// multibot: F10 — import existing profile into local service. UI gada wyłącznie z
-// przelotką harnessu (`server/engine/proxy.ts`: `/api/engine/<rest>` → `/api/<rest>`):
-//   POST /api/engine/import/inspect {source} — podgląd bez kopiowania
-//     (engine/server/importer.py `inspect`); katalog `profiles/` w źródle =
-//     profile ROOT, odpowiedź niesie `profiles: [nazwy]` i wtedy dociągamy
-//     inspect per podprofil (`<root>/profiles/<nazwa>`, mieszane separatory
-//     łyka pathlib), 422 = to nie profil,
-//   POST /api/profiles/import {source, name} — kopia profilu + odpowiadający bot
-//     harnessu; engine id `mb-<threadId>` jest nadawane automatycznie.
-//     (regex `^[a-z0-9][a-z0-9_-]{0,63}$`, engine/server/bots.py).
-// Import tworzy bota harnessu i jego profil silnika atomowo. 502/503 z przelotki
-// = konwencja "Engine offline" (jak EngineAutonomy), reszta błędów = `detail`.
-
-// Jak w RoutinesPanel: własny helper, bo silnik zwraca błędy jako `{detail}`
-// (FastAPI), przelotka jako `{error}`; do tego `status`, żeby odróżnić
-// 502/503 (Engine offline) od 409/422 (komunikat dla usera).
+// Własny helper zamiast gołego authFetch: część tras harnessu oddaje błąd
+// jako `{detail}`, część jako `{error}`, a `status` pozwala odróżnić awarię
+// serwera od komunikatu dla usera.
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await authFetch(path, { headers: { "content-type": "application/json" }, ...init });
   const body = await res.json().catch(() => ({}));
@@ -54,39 +39,6 @@ async function api(path: string, init?: RequestInit): Promise<any> {
     throw err;
   }
   return body;
-}
-
-
-// multibot: F11 — status silnika slafy: jeden GET przy każdym otwarciu panelu
-// (mount = otwarcie, panel renderuje się warunkowo w App.tsx), zero pollingu.
-// Czemu tu: to jedyne panelowe miejsce "app-level" (per-bot rzeczy żyją w
-// SettingsPanel), a sekcje usługi profili już tu mieszkają.
-// Kropka: bg-success = działa, bg-raised-hover = konwencja "Engine offline"
-// z local service status/import components.
-function EngineStatusRow() {
-  const polish = useLanguage() === "pl";
-  const [online, setOnline] = useState<boolean | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void engineOnline().then((ok) => alive && setOnline(ok));
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return (
-    <div className="mt-4 rounded-xl bg-card p-4">
-      <div className="text-[15px] font-medium text-ink">{polish ? "Usługa lokalna" : "Local service"}</div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">
-        {polish
-          ? "Silnik MultiBota. Trzyma boty przy życiu, gdy program jest zamknięty — rutyny i zaplanowane zadania działają dzięki niemu."
-          : "MultiBot's engine. Keeps bots alive when the app is closed — routines and scheduled tasks run because of it."}
-      </div>
-      <div className="mt-3 flex items-center gap-2 text-[13px] text-ink-secondary">
-        <span className={cn("size-1.5 rounded-full", online ? "bg-success animate-pulse" : "bg-raised-hover")} />
-        {online === null ? (polish ? "Sprawdzanie…" : "Checking…") : online ? (polish ? "Działa" : "Running") : (polish ? "Usługa offline" : "Service offline")}
-      </div>
-    </div>
-  );
 }
 
 type DeviceResources = {
@@ -1128,8 +1080,6 @@ export function AppSettingsPanel() {
               {/* multibot: G1 — CLI allowlist UI; provisioning actions land in G3. */}
               <CommandLineTools />
 
-              {/* multibot: F11 — status local service */}
-              <EngineStatusRow />
               <MachineResources />
               <DiagnosticsRow />
             </>

@@ -23,7 +23,17 @@ export interface GroupRecord {
 
 const FILE = join(DATA_DIR, "groups.json");
 
-/** Small durable shadow for engine groups; engine remains source of turn execution. */
+/** multibot: członek grupy jedzie po drucie jako `mb-<threadId>`. Odwzorowanie
+ * jest wyliczalne w obie strony, więc nikt nie musi trzymać mapy wątek↔członek.
+ * Prefiks został po silniku Hermesa, ale jest już tylko formatem transportu:
+ * `groups.json` i UI (Sidebar, GroupPanel) mówią nim od zawsze, a przepisanie
+ * go kasowałoby istniejące grupy. */
+export const GROUP_MEMBER_PREFIX = "mb-";
+export const groupMemberId = (threadId: string) => `${GROUP_MEMBER_PREFIX}${threadId}`;
+export const threadIdOfGroupMember = (memberId: string) =>
+  memberId.startsWith(GROUP_MEMBER_PREFIX) ? memberId.slice(GROUP_MEMBER_PREFIX.length) : null;
+
+/** Durable store of group rooms: roster, membership and transcript. */
 export class GroupStore {
   private groups: GroupRecord[];
   private hasSnapshot = false;

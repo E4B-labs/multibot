@@ -1,10 +1,10 @@
 # Google Workspace (Gmail / Drive / Calendar / Docs / Sheets / …)
 
 MultiBot używa samohostowanego serwera MCP [`workspace-mcp`]
-(https://github.com/taylorwilsdon/google_workspace_mcp, MIT) instalowanego do
-venvu silnika. Jeden serwer daje 120+ narzędzi Google całej flocie botów —
-i silnikowych, i CLI (Claude Code / Codex) — bo rozprowadzanie idzie istniejącym
-mechanizmem konektorów (`mcpConnectors` w `config.json`).
+(https://github.com/taylorwilsdon/google_workspace_mcp, MIT) — pakietu z PyPI,
+instalowanego na hoście. Jeden serwer daje 120+ narzędzi Google całej flocie
+botów, bo rozprowadzanie idzie istniejącym mechanizmem konektorów
+(`mcpConnectors` w `config.json`): harness montuje go jako serwer stdio.
 
 Dane nie przechodzą przez żaden SaaS: serwer gada tylko z API Google, na
 poziomie konta właściciela, na jego własnym kliencie OAuth.
@@ -13,12 +13,19 @@ poziomie konta właściciela, na jego własnym kliencie OAuth.
 
 1. **Serwer** (raz, na hoście, na którym chodzi MultiBot):
 
-   ```sh
-   <engine>/.venv/bin/pip install workspace-mcp   # Windows: Scripts/pip.exe
+   ```
+   pipx install workspace-mcp
    ```
 
+   `workspace-mcp` to pakiet Pythona. Mieszkał w venvie silnika Hermesa; po
+   jego usunięciu MultiBot szuka go po prostu na PATH — tej samej ścieżce,
+   którą widzą pozostałe CLI (`augmentedPath()`). Liczy się więc każda
+   instalacja, która wystawia skrypt na PATH: `pipx`, `uv tool install`,
+   `pip install --user`, własny venv dodany do PATH. Kod:
+   `server/google-workspace.ts` (`workspaceMcpBin()`, `installHint()`).
+
    Panel Wtyczki → Google Workspace pokazuje status i gotową komendę, gdy
-   serwer brakuje.
+   serwera brakuje.
 
    Termux/Android: budowanie zależności Rusta wymaga `rust-std-aarch64-linux-android`
    (`pkg install rust rust-std-aarch64-linux-android`) oraz `ANDROID_API_LEVEL`
@@ -62,8 +69,8 @@ autonomicznym, i rozważ `--read-only` dla botów pracujących na wrogich danych
 
 ## Ekonomia RAM (Telefon)
 
-Silnikowskie boty spawnują serwer stdio per profil. 121 narzędzi ≈ ~150–250 MB
-na proces. Na telefonie z wieloma botami silnikowymi rozważ tier `core`
+Każdy bot spawnuje własny proces stdio serwera. 121 narzędzi ≈ ~150–250 MB
+na proces. Na telefonie z wieloma botami rozważ tier `core`
 albo `--tools gmail drive calendar` w argumencie konektora.
 
 ## Trasy

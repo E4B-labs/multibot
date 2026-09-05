@@ -13,12 +13,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { ProviderInstance, SendTurnInput } from "../contracts.ts";
-import { COMPUTER_TOOLS_VERSION } from "../engine/computer-mcp.ts";
 import { AGENTS_TOOLS_VERSION } from "../turn-tools.ts";
 import { COMPUTER_MCP_TOOLS } from "../turn-tools.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { clearTurnPolicy, setTurnPolicy } from "../turn-policy.ts";
-import { CodexDriver, codexMcpConfig, cursorMcpKey, cursorPlan, splitCursor } from "./codex.ts";
+import { CodexDriver, codexMcpConfig, cursorMcpKey, cursorPlan, splitCursor, COMPUTER_TOOLS_VERSION } from "./codex.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
 
