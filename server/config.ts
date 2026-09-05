@@ -88,6 +88,9 @@ export interface AppConfig {
   timeZone?: string;
   /** multibot: autoweryfikacja akcji — patrz server/auto-verify.ts. */
   autoVerify?: AutoVerifyState;
+  /** multibot: kolejność sekcji sidebaru. Trzymana na serwerze, żeby desktop
+   * i telefon układały listę tak samo; nowe sekcje dopisują się na końcu. */
+  sectionOrder?: string[];
 }
 
 /** Credential names shared with Electron diagnostics redaction. */
@@ -184,6 +187,9 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   // — bez tej linii zapis przepadłby po cichu. O zapisie decyduje TYP, nie
   // prawdziwość: pusty ciąg to świadome "wykryj strefę sam", a nie brak wyboru.
   if (typeof patch.timeZone === "string") disk.timeZone = patch.timeZone;
+  // multibot: kolejność sekcji to lista, nie obiekt — pętla wyżej by ją minęła,
+  // a scalanie i tak byłoby złe: klient przysyła pełną, nową kolejność.
+  if (Array.isArray(patch.sectionOrder)) disk.sectionOrder = patch.sectionOrder;
   mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   chmodPrivate(DATA_DIR, 0o700);
   chmodPrivate(p, 0o600);

@@ -141,6 +141,8 @@ export interface ConfigStatus {
   timeZone?: string;
   /** Autoweryfikacja: czy sprawdzać akcje i jakie reguły je przepuszczają */
   autoVerify?: AutoVerifySettings;
+  /** kolejność sekcji sidebaru — wspólna dla desktopu i telefonu */
+  sectionOrder?: string[];
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
 }
@@ -166,6 +168,8 @@ export interface EngineGroup {
   id: string;
   name: string;
   bot_ids: string[];
+  /** sekcja sidebaru — grupa siedzi w sekcji tak samo jak bot */
+  section?: string;
   messages?: Array<{ id: string; from: "you" | string; text: string; at: number }>;
 }
 

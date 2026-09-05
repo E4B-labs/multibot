@@ -8,16 +8,20 @@ import { GroupStore } from "./group-store.ts";
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
+function storeFile(): string {
+  const configuredTemp = process.env.TMP || process.env.TEMP;
+  const root = process.platform === "win32" && configuredTemp?.toUpperCase().startsWith("D:\\")
+    ? configuredTemp
+    : tmpdir();
+  mkdirSync(root, { recursive: true });
+  const dir = mkdtempSync(join(root, "multibot-group-"));
+  dirs.push(dir);
+  return join(dir, "groups.json");
+}
+
 describe("durable group store", () => {
   it("persists roster and transcript", () => {
-    const configuredTemp = process.env.TMP || process.env.TEMP;
-    const root = process.platform === "win32" && configuredTemp?.toUpperCase().startsWith("D:\\")
-      ? configuredTemp
-      : tmpdir();
-    mkdirSync(root, { recursive: true });
-    const dir = mkdtempSync(join(root, "multibot-group-"));
-    dirs.push(dir);
-    const file = join(dir, "groups.json");
+    const file = storeFile();
     const first = new GroupStore(file);
     const group = first.upsert({ id: "g1", name: "Room", bot_ids: ["mb-a", "mb-b"] });
     first.append(group.id, { from: "you", text: "hej" });
@@ -27,5 +31,18 @@ describe("durable group store", () => {
     expect(new GroupStore(file).get("g1")).toBeNull();
     expect(new GroupStore(file).hasLocalRoster()).toBe(true);
     expect(first.delete("g1")).toBe(false);
+  });
+
+  // multibot: grupa siedzi w sekcji sidebaru tak samo jak bot — osobnej sekcji
+  // „GRUPY" nie ma. Dopisanie członka nie podaje sekcji, więc nie wolno jej
+  // przy okazji skasować.
+  it("keeps a group's section across roster updates", () => {
+    const file = storeFile();
+    const store = new GroupStore(file);
+    expect(store.upsert({ id: "g1", name: "Room", bot_ids: ["mb-a"], section: "GitHub" }).section).toBe("GitHub");
+    expect(store.upsert({ id: "g1", name: "Room", bot_ids: ["mb-a", "mb-b"] }).section).toBe("GitHub");
+    expect(new GroupStore(file).get("g1")?.section).toBe("GitHub");
+    expect(store.upsert({ id: "g1", name: "Room", bot_ids: ["mb-a"], section: "" }).section).toBeUndefined();
+    expect(store.upsert({ name: "Loose", bot_ids: ["mb-a"] }).section).toBeUndefined();
   });
 });

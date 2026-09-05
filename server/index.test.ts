@@ -675,6 +675,25 @@ describe("harness HTTP API", () => {
     expect(after.body.autoVerify).toEqual({ enabled: true, rules: [] });
   });
 
+  // multibot: kolejność sekcji sidebaru mieszka na serwerze, żeby desktop i
+  // telefon układały listę tak samo. Zapis jest podmianą całej listy — inaczej
+  // przestawienie nie umiałoby usunąć nazwy, której już nikt nie używa.
+  it("saves and echoes the sidebar section order", async () => {
+    expect((await api("GET", "/api/config")).body.sectionOrder).toEqual([]);
+
+    const saved = await api("PUT", "/api/config", { sectionOrder: ["  GitHub  ", "Workers", "GitHub", "", 7] });
+    expect(saved.status).toBe(200);
+    expect(saved.body.sectionOrder).toEqual(["GitHub", "Workers"]);
+
+    // pełna podmiana: przestawienie i usunięcie sekcji jednym zapisem
+    const moved = await api("PUT", "/api/config", { sectionOrder: ["Workers"] });
+    expect(moved.body.sectionOrder).toEqual(["Workers"]);
+    expect((await api("GET", "/api/config")).body.sectionOrder).toEqual(["Workers"]);
+
+    // zapis innego ustawienia nie może zgubić kolejności
+    expect((await api("PUT", "/api/config", { timeZone: "" })).body.sectionOrder).toEqual(["Workers"]);
+  });
+
   // multibot (F7): własne serwery MCP użytkownika — osobna trasa `/custom/`,
   // wspólny katalog z Composio (karta niesie `source`).
   it("registers a custom MCP connector and tags it in the integrations catalog", async () => {
