@@ -58,7 +58,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_MODE;
     delete process.env.FAKE_CODEX_DUMP;
     delete process.env.OPENAI_API_KEY;
-    for (const id of ["t-policy-deny", "t-policy-auto", "t-mcp-auto"]) clearTurnPolicy(id);
+    for (const id of ["t-policy-deny", "t-policy-auto", "t-mcp-auto", "t-mcp-resume"]) clearTurnPolicy(id);
     recorder?.stop();
     await instance?.dispose();
     rmSync(scratch, { recursive: true, force: true });
@@ -146,6 +146,30 @@ describe("CodexDriver turns (fake app-server)", () => {
     const methods = JSON.parse(readFileSync(dump, "utf8")).calls.map((c: { method: string }) => c.method);
     expect(methods).toContain("thread/resume");
     expect(methods).not.toContain("thread/start");
+  });
+
+  // multibot (0.3.32): codex 0.153 nie odtwarza piaskownicy wznawianego wątku,
+  // a w piaskownicy KAŻDE narzędzie MCP chce aprobaty — przy `never` odmawia.
+  // Pierwsza tura bota z pełnym dostępem działała, każda następna dostawała
+  // "MCP tool call requires approval". Pilnujemy więc, że `thread/resume`
+  // wiezie te same ustawienia wątku co `thread/start`.
+  it("resumes a full-access thread with its sandbox so MCP tools still run", async () => {
+    await create({ mode: "resume-mcp" });
+    const dump = join(scratch, "resume-mcp.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    setTurnPolicy("t-mcp-resume", { autonomy: "autonomous", access: "full", permissions: { delegation: true, file: true } });
+
+    await instance.adapter.sendTurn({ threadId: "t-mcp-resume", text: "list my routines", resumeCursor: "codex-thread-9" });
+    const reply = await recorder.until((e: any) => e.type === "item.completed" && e.itemType === "assistant_text");
+    expect((reply as any).text).toBe("no routines");
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls as Array<{ method: string; params: any }>;
+    expect(calls.find((c) => c.method === "thread/resume")!.params).toMatchObject({
+      threadId: "codex-thread-9",
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+    });
   });
 
   it("falls back to a fresh thread when resume fails", async () => {
