@@ -1161,6 +1161,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             rawDispatch({ type: "runtimeTick", threadId: event.threadId, kind: "start" });
           } else if (event.type === "item.started" && event.itemType === "reasoning") {
             rawDispatch({ type: "runtimeTick", threadId: event.threadId, kind: "reasoning" });
+          } else if (event.type === "item.started" && event.itemType === "tool") {
+            // multibot: bot odpala narzędzie — pasek pokazuje „working" (bez
+            // pierścieni). Pierścienie zostają wyłącznie na zimny start.
+            rawDispatch({ type: "runtimeTick", threadId: event.threadId, kind: "tool" });
           } else if (event.type === "content.delta" && event.streamKind === "reasoning_text") {
             rawDispatch({ type: "runtimeTick", threadId: event.threadId, kind: "reasoning" });
           } else if (event.type === "content.delta" && event.streamKind === "assistant_text") {
