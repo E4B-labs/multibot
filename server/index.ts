@@ -60,6 +60,10 @@ import {
   exec as computerExec,
 } from "./hosted-computer.ts";
 import * as computerControl from "./computer-control.ts";
+// multibot: the browser half of the computer — CDP tools and the teach recorder,
+// back in the harness after the Python engine took them with it.
+import { computerTool, computerToolset } from "./computer/index.ts";
+import * as teach from "./computer/teach.ts";
 import { claimPairing, pairingPending, startPairing } from "./pairing.ts";
 import { pairingQrSvg } from "./qr.ts";
 import { filterSearchResults, searchText, type SearchResult } from "./search.ts";
@@ -83,7 +87,7 @@ import { CREDENTIAL_TARGETS, credentialConfigPatch, isCredentialTargetId, type C
 import { inspectorEvents, recordInspectorEvent, replayInspectorEvents } from "./inspector.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
 import { WorkspaceStore } from "./workspace.ts";
-import { canUseIntegration, clearTurnPolicy, rememberApprovalRule, setTurnPolicy } from "./turn-policy.ts";
+import { canUseIntegration, clearTurnPolicy, rememberApprovalRule, setTurnPolicy, toolsetAllowed, turnPolicy } from "./turn-policy.ts";
 import { webMcpIntegration } from "./drivers/web-proxy.ts";
 // multibot (F12): jednorazowy wybór modelu dla bieżącego zadania (natural
 // language) — rozpoznawanie frazy + wycinanie jej z treści wiadomości.
@@ -239,17 +243,19 @@ function armBusyWatchdog(botId: string): void {
   busyWatchdog.set(botId, wd);
 }
 // proxy entry: .ts in dev (node type-strips), .js in the packaged dist-server
-const agentsProxyPath = (() => {
-  const ts = join(dirname(fileURLToPath(import.meta.url)), "drivers", "agents-proxy.ts");
+const proxyPath = (...parts: string[]) => {
+  const ts = join(dirname(fileURLToPath(import.meta.url)), ...parts);
   return existsSync(ts) ? ts : ts.replace(/\.ts$/, ".js");
-})();
+};
+const agentsProxyPath = proxyPath("drivers", "agents-proxy.ts");
+const computerProxyPath = proxyPath("computer", "mcp.ts");
 // in the packaged app process.execPath is Electron — run the proxy as node
 const AGENTS_NODE_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
-function agentsIntegration(botId: string) {
+function proxyIntegration(proxy: string, botId: string) {
   return {
     command: process.execPath,
-    args: [agentsProxyPath],
+    args: [proxy],
     env: {
       ...AGENTS_NODE_FLAG,
       OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
@@ -258,6 +264,10 @@ function agentsIntegration(botId: string) {
     },
   };
 }
+
+const agentsIntegration = (botId: string) => proxyIntegration(agentsProxyPath, botId);
+/** The computer MCP server — same spawn shape as agents, a different entry file. */
+const localComputerIntegration = (botId: string) => proxyIntegration(computerProxyPath, botId);
 
 /** Run a turn on `targetBotId` and resolve with its assistant text — the
  * synchronous half of ask_bot. Subscribes to the bus, folds assistant_text
@@ -1956,17 +1966,25 @@ async function warmBot(botId: string): Promise<boolean> {
     permissions: workspace.permissions(bot.id),
     approvalRules: workspace.approvalRules(bot.id),
   });
-  await instance.adapter.sendTurn({
-    threadId: bot.threadId,
-    text: "",
-    model: bot.modelSelection.model,
-    // Ten sam kursor co tura — inaczej rozgrzalibyśmy proces z NOWĄ sesją, a
-    // tura wzięłaby go (kursor nie wchodzi do podpisu) i zgubiła kontekst.
-    resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId],
-    system: botSystemPrompt(bot, { isolated: false, integrations, workspace, timeZone: cfg.timeZone }),
-    integrations,
-    warmOnly: true,
-  } as Parameters<typeof instance.adapter.sendTurn>[0] & { warmOnly: boolean });
+  try {
+    await instance.adapter.sendTurn({
+      threadId: bot.threadId,
+      text: "",
+      model: bot.modelSelection.model,
+      // Ten sam kursor co tura — inaczej rozgrzalibyśmy proces z NOWĄ sesją, a
+      // tura wzięłaby go (kursor nie wchodzi do podpisu) i zgubiła kontekst.
+      resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId],
+      system: botSystemPrompt(bot, { isolated: false, integrations, workspace, timeZone: cfg.timeZone }),
+      integrations,
+      warmOnly: true,
+    } as Parameters<typeof instance.adapter.sendTurn>[0] & { warmOnly: boolean });
+  } finally {
+    // Rozgrzewka NIE jest turą, a polityka zostawiona po niej wyglądała jak
+    // trwająca tura — na tym stoi bramka trasy narzędzi komputera („brak
+    // polityki = nikt nie ma tury"), więc bez tego ciepły proces miałby
+    // przeglądarkę i shell między turami. Prawdziwa tura ustawia ją na nowo.
+    clearTurnPolicy(bot.threadId);
+  }
   return false; // proces dopiero co wstał — czy się utrzymał, pokaże następne zamiatanie
 }
 
@@ -2150,10 +2168,16 @@ opts?: {
         // a czekanie na nią szeregowało całą flotę. Gdyby dwa boty naprawdę
         // nie mogły klikać naraz, blokada należy do ścieżki narzędzi, nie do
         // startu tury.
-        // BLOKER (usunięcie silnika Hermesa): zestaw narzędzi przeglądarki dla
-        // botów claude/codex/acp jechał przez `python -m server.computer_mcp`,
-        // czyli klienta HTTP silnika. Ekran (noVNC) i `computer/exec` zostają —
-        // narzędzi CDP nie ma, dopóki nie powstanie ich odpowiednik w TS.
+        //
+        // Narzędzia przeglądarki jechały przez `python -m server.computer_mcp`
+        // i zniknęły z silnikiem Hermesa; teraz ten sam zestaw nazw daje
+        // `server/computer/mcp.ts` — proxy stdio nad trasą wewnętrzną harnessu.
+        // Montujemy je tym samym driverom, co MCP agentów: claude, codex i ACP
+        // to jedyne, które `integrations.localComputer` w ogóle czytają, więc
+        // reszta dostałaby w prompcie ofertę, której nie umie zamontować.
+        if (computer && computer.state !== "error" && instance.adapter.capabilities.agentsMcp === true) {
+          integrations.localComputer = localComputerIntegration(bot.id);
+        }
       } catch (e) {
         console.warn(`[multibot] computer unavailable for ${bot.id}:`, e instanceof Error ? e.message : e);
       }
@@ -2927,6 +2951,31 @@ const server = createServer(async (req, res) => {
     if (path.startsWith("/api/internal/")) {
       if (req.headers.authorization !== `Bearer ${COMMS_TOKEN}`) {
         return json(res, 401, { error: "unauthorized" });
+      }
+      // multibot: every computer tool, one route. The MCP proxy is then a table
+      // of names and the harness stays the only owner of the browser — the same
+      // split the Python `server.computer_mcp` had over the engine's REST API.
+      if (method === "POST" && path === "/api/internal/computer/tool") {
+        const body = await readBody(req);
+        const caller = store.bot(String(body?.self ?? ""));
+        if (!caller) return json(res, 404, { error: "no such bot" });
+        const name = String(body?.name ?? "");
+        // Fail closed, and per TOOL rather than per integration: `computer_exec`
+        // is a shell, so it answers to the `terminal` permission and to
+        // read-only access — neither of which `canUseIntegration("browser")`
+        // looks at. No registered policy = no turn is running: a warm CLI
+        // process must not keep a browser and a shell between turns.
+        if (!turnPolicy(caller.threadId)) return json(res, 403, { error: "no turn is running for this bot" });
+        if (!toolsetAllowed(caller.threadId, computerToolset(name))) {
+          return json(res, 403, { error: `this bot may not use ${name} on this turn` });
+        }
+        try {
+          const out = await computerTool(name, (body?.args ?? {}) as Record<string, unknown>);
+          return json(res, 200, out as Record<string, unknown>);
+        } catch (e) {
+          const status = (e as { status?: number }).status ?? 502;
+          return json(res, status, { error: e instanceof Error ? e.message : String(e) });
+        }
       }
       if (method === "GET" && path === "/api/internal/environment") {
         const self = url.searchParams.get("self") ?? "";
@@ -4155,6 +4204,33 @@ const server = createServer(async (req, res) => {
         return ok ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such skill" });
       }
       return json(res, 405, { error: "method not allowed" });
+    }
+
+    // Nagrywarka demonstracji: wpina się w przeglądarkę komputera przez CDP i
+    // zbiera kliknięcia, wpisy i nawigacje. `stop` oddaje gotowe kroki, które
+    // panel wysyła do `teach/synthesize` niżej — nagranie nigdzie nie zostaje.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/teach\/(start|stop)$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      // Recording watches the bot's browser, so it answers to the same switch
+      // the browser tools do — a bot with browser access off must not become a
+      // way to observe that browser either.
+      if (!canUseIntegration(bot.threadId, "browser")) {
+        return json(res, 403, { error: "this bot has no browser access" });
+      }
+      try {
+        if (m[2] === "start") {
+          await ensureComputer();
+          return json(res, 200, await teach.start(bot.id));
+        }
+        const body = await readBody(req);
+        const id = typeof body?.recording_id === "string" ? body.recording_id : undefined;
+        return json(res, 200, teach.stop(bot.id, id));
+      } catch (e) {
+        const status = (e as { status?: number }).status ?? 502;
+        return json(res, status, { error: e instanceof Error ? e.message : String(e) });
+      }
     }
 
     // Lista kroków → skill, tym samym providerem, co reszta pracy bota.
