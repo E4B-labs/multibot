@@ -30,7 +30,8 @@ describe("OpenCode ACP driver", () => {
   });
 
   it("uses official OpenCode ACP argv", () => {
-    expect(opencodeAcpArgs("opencode-go/gpt-5.6-luna")).toEqual(["--model", "opencode-go/gpt-5.6-luna", "acp"]);
+    // `opencode acp` rejects --model (1.18) — the model rides in the config env.
+    expect(opencodeAcpArgs()).toEqual(["acp"]);
   });
 
   it("runs Zen without passing Go key to child", async () => {
@@ -48,7 +49,8 @@ describe("OpenCode ACP driver", () => {
     await recorder.until((event) => event.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.argv).toEqual(["--model", "opencode/big-pickle", "acp"]);
+    expect(seen.argv).toEqual(["acp"]);
+    expect(seen.env.OPENCODE_CONFIG_CONTENT).toBe(JSON.stringify({ model: "opencode/big-pickle" }));
     expect(seen.env.OPENCODE_API_KEY).toBeUndefined();
   });
 

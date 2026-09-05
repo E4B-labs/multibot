@@ -11,7 +11,7 @@ export interface CliToolMetadata {
   displayName: string;
   install?: CliInstall;
   /** Uses a packaged native installer script with Termux/proot fallback. */
-  installStrategy?: "claude-native" | "codex-native" | "kimi-native";
+  installStrategy?: "claude-native" | "codex-native" | "kimi-native" | "opencode-native";
   /** Interactive OAuth/subscription login; never automated by server. */
   loginCommand?: string;
   /** Fixed interactive command; stdin stays attached for OAuth prompts. */
@@ -85,6 +85,8 @@ export const CLI_TOOLS: readonly CliToolMetadata[] = [
     id: "opencode",
     driverKind: "opencode",
     displayName: "OpenCode",
+    // npm's opencode-ai has no Android build, so Termux needs the native script.
+    installStrategy: "opencode-native",
     install: { command: "npm", args: ["install", "-g", "opencode-ai@latest"] },
     loginHint: "OpenCode Go needs a shared API key; free OpenCode Zen models need no key in MultiBot.",
   },
