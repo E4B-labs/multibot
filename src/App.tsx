@@ -21,7 +21,7 @@ import { SkillsPanel } from "@/components/SkillsPanel";
 // multibot: F9-FE — pokój grupowy silnika slafy
 import { GroupPanel } from "@/components/GroupPanel";
 import { RoomPanel } from "@/components/RoomPanel";
-import { MailPanel } from "@/components/MailPanel";
+import { RoomsPanel } from "@/components/RoomsPanel";
 // multibot: własne min/max/zamknij — okno bez ramki systemowej (Windows,
 // Linux). Komponent sam sprawdza mostek preloadu i w przeglądarce oraz pod
 // macOS nie rysuje niczego.
@@ -229,8 +229,8 @@ function Shell() {
         ) : (
           <>
             <Sidebar />
-            {state.mailOpen ? (
-              <MailPanel />
+            {state.roomsOpen ? (
+              <RoomsPanel />
             ) : state.roomOpen ? (
               <RoomPanel />
             ) : state.groupOpen ? (
