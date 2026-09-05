@@ -268,6 +268,29 @@ function RoomChip({ message }: { message: Message }) {
   const polish = useLanguage() === "pl";
   const room = message.room;
   if (!room) return null;
+  const pill = "flex max-w-full items-center gap-1.5 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink";
+  // A group turn mirrors ONE room shared by every member, so "X texted Y, Z"
+  // read as nonsense in a member's private thread: name the group instead and
+  // lead back to the group chat, not the room ledger.
+  const groupId = room.groupId;
+  if (groupId) {
+    return (
+      <div className="flex justify-center">
+        <button
+          onClick={() => {
+            void authFetch(`/api/groups/${encodeURIComponent(groupId)}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((group) => group && dispatch({ type: "toggleGroup", group }));
+          }}
+          className={pill}
+          title={polish ? "Otwórz czat grupowy" : "Open group chat"}
+        >
+          <span>{polish ? "Rozmowa w grupie" : "Group chat:"}</span>
+          <span className="truncate font-medium text-ink">{room.name}</span>
+        </button>
+      </div>
+    );
+  }
   const owner = state.bots.find((b) => b.id === room.ownerBotId);
   const peers = room.bot_ids
     .filter((id) => id !== room.ownerBotId)
@@ -281,7 +304,7 @@ function RoomChip({ message }: { message: Message }) {
             .then((r) => (r.ok ? r.json() : null))
             .then((full) => full && dispatch({ type: "toggleRoom", room: full }));
         }}
-        className="flex max-w-full items-center gap-1.5 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+        className={pill}
         title={polish ? "Otwórz pokój współpracy (tylko do odczytu)" : "Open collaboration room (read-only)"}
       >
         <span className="flex items-center gap-1 font-medium text-ink">
