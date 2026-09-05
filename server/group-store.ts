@@ -17,6 +17,8 @@ export interface GroupRecord {
   bot_ids: string[];
   createdAt: number;
   messages: GroupMessage[];
+  /** multibot: sekcja sidebaru, ta sama co u botów. Brak = obszar bez sekcji. */
+  section?: string;
 }
 
 const FILE = join(DATA_DIR, "groups.json");
@@ -66,11 +68,17 @@ export class GroupStore {
     return true;
   }
 
-  upsert(input: { id?: string; name: string; bot_ids: string[] }): GroupRecord {
+  upsert(input: { id?: string; name: string; bot_ids: string[]; section?: string | null }): GroupRecord {
     const existing = input.id ? this.groups.find((g) => g.id === input.id) : undefined;
     if (existing) {
       existing.name = input.name;
       existing.bot_ids = [...input.bot_ids];
+      // multibot: sekcji dotykamy tylko wtedy, gdy wołający ją podał — dopisanie
+      // członka (addGroupMemberRecord) nie może wyrzucić grupy z sekcji.
+      if (input.section !== undefined) {
+        if (input.section) existing.section = input.section;
+        else delete existing.section;
+      }
       this.save();
       return this.get(existing.id)!;
     }
@@ -80,6 +88,7 @@ export class GroupStore {
       bot_ids: [...input.bot_ids],
       createdAt: Date.now(),
       messages: [],
+      ...(input.section ? { section: input.section } : {}),
     };
     this.groups.unshift(group);
     this.save();

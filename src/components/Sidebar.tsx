@@ -6,6 +6,7 @@ import {
   BellDot,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   ClipboardCopy,
   Copy,
   Crown,
@@ -36,6 +37,8 @@ import { engineOnline } from "@/lib/engineStatus";
 import { getLanguage, useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
 import { groupAvatarSplit, groupRowTitle } from "@/lib/groupRow";
+// multibot: kolejność sekcji i podział wierszy — czysta logika, testowana osobno
+import { moveSectionTo, sectionRows } from "@/lib/sidebarSections";
 // multibot: czerwony wykrzyknik na ikonie ustawień — jest widoczna aktualizacja
 import { useUpdaterState } from "@/lib/updater";
 
@@ -231,21 +234,137 @@ function BotContextMenu({
   );
 }
 
-// multibot: nagłówek sekcji botów na liście (port z OpenMausBot #296)
-function SectionDivider({ name, collapsed, onToggle, polish }: { name: string; collapsed: boolean; onToggle: () => void; polish: boolean }) {
+// multibot: nagłówek sekcji na liście (port z OpenMausBot #296). Wysokość i
+// marginesy są STAŁE (`h-9`, zero paddingu pionowego) — wcześniej `pt-3 pb-1`
+// dawało inny odstęp nad pierwszą sekcją niż między kolejnymi, więc kilka
+// zwiniętych nagłówków obok siebie wyglądało na krzywo poukładane. Odstępy
+// robi wyłącznie `gap-0.5` listy, tak samo dla wiersza bota, grupy i nagłówka.
+function SectionDivider({
+  name,
+  collapsed,
+  onToggle,
+  onMenu,
+  onDropBot,
+  onDropSection,
+  polish,
+}: {
+  name: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  onMenu: (menu: { name: string; x: number; y: number }) => void;
+  onDropBot: (botId: string, section: string) => void;
+  onDropSection: (moved: string, target: string) => void;
+  polish: boolean;
+}) {
+  const [dragOver, setDragOver] = useState(false);
   return (
     <button
       type="button"
       onClick={onToggle}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu({ name, x: e.clientX, y: e.clientY });
+      }}
+      // multibot: nagłówek jest i uchwytem (kolejność sekcji), i celem —
+      // upuszczony bot wpada do sekcji, upuszczona sekcja staje na tym miejscu.
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/mb-section", name);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDragEnd={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        // Payload czytamy dopiero tutaj — w `dragover` przeglądarka go chowa.
+        const moved = e.dataTransfer.getData("text/mb-section").trim();
+        if (moved) {
+          if (moved !== name) onDropSection(moved, name);
+          return;
+        }
+        const botId = (e.dataTransfer.getData("text/mb-bot-id") || e.dataTransfer.getData("text/plain") || "").trim();
+        if (botId) onDropBot(botId, name);
+      }}
       aria-expanded={!collapsed}
       aria-label={collapsed ? polish ? `Rozwiń sekcję ${name}` : `Expand section ${name}` : polish ? `Zwiń sekcję ${name}` : `Collapse section ${name}`}
       title={collapsed ? polish ? "Rozwiń sekcję" : "Expand section" : polish ? "Zwiń sekcję" : "Collapse section"}
-      className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 pb-1 pt-3 text-left hover:bg-raised/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+      className={cn(
+        "flex h-9 w-full shrink-0 items-center gap-2 rounded-lg px-3 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent",
+        dragOver ? "bg-raised ring-1 ring-accent" : "hover:bg-raised/40",
+      )}
     >
       {collapsed ? <ChevronRight size={14} className="shrink-0 text-ink-secondary" /> : <ChevronDown size={14} className="shrink-0 text-ink-secondary" />}
-      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{name}</span>
+      <span className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{name}</span>
       <span className="h-px flex-1 bg-hairline/40" />
     </button>
+  );
+}
+
+/** Menu kontekstowe nagłówka sekcji: przestawienie w górę/w dół. */
+function SectionMenu({
+  menu,
+  canUp,
+  canDown,
+  onMove,
+  onClose,
+  polish,
+}: {
+  menu: { name: string; x: number; y: number };
+  canUp: boolean;
+  canDown: boolean;
+  onMove: (delta: -1 | 1) => void;
+  onClose: () => void;
+  polish: boolean;
+}) {
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest("[data-section-menu]")) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("blur", onClose);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("blur", onClose);
+    };
+  }, [onClose]);
+
+  const top = Math.min(menu.y, window.innerHeight - 110);
+  const left = Math.min(menu.x, window.innerWidth - 216);
+  const item = (icon: React.ReactNode, label: string, enabled: boolean, delta: -1 | 1) => (
+    <button
+      disabled={!enabled}
+      onClick={() => {
+        onMove(delta);
+        onClose();
+      }}
+      className={cn(
+        "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink",
+        enabled ? "hover:bg-raised/70" : "cursor-default opacity-40",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      data-section-menu
+      style={{ top, left }}
+      className="fixed z-40 w-[204px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60"
+    >
+      {item(<ChevronUp size={16} className="text-ink-secondary" />, polish ? "Przenieś wyżej" : "Move up", canUp, -1)}
+      {item(<ChevronDown size={16} className="text-ink-secondary" />, polish ? "Przenieś niżej" : "Move down", canDown, 1)}
+    </div>
   );
 }
 
@@ -622,53 +741,10 @@ function GroupContextMenu({ menu, onClose }: { menu: GroupMenuState; onClose: ()
 
 // multibot: F9-FE — grupy w sidebarze: każdy bot ma trwałą reprezentację
 // `mb-<threadId>` w transporcie grupowym, niezależnie od wybranego drivera.
-function GroupsSection({
-  bots,
-  createOpen,
-  onCreateOpenChange,
-  onMenu,
-  groupsCollapsed,
-  onToggleCollapsed,
-  collapsed,
-}: {
-  bots: Bot[];
-  createOpen: boolean;
-  onCreateOpenChange: (open: boolean) => void;
-  onMenu: (menu: GroupMenuState) => void;
-  groupsCollapsed: boolean;
-  onToggleCollapsed: () => void;
-  collapsed?: boolean;
-}) {
-  const { state, dispatch } = useStore();
-  const lang = useLanguage();
-  const polish = lang === "pl";
-  // null = nie załadowano (silnik offline / jeszcze nie sprawdzono)
+// Jeden GET przy mount (wzorzec engineStatus) — zero pollingu; POST create
+// dopisuje do listy lokalnie. `null` = nie załadowano (silnik offline).
+function useEngineGroups(workspaceVersion: unknown) {
   const [groups, setGroups] = useState<EngineGroup[] | null>(null);
-  const [name, setName] = useState("");
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [dragOverId, setDragOverId] = useState<string | null>(null);
-
-  // multibot 0.1.46: upuszczenie bota na wiersz grupy dopisuje go do składu
-  const dropBot = async (groupId: string, botId: string) => {
-    setDragOverId(null);
-    try {
-      const res = await authFetch(`/api/groups/${encodeURIComponent(groupId)}/members`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ botId }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
-      setGroups((gs) => (gs ?? []).map((g) => (g.id === groupId ? (body as EngineGroup) : g)));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  // Jeden GET przy mount (wzorzec engineStatus) — zero pollingu; POST create
-  // dopisuje do listy lokalnie.
   useEffect(() => {
     let alive = true;
     authFetch("/api/groups")
@@ -678,7 +754,144 @@ function GroupsSection({
     return () => {
       alive = false;
     };
-  }, [state.workspaceVersion]);
+  }, [workspaceVersion]);
+  return [groups, setGroups] as const;
+}
+
+/** Wiersz grupy. Osobnej sekcji „GRUPY" już nie ma — grupa stoi w liście tam,
+ *  gdzie wskazuje jej `section`, dokładnie tak samo jak bot. */
+function GroupRow({
+  group: g,
+  bots,
+  collapsed,
+  onMenu,
+  onUpdated,
+}: {
+  group: EngineGroup;
+  bots: Bot[];
+  collapsed?: boolean;
+  onMenu: (menu: GroupMenuState) => void;
+  onUpdated: (group: EngineGroup) => void;
+}) {
+  const { state, dispatch } = useStore();
+  const lang = useLanguage();
+  const [dragOver, setDragOver] = useState(false);
+
+  // multibot 0.1.46: upuszczenie bota na wiersz grupy dopisuje go do składu.
+  // Błąd zostaje po cichu — wiersz nie ma gdzie go pokazać, a skład na
+  // serwerze się wtedy nie zmienił.
+  const dropBot = async (botId: string) => {
+    setDragOver(false);
+    try {
+      const res = await authFetch(`/api/groups/${encodeURIComponent(g.id)}/members`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ botId }),
+      });
+      if (res.ok) onUpdated((await res.json()) as EngineGroup);
+    } catch {
+      /* silnik/serwer nie odpowiedział — skład zostaje jak był */
+    }
+  };
+
+  const members = g.bot_ids
+    .map((id) => bots.find((b) => "mb-" + b.threadId === id))
+    .filter((b): b is Bot => b != null);
+  const { shown, overflow } = groupAvatarSplit(members, 2, g.bot_ids.length);
+  const last = g.messages?.[g.messages.length - 1];
+  const attention = members.find((b) => b.needsAttention != null)?.needsAttention;
+
+  return (
+    <button
+      onClick={() => dispatch({ type: "toggleGroup", group: g })}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu({ group: g, x: e.clientX, y: e.clientY });
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        const bid = (e.dataTransfer.getData("text/mb-bot-id") || e.dataTransfer.getData("text/plain") || "").trim();
+        if (bid) void dropBot(bid);
+        else setDragOver(false);
+      }}
+      title={g.name || g.id}
+      className={cn(
+        "relative flex w-full items-center rounded-xl text-left",
+        collapsed ? "justify-center px-0 py-2" : "gap-3 px-3 py-2.5",
+        dragOver ? "bg-raised ring-1 ring-accent" : state.groupOpen?.id === g.id ? "bg-raised" : "hover:bg-raised/50",
+      )}
+    >
+      {members.length > 0 ? (
+        <span className="relative flex shrink-0 items-center">
+          {shown.map((b, i) => (
+            <span key={b.id} className={cn("shrink-0", i > 0 && "-ml-3")}>
+              <MausAvatar
+                color={b.color}
+                avatarUrl={b.avatarUrl}
+                shape={b.mascotShape}
+                size={40}
+                {...groupMemberAvatarProps(b)}
+              />
+            </span>
+          ))}
+          {overflow > 0 && (
+            <span className="absolute -bottom-1 -right-1 flex min-w-4 items-center justify-center rounded-full bg-control px-1 text-[10px] font-semibold text-ink">
+              +{overflow}
+            </span>
+          )}
+          {attention && (
+            <span
+              title={attention}
+              className="absolute -right-1 -top-1 flex items-center justify-center rounded-full bg-panel text-warning"
+            >
+              <AlertTriangle size={12} />
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary">
+          <Users size={20} />
+        </span>
+      )}
+      {!collapsed && (
+        <div className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
+          <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">
+            {groupRowTitle(members.map((b) => botDisplayName(b, lang))) || g.name || g.id}
+          </span>
+          {last && <span className="shrink-0 text-[11px] text-ink-secondary">{formatTime(last.at)}</span>}
+        </div>
+      )}
+    </button>
+  );
+}
+
+/** Formularz nowej grupy. Sekcję wybiera się tu (istniejące w `datalist`,
+ *  wpisanie nowej też działa); puste pole = obszar bez sekcji. */
+function GroupCreateForm({
+  bots,
+  sections,
+  onClose,
+  onCreated,
+}: {
+  bots: Bot[];
+  sections: string[];
+  onClose: () => void;
+  onCreated: (group: EngineGroup) => void;
+}) {
+  const { dispatch } = useStore();
+  const lang = useLanguage();
+  const polish = lang === "pl";
+  const [name, setName] = useState("");
+  const [section, setSection] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const toggle = (engineBotId: string) =>
     setPicked((cur) => {
@@ -697,7 +910,7 @@ function GroupsSection({
       const res = await authFetch("/api/groups", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), bot_ids }),
+        body: JSON.stringify({ name: name.trim(), bot_ids, section: section.trim() }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -705,9 +918,10 @@ function GroupsSection({
         throw new Error(detail ?? body.error ?? `${res.status} ${res.statusText}`);
       }
       const group = body as EngineGroup;
-      setGroups((gs) => [...(gs ?? []), group]);
-      onCreateOpenChange(false);
+      onCreated(group);
+      onClose();
       setName("");
+      setSection("");
       setPicked(new Set());
       dispatch({ type: "toggleGroup", group });
     } catch (e) {
@@ -718,155 +932,66 @@ function GroupsSection({
   };
 
   return (
-    <div className="flex flex-col gap-0.5">
-
-      {(groups ?? []).length > 0 && !collapsed && (
-        <button
-          type="button"
-          onClick={onToggleCollapsed}
-          aria-expanded={!groupsCollapsed}
-          aria-label={groupsCollapsed ? (polish ? "Rozwiń sekcję Grupy" : "Expand section Groups") : polish ? "Zwiń sekcję Grupy" : "Collapse section Groups"}
-          title={groupsCollapsed ? (polish ? "Rozwiń sekcję" : "Expand section") : polish ? "Zwiń sekcję" : "Collapse section"}
-          className="flex w-full items-center gap-1.5 rounded-lg px-3 pb-1 pt-1 text-left text-ink-secondary hover:bg-raised/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-        >
-          {groupsCollapsed ? <ChevronRight size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />}
-          <span className="text-[12px] font-medium uppercase tracking-wide">
-            {polish ? "Grupy" : "Groups"}
-          </span>
-        </button>
-      )}
-
-      {(!groupsCollapsed || collapsed) &&
-        (groups ?? []).map((g) => {
-          const members = g.bot_ids
-            .map((id) => bots.find((b) => ("mb-" + b.threadId) === id))
-            .filter((b): b is Bot => b != null);
-          const { shown, overflow } = groupAvatarSplit(members, 2, g.bot_ids.length);
-          const last = g.messages?.[g.messages.length - 1];
-          const attention = members.find((b) => b.needsAttention != null)?.needsAttention;
-
+    <div className="mx-1 mt-1 flex flex-col gap-2 rounded-xl bg-card p-3">
+      <input
+        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+        placeholder={polish ? "Nazwa grupy" : "Group name"}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <input
+        list="mb-group-sections"
+        maxLength={60}
+        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+        placeholder={polish ? "Sekcja (opcjonalnie)" : "Section (optional)"}
+        aria-label={polish ? "Sekcja grupy" : "Group section"}
+        value={section}
+        onChange={(e) => setSection(e.target.value)}
+      />
+      <datalist id="mb-group-sections">
+        {sections.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+      <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+        {bots.map((b) => {
+          const engineBotId = `mb-${b.threadId}`;
           return (
-            <button
-              key={g.id}
-              onClick={() => dispatch({ type: "toggleGroup", group: g })}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                onMenu({ group: g, x: e.clientX, y: e.clientY });
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                setDragOverId(g.id);
-              }}
-              onDragLeave={() => setDragOverId((cur) => (cur === g.id ? null : cur))}
-              onDrop={(e) => {
-                e.preventDefault();
-                const bid = (e.dataTransfer.getData("text/mb-bot-id") || e.dataTransfer.getData("text/plain") || "").trim();
-                if (bid) void dropBot(g.id, bid);
-              }}
-              title={g.name || g.id}
-              className={cn(
-                "relative flex w-full items-center rounded-xl text-left",
-                collapsed ? "justify-center px-0 py-2" : "gap-3 px-3 py-2.5",
-                dragOverId === g.id ? "bg-raised ring-1 ring-accent" : state.groupOpen?.id === g.id ? "bg-raised" : "hover:bg-raised/50",
-              )}
+            <label
+              key={b.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-[13px] text-ink hover:bg-raised/50"
             >
-              {members.length > 0 ? (
-                <span className="relative flex shrink-0 items-center">
-                  {shown.map((b, i) => (
-                    <span key={b.id} className={cn("shrink-0", i > 0 && "-ml-3")}>
-                      <MausAvatar
-                        color={b.color}
-                        avatarUrl={b.avatarUrl}
-                        shape={b.mascotShape}
-                        size={40}
-                        {...groupMemberAvatarProps(b)}
-                      />
-                    </span>
-                  ))}
-                  {overflow > 0 && (
-                    <span className="absolute -bottom-1 -right-1 flex min-w-4 items-center justify-center rounded-full bg-control px-1 text-[10px] font-semibold text-ink">
-                      +{overflow}
-                    </span>
-                  )}
-                  {attention && (
-                    <span
-                      title={attention}
-                      className="absolute -right-1 -top-1 flex items-center justify-center rounded-full bg-panel text-warning"
-                    >
-                      <AlertTriangle size={12} />
-                    </span>
-                  )}
-                </span>
-              ) : (
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary">
-                  <Users size={20} />
-                </span>
-              )}
-              {!collapsed && (
-                <div className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
-                  <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">
-                    {groupRowTitle(members.map((b) => botDisplayName(b, lang))) || g.name || g.id}
-                  </span>
-                  {last && (
-                    <span className="shrink-0 text-[11px] text-ink-secondary">
-                      {formatTime(last.at)}
-                    </span>
-                  )}
-                </div>
-              )}
-            </button>
+              <input
+                type="checkbox"
+                checked={picked.has(engineBotId)}
+                onChange={() => toggle(engineBotId)}
+                className="accent-accent"
+              />
+              <span className="truncate">{botDisplayName(b, lang)}</span>
+            </label>
           );
         })}
-      {createOpen && !collapsed && (
-        <div className="mx-1 mt-1 flex flex-col gap-2 rounded-xl bg-card p-3">
-          <input
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-            placeholder={polish ? "Nazwa grupy" : "Group name"}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
-            {bots.map((b) => {
-              const engineBotId = `mb-${b.threadId}`;
-              return (
-                <label
-                  key={b.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 text-[13px] text-ink hover:bg-raised/50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={picked.has(engineBotId)}
-                    onChange={() => toggle(engineBotId)}
-                    className="accent-accent"
-                  />
-                   <span className="truncate">{botDisplayName(b, lang)}</span>
-                </label>
-              );
-            })}
-          </div>
-          {error && <div className="text-[12px] text-danger">{error}</div>}
-          <div className="flex gap-2">
-            <button
-              onClick={() => void create()}
-              disabled={busy || !name.trim() || picked.size === 0}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {busy && <Loader2 size={12} className="animate-spin" />}
-              {polish ? "Utwórz" : "Create"}
-            </button>
-            <button
-              onClick={() => {
-                onCreateOpenChange(false);
-                setError(null);
-              }}
-              className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
-            >
-              {polish ? "Anuluj" : "Cancel"}
-            </button>
-          </div>
-        </div>
-      )}
+      </div>
+      {error && <div className="text-[12px] text-danger">{error}</div>}
+      <div className="flex gap-2">
+        <button
+          onClick={() => void create()}
+          disabled={busy || !name.trim() || picked.size === 0}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy && <Loader2 size={12} className="animate-spin" />}
+          {polish ? "Utwórz" : "Create"}
+        </button>
+        <button
+          onClick={() => {
+            onClose();
+            setError(null);
+          }}
+          className="rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
+        >
+          {polish ? "Anuluj" : "Cancel"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -899,7 +1024,6 @@ export function Sidebar() {
   const [groupMenu, setGroupMenu] = useState<GroupMenuState | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
-  const [groupsCollapsed, setGroupsCollapsed] = useState(false);
   const [scoutOpen, setScoutOpen] = useState(false);
   // multibot 0.1.49: kafelek hovera — timer 350 ms gasi migotanie przy
   // przejeżdżaniu myszką przez listę; wyjazd z wiersza kasuje go natychmiast.
@@ -1006,9 +1130,10 @@ export function Sidebar() {
     .filter((b) => !b.hidden)
     .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
   // multibot: sekcje sidebaru (port z OpenMausBot #296) — przypięte zostają na
-  // górze bez podziałów; reszta dzieli się na „bez sekcji" i grupy w kolejności
-  // pierwszego wystąpienia. W zwiniętej szynie podziałów nie rysujemy.
+  // górze bez podziałów; reszta dzieli się na „bez sekcji" i sekcje w
+  // kolejności zapisanej na serwerze. W zwiniętej szynie podziałów nie rysujemy.
   const [sectionPicker, setSectionPicker] = useState<{ botId: string; x: number; y: number } | null>(null);
+  const [sectionMenu, setSectionMenu] = useState<{ name: string; x: number; y: number } | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
   const toggleSection = (name: string) => {
     setCollapsedSections((current) => {
@@ -1021,27 +1146,29 @@ export function Sidebar() {
   const unpinned = visibleBots.filter((b) => !b.pinned);
   // multibot: przypięty bot — duży awatar 1:1 pod wyszukiwarką, bez szpilki (wzór z foty)
   const pinnedBots = visibleBots.filter((b) => b.pinned);
-  const unsectionedBots = collapsed ? [] : unpinned.filter((b) => !b.section);
-  const sectionedBots = collapsed
-    ? []
-    : (() => {
-        const out: Array<{ name: string; bots: Bot[] }> = [];
-        for (const b of unpinned) {
-          if (!b.section) continue;
-          let group = out.find((s) => s.name === b.section);
-          if (!group) {
-            group = { name: b.section, bots: [] };
-            out.push(group);
-          }
-          group.bots.push(b);
-        }
-        return out;
-      })();
-  // multibot: przypięte nie siedzą już w liście — mają osobny header nad nią
-  const flatBots = collapsed ? visibleBots : [...unsectionedBots];
   // multibot: F9-FE — kandydaci do grup: cała flota, także ukryci. Kolejność
   // stabilna z listy botów; wybrany driver nie usuwa bota z grup.
   const groupBots = state.bots;
+  const [groups, setGroups] = useEngineGroups(state.workspaceVersion);
+  const groupList = groups ?? [];
+  // multibot: kolejność sekcji trzyma serwer (`/api/config`), więc desktop i
+  // telefon układają listę tak samo; nowe sekcje dopisują się na końcu.
+  const savedOrder = state.config?.sectionOrder ?? [];
+  const rows = sectionRows(unpinned, groupList, savedOrder);
+  const sectionNames = rows.sections.map((s) => s.name);
+  const saveOrder = (next: string[]) => {
+    void authFetch("/api/config", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sectionOrder: next }),
+    })
+      .then((r) => r.json())
+      .then((config) => dispatch({ type: "configStatus", config }))
+      .catch(() => {});
+  };
+  const moveSection = (name: string, index: number) => saveOrder(moveSectionTo(sectionNames, name, index));
+  // multibot: przypięte nie siedzą już w liście — mają osobny header nad nią
+  const flatBots = collapsed ? visibleBots : rows.unsectioned.bots;
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -1281,6 +1408,9 @@ export function Sidebar() {
       <div
         className={cn("flex-1 overflow-y-auto", collapsed ? "px-1 pt-2" : "px-2")}
       >
+        {/* multibot: jedna kolumna z jednym `gap-0.5` na wszystko — wiersz
+            bota, wiersz grupy i nagłówek sekcji dostają ten sam odstęp, więc
+            kilka zwiniętych nagłówków obok siebie stoi równo. */}
         <div className="flex flex-col gap-0.5">
           {flatBots.map((b) => (
             <BotListItem
@@ -1292,43 +1422,63 @@ export function Sidebar() {
               onUnhover={hideHoverCard}
             />
           ))}
-        </div>
-        {!collapsed &&
-          sectionedBots.map((group) => (
-            <div key={group.name}>
-              <SectionDivider
-                name={group.name}
-                collapsed={collapsedSections.has(group.name)}
-                onToggle={() => toggleSection(group.name)}
-                polish={polish}
-              />
-              {!collapsedSections.has(group.name) && (
-                <div className="flex flex-col gap-0.5">
-                  {group.bots.map((b) => (
-                    <BotListItem
-                      key={b.id}
-                      bot={b}
-                      onMenu={setMenu}
-                      collapsed={collapsed}
-                      onHover={showHoverCard}
-                      onUnhover={hideHoverCard}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+          {(collapsed ? groupList : rows.unsectioned.groups).map((g) => (
+            <GroupRow
+              key={g.id}
+              group={g}
+              bots={groupBots}
+              collapsed={collapsed}
+              onMenu={setGroupMenu}
+              onUpdated={(next) => setGroups((gs) => (gs ?? []).map((x) => (x.id === next.id ? next : x)))}
+            />
           ))}
-        {groupBots.length > 0 && (
-          <GroupsSection
-            bots={groupBots}
-            createOpen={groupCreateOpen}
-            onCreateOpenChange={setGroupCreateOpen}
-            onMenu={setGroupMenu}
-            groupsCollapsed={groupsCollapsed}
-            onToggleCollapsed={() => setGroupsCollapsed((value) => !value)}
-            collapsed={collapsed}
-          />
-        )}
+          {!collapsed &&
+            rows.sections.map((section) => (
+              <div key={section.name} className="flex flex-col gap-0.5">
+                <SectionDivider
+                  name={section.name}
+                  collapsed={collapsedSections.has(section.name)}
+                  onToggle={() => toggleSection(section.name)}
+                  onMenu={setSectionMenu}
+                  onDropBot={(botId, name) => dispatch({ type: "updateBot", botId, patch: { section: name } })}
+                  onDropSection={(moved, target) => moveSection(moved, sectionNames.indexOf(target))}
+                  polish={polish}
+                />
+                {!collapsedSections.has(section.name) && (
+                  <>
+                    {section.bots.map((b) => (
+                      <BotListItem
+                        key={b.id}
+                        bot={b}
+                        onMenu={setMenu}
+                        collapsed={collapsed}
+                        onHover={showHoverCard}
+                        onUnhover={hideHoverCard}
+                      />
+                    ))}
+                    {section.groups.map((g) => (
+                      <GroupRow
+                        key={g.id}
+                        group={g}
+                        bots={groupBots}
+                        collapsed={collapsed}
+                        onMenu={setGroupMenu}
+                        onUpdated={(next) => setGroups((gs) => (gs ?? []).map((x) => (x.id === next.id ? next : x)))}
+                      />
+                    ))}
+                  </>
+                )}
+              </div>
+            ))}
+          {groupCreateOpen && !collapsed && (
+            <GroupCreateForm
+              bots={groupBots}
+              sections={sectionNames}
+              onClose={() => setGroupCreateOpen(false)}
+              onCreated={(group) => setGroups((gs) => [...(gs ?? []), group])}
+            />
+          )}
+        </div>
       </div>
 
       {/* Footer */}
@@ -1407,6 +1557,16 @@ export function Sidebar() {
       )}
       {groupMenu && <GroupContextMenu menu={groupMenu} onClose={() => setGroupMenu(null)} />}
       {sectionPicker && <SectionPicker botId={sectionPicker.botId} anchor={sectionPicker} onClose={() => setSectionPicker(null)} />}
+      {sectionMenu && (
+        <SectionMenu
+          menu={sectionMenu}
+          canUp={sectionNames.indexOf(sectionMenu.name) > 0}
+          canDown={sectionNames.indexOf(sectionMenu.name) < sectionNames.length - 1}
+          onMove={(delta) => moveSection(sectionMenu.name, sectionNames.indexOf(sectionMenu.name) + delta)}
+          onClose={() => setSectionMenu(null)}
+          polish={polish}
+        />
+      )}
       {scoutOpen && <ScoutTeamModal onClose={() => setScoutOpen(false)} />}
       {hover && (() => {
         const bot = state.bots.find((b) => b.id === hover.botId);
