@@ -96,9 +96,11 @@ export function codexMcpConfig(turn: SendTurnInput): { config?: { mcp_servers: R
   // Codex startuje serwery MCP równolegle z turą i kompletuje listę narzędzi w
   // momencie `resolve_for_step`. Serwer, który do tej chwili nie wstał, jest
   // POMIJANY, jeśli nie jest wymagany — w logu `omitting pending optional MCP
-  // server server_name=computer`. Na telefonie ten serwer to Python (mcp +
-  // pydantic + fastmcp), więc wstaje ~4 s i nie zdąża: 46 tur z rzędu poszło
-  // bez komputera, a bot uczciwie meldował, że komputera nie ma. Łaska dla
+  // server server_name=computer`. Zmierzone, gdy ten serwer był Pythonem (mcp +
+  // pydantic + fastmcp) i wstawał ~4 s: 46 tur z rzędu poszło bez komputera, a
+  // bot uczciwie meldował, że komputera nie ma. Dziś serwer jest node'owy i
+  // wstaje od razu, ale `required` zostaje: cicha degradacja jest tą samą
+  // awarią niezależnie od czasu startu. Łaska dla
   // serwerów opcjonalnych to stała w kodzie codeksa (`OPTIONAL_MCP_STARTUP_
   // GRACE`), więc podnieść jej się nie da — jedyną dźwignią jest `required`.
   //
@@ -126,8 +128,9 @@ export function codexMcpConfig(turn: SendTurnInput): { config?: { mcp_servers: R
       // Jawna whitelist (mirror COMPUTER_MCP_TOOLS) — codex rejestruje tylko
       // te narzędzia; to samo źródło, z którego prompt wylicza ofertę tury.
       enabled_tools: [...COMPUTER_MCP_TOOLS],
-      // Serwer to Python i na s10e wstaje ~4 s; default 10 s — zapas na
-      // wolny dzień telefonu, zanim required:true skończy turę błędem.
+      // Serwer jest dziś node'owy (`server/computer/mcp.ts`) i wstaje od razu —
+      // zapas zostaje na wolny dzień telefonu, zanim required:true skończy turę
+      // błędem. Kosztuje tylko wtedy, gdy naprawdę nie wstaje.
       startup_timeout_ms: 30_000,
     };
   }
@@ -177,11 +180,13 @@ export function codexMcpConfig(turn: SendTurnInput): { config?: { mcp_servers: R
 // AGENTS_TOOLS_VERSION) — to bolało, więc świeży wątek dostaje teraz
 // `turn.transcript` w pierwszej turze (patrz `historyBlock` w ./history.ts).
 /** Wersja zestawu narzędzi komputera bota, wpisywana w klucz kursora Codeksa.
- * Mieszkała przy serwerze MCP komputera (silnik Hermesa); po jego usunięciu nikt
- * `integrations.localComputer` nie ustawia, ale plumbing driverów zostaje — gdy
- * wróci serwer komputera w TS, PODNIEŚ tę liczbę, żeby wątki nie wznowiły się ze
- * starym zestawem narzędzi. */
-export const COMPUTER_TOOLS_VERSION = 5;
+ * PODNIEŚ przy KAŻDEJ zmianie `TOOLS` w `server/computer/mcp.ts` — codex trzyma
+ * listę narzędzi w wątku, a `thread/resume` jej nie odświeża.
+ *
+ * 5 → 6: serwer MCP komputera wrócił z silnika Hermesa do harnessu
+ * (`server/computer/mcp.ts`). Nazwy narzędzi te same, ale opisy i kształt
+ * odpowiedzi nie — wątek sprzed usunięcia silnika musi zacząć od nowa. */
+export const COMPUTER_TOOLS_VERSION = 6;
 
 export function cursorMcpKey(cfg: ReturnType<typeof codexMcpConfig>): string {
   return Object.keys(cfg.config?.mcp_servers ?? {})

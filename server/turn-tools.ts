@@ -7,12 +7,11 @@
 // Listy są statyczne — mirror z dwóch miejsc, żeby nie importować spawnerów
 // (agents-proxy.ts to skrypt z runem, nie moduł):
 //   - AGENTS_MCP_TOOLS  = TOOLS w server/drivers/agents-proxy.ts (28 narzędzi)
-//   - COMPUTER_MCP_TOOLS = narzędzia serwera MCP komputera (12)
+//   - COMPUTER_MCP_TOOLS = TOOLS w server/computer/mcp.ts (12 narzędzi)
 //
-// UWAGA: serwer MCP komputera jechał przez silnik Hermesa i zniknął razem z nim,
-// więc `integrations.localComputer` nie ma dziś producenta. Lista zostaje, bo
-// zostaje też plumbing driverów — patrz `COMPUTER_TOOLS_VERSION`
-// w server/drivers/codex.ts.
+// Że obie listy zgadzają się ze swoimi serwerami, pilnują testy — dla komputera
+// `server/computer/computer.test.ts`. Serwer komputera jechał kiedyś przez
+// silnik Hermesa i zniknął razem z nim; wrócił jako proxy stdio w harnessie.
 
 /** Narzędzia serwera MCP komputera. */
 export const COMPUTER_MCP_TOOLS = [

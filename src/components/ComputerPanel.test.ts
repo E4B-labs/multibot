@@ -1,5 +1,6 @@
 // H4/H5: the pure bits of the computer panel — state→label mapping and the
 // noVNC iframe URL builder — extracted so they're testable without rendering.
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { computerStateLabel, computerVncSrc, stripVncChrome, type ComputerState } from "./ComputerPanel";
@@ -90,5 +91,37 @@ describe("stripVncChrome", () => {
 
   it("does nothing when the iframe document is not reachable", () => {
     expect(() => stripVncChrome(null)).not.toThrow();
+  });
+});
+
+// „Record a skill" wróciło razem z nagrywarką CDP w harnessie. Testu nie da się
+// tu postawić na DOM (vitest chodzi w środowisku node, repo nie ma jsdom), więc
+// pilnujemy tego, co się zepsuło przy usuwaniu silnika: przycisk, jego dwa
+// zdarzenia i trasy, na które karta faktycznie strzela.
+describe("wiring nagrywania umiejętności", () => {
+  const panel = readFileSync(new URL("./ComputerPanel.tsx", import.meta.url), "utf8");
+  const skills = readFileSync(new URL("./SkillsPanel.tsx", import.meta.url), "utf8");
+
+  it("panel komputera renderuje kartę i przycisk startu/stopu", () => {
+    expect(panel).toContain('import { TeachCard } from "./SkillsPanel"');
+    expect(panel).toContain("<TeachCard");
+    // jeden guzik przełącza: ta sama ikona startuje i zatrzymuje
+    expect(panel).toContain('new CustomEvent(teachRecording ? "mb:teach:stop" : "mb:teach:start")');
+    // czerwona ramka na ekranie mówi, że nagrywanie trwa
+    expect(panel).toContain("teachRecording && (");
+  });
+
+  it("karta słucha obu zdarzeń i odsyła swoją fazę z powrotem", () => {
+    expect(skills).toContain('window.addEventListener("mb:teach:start", onStart)');
+    expect(skills).toContain('window.addEventListener("mb:teach:stop", onStop)');
+    expect(skills).toContain('new CustomEvent("mb:teach:phase"');
+    expect(panel).toContain('window.addEventListener("mb:teach:phase", onPhase)');
+  });
+
+  it("strzela w trasy harnessu, nie w nieistniejący silnik", () => {
+    expect(skills).toContain("/api/bots/${botId}/teach/start");
+    expect(skills).toContain("/api/bots/${botId}/teach/stop");
+    expect(skills).toContain("/api/bots/${botId}/teach/synthesize");
+    expect(skills).not.toContain("/api/engine/");
   });
 });

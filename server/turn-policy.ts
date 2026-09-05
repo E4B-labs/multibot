@@ -57,10 +57,23 @@ export function toolsetFor(tool: string): string {
 }
 
 export function toolAllowed(threadId: string, tool: string): boolean {
+  return toolsetAllowed(threadId, toolsetFor(tool));
+}
+
+/**
+ * The same decision, for a toolset the caller already knows by name.
+ *
+ * `toolsetFor` is a name-sniffing heuristic and it is wrong for most of the
+ * computer tools — `read_page` looks like a file tool, `find`/`click`/`key` look
+ * like nothing at all, and `computer_exec` matches the browser pattern before it
+ * ever reaches the terminal one. A caller holding an exact tool→toolset map
+ * (server/computer/index.ts does) must not lose it to the guesser.
+ */
+export function toolsetAllowed(threadId: string, toolset: string): boolean {
   const policy = active.get(threadId);
   if (!policy) return true;
-  if (policy.access === "read-only" && ["browser", "delegation", "file", "integrations", "terminal"].includes(toolsetFor(tool))) return false;
-  return policy.permissions[toolsetFor(tool)] !== false;
+  if (policy.access === "read-only" && ["browser", "delegation", "file", "integrations", "terminal"].includes(toolset)) return false;
+  return policy.permissions[toolset] !== false;
 }
 
 export function autoApproveAllowed(threadId: string, tool: string): boolean {

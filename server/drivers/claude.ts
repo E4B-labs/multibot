@@ -463,8 +463,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // multibot (A1): Claude Code NIE ma wyścigu codexa — czeka na łączące się
         // serwery MCP (tool search / WaitForMcpServers), a awarię serwera zgłasza
         // Claude'owi zamiast cicho pominąć narzędzia. `MCP_TIMEOUT` to startup
-        // timeout serwerów MCP (default 10 s; serwer komputera to Python i na
-        // telefonie wstaje ~4 s — 30 s zostawia zapas na wolny dzień s10e).
+        // timeout serwerów MCP (default 10 s; 30 s zostawia zapas na wolny dzień
+        // s10e — mierzone jeszcze na pythonowym serwerze komputera, który wstawał
+        // ~4 s; dzisiejszy node'owy wstaje od razu).
         // Stdio serwery nie reconnectują się same, więc start musi się zmieścić
         // w tym oknie — stąd podbicie, a nie domyślne 10 s.
         const env: Record<string, string | undefined> = { ...process.env, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error", MCP_TIMEOUT: "30000" };
