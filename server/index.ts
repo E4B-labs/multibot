@@ -80,14 +80,13 @@ import * as mcpConnectors from "./mcp-connectors.ts";
 import * as googleWorkspace from "./google-workspace.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { HarnessRoutines, oneShotAt, routineTurnText, verifyWebhookSignature, type HarnessRoutine } from "./routines.ts";
-import { runGroupRound } from "./group-round.ts";
 import { GroupStore } from "./group-store.ts";
-import { RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
-import { BotMailQueue, BotMailStore, botMailThreadId, type PendingBotMail } from "./bot-mail.ts";
+import { budgetLeft, isDuplicateOfLast, RoomStore, ROOM_DONE_MARKER, type RoomRecord } from "./rooms.ts";
+import { BotMailStore, botMailThreadId } from "./bot-mail.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
-import { BOT_COLORS, chainDepth, managedBotPatch, mentionedBots, Store, type BotRecord, type ConnectorTarget, type Message, type OptionCardData } from "./store.ts";
+import { BOT_COLORS, managedBotPatch, mentionedBots, Store, type BotRecord, type ConnectorTarget, type Message, type OptionCardData } from "./store.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, isCredentialTargetId, type CredentialTargetId } from "./credential-request.ts";
 import { inspectorEvents, recordInspectorEvent, replayInspectorEvents } from "./inspector.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
@@ -173,10 +172,21 @@ const t = (pl: string, en: string): string => (uiLang === "pl" ? pl : en);
 // A shared secret guards the localhost-only /api/internal endpoints the
 // agents-proxy calls; regenerated each boot (the proxy gets it via env).
 const COMMS_TOKEN = randomBytes(24).toString("hex");
-// Cap message chains: depth 0 = a user-initiated turn (may ask a peer);
-// a peer invoked via ask_bot runs at depth 1 and gets no MCP child, so
-// A→B is allowed but B→C (and A→B→A loops) never start.
-const MAX_COMMS_DEPTH = 1;
+// A bot→bot message is a REAL turn on the recipient's own thread, with the
+// full toolset (peer tools included), so B can answer, ask back, or pull in C.
+// Nothing caps the hop count any more; three deterministic brakes bound the
+// conversation instead: a per-room message budget, a wall clock, and a
+// duplicate guard (see deliverPeerMessage).
+const DEFAULT_COLLAB_MAX_MESSAGES = 24;
+function collabMaxMessages(): number {
+  const raw = Number(process.env.OMB_COLLAB_MAX_MESSAGES);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : DEFAULT_COLLAB_MAX_MESSAGES;
+}
+const DEFAULT_COLLAB_MAX_MS = 2 * 60 * 60_000;
+function collabMaxMs(): number {
+  const raw = Number(process.env.OMB_COLLAB_MAX_MS);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : DEFAULT_COLLAB_MAX_MS;
+}
 /** "Room only for task": a user @mention opens a collaboration room only when
  * the message also carries task language; bare mentions stay one-shot folds. */
 const TASK_HINTS =
@@ -232,7 +242,7 @@ const agentsProxyPath = (() => {
 // in the packaged app process.execPath is Electron — run the proxy as node
 const AGENTS_NODE_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
-function agentsIntegration(botId: string, depth: number) {
+function agentsIntegration(botId: string) {
   return {
     command: process.execPath,
     args: [agentsProxyPath],
@@ -241,7 +251,6 @@ function agentsIntegration(botId: string, depth: number) {
       OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
       OMB_BOT_ID: botId,
       OMB_COMMS_TOKEN: COMMS_TOKEN,
-      OMB_TURN_DEPTH: String(depth),
     },
   };
 }
@@ -252,11 +261,6 @@ function agentsIntegration(botId: string, depth: number) {
  * the old 4 minutes, overridable per caller via `timeoutMs`). */
 function groupThreadId(groupId: string, botId: string): string {
   return `group-${groupId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}-${botId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}`;
-}
-
-/** Isolated per-bot thread inside a collaboration room (mirror of groupThreadId). */
-function roomThreadId(roomId: string, botId: string): string {
-  return `room-${roomId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}-${botId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}`;
 }
 
 /** Isolated thread for a one-shot delegated peer turn ("[Delegation from @X]",
@@ -364,23 +368,11 @@ async function delegatedPeerTurn(callerId: string, peerId: string, message: stri
   }
 }
 
-// multibot: pokoje i cele mają różną tolerancję na zajętego bota. Cel (runGoal)
-// czeka 60s (24*2.5s) — najzwyklejszy przypadek to użytkownik, który dopisał zwykłą
-// wiadomość w trakcie celu, i nie chcemy trzymać pętli na martwym bocie.
-// Pokój czeka 60s (30*2s): odpowiedź jednego bota na pytanie drugiego ma max 60s,
-// cel <15s typowo — stąd 20*60s -> 60s timeout w runCollab.
+// multibot: cel (runGoal) czeka 60s (24*2.5s) na zajętego bota — najzwyklejszy
+// przypadek to użytkownik, który dopisał zwykłą wiadomość w trakcie celu, i nie
+// chcemy trzymać pętli na martwym bocie.
 const IDLE_WAIT_MS = 2_000;
 const IDLE_ROUNDS_LIMIT = 30;
-const ROOM_IDLE_ROUNDS_LIMIT = 30;
-// multibot: ile rund wymiany dostaje pokoj otwarty przez ask_bot, zanim
-// zamknie sie sam. Rozmowa ma trwac (zadanie → praca → ocena → poprawka), ale
-// nie w nieskonczonosc, gdy zaden bot nie wystawi [TASK COMPLETE]. Cztery rundy
-// gasily rozmowe, zanim boty zdazyly sobie cokolwiek poprawic — stad 12 i env.
-const DEFAULT_COLLAB_MAX_ROUNDS = 12;
-function collabMaxRounds(): number {
-  const raw = Number(process.env.OMB_COLLAB_MAX_ROUNDS);
-  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : DEFAULT_COLLAB_MAX_ROUNDS;
-}
 
 /** Clickable "X texted Y" pill on the owner's thread pointing at the room. */
 function postRoomChip(ownerBotId: string, room: RoomRecord) {
@@ -392,197 +384,6 @@ function postRoomChip(ownerBotId: string, room: RoomRecord) {
     room: { id: room.id, name: room.name, bot_ids: [...room.bot_ids], ownerBotId, status: room.status },
   });
   broadcast({ kind: "message", threadId: owner.threadId, message });
-}
-
-/** Room turn prompt: task + collaboration rules + explicit done marker.
- * multibot: wiadomości innych botów jadą W TREŚCI promptu, nie w polu
- * `transcript` tury — drivery CLI (claude, codex, ACP) tego pola nie czytają,
- * więc boty pracowały na ślepo i "rozmowa" nigdy nie zbiegała. Sesja CLI
- * pamięta własne poprzednie tury, więc kolejne rundy dostają sam przyrost. */
-function collabPrompt(room: RoomRecord, bot: { id: string; name: string }, freshFromPeers: string): string {
-  const peers = room.bot_ids
-    .filter((id) => id !== bot.id)
-    .map((id) => store.bot(id)?.name ?? id);
-  const header = peers.length
-    ? `You are @${bot.name} in a collaboration room with ${peers.map((n) => `@${n}`).join(" and ")}.`
-    : `You are @${bot.name} in a collaboration room.`;
-  // multibot: skład drużyny Z OPISAMI — boty wiedzą, kto się czym zajmuje,
-  // i adresują pracę do właściwego specjalisty zamiast zgadywać.
-  const roster = room.bot_ids
-    .filter((id) => id !== bot.id)
-    .map((id) => {
-      const peer = store.bot(id);
-      if (!peer) return null;
-      return `@${peer.name}${peer.description ? ` — ${peer.description}` : ""}`;
-    })
-    .filter((line): line is string => Boolean(line))
-    .join("\n");
-  return [
-    header,
-    roster ? `Team roster (who specialises in what):\n${roster}` : "",
-    `The user's task: ${room.task}`,
-    freshFromPeers
-      ? `Messages addressed to you (or to the whole team):\n\n${freshFromPeers}`
-      : "No messages from the other bots yet — you go first.",
-    "Delivery is PRIVATE: a message that @mentions a bot goes ONLY to that bot — nobody else sees it. An unaddressed message reaches the whole team. Start your message with @Name of the bot you are answering, and write unaddressed only when it truly concerns everyone.",
-    "Work on this task together with the other bots. Build on what the others wrote, answer their points, do your part.",
-    "Keep each contribution SHORT — a few sentences, no restating the whole discussion — and end the room as soon as the task is resolved instead of exchanging pleasantries.",
-    `Write your contribution now. When the task is fully resolved, end your message with the exact line: ${ROOM_DONE_MARKER}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-/** Follow-up round prompt: only what arrived since this bot's previous turn. */
-function collabRoundPrompt(freshFromPeers: string): string {
-  return [
-    freshFromPeers
-      ? `New messages addressed to you (or to the whole team):\n\n${freshFromPeers}`
-      : "No new messages from the other bots.",
-    `Continue your part. Address the bot you answer with @Name. When the task is fully resolved, end your message with the exact line: ${ROOM_DONE_MARKER}`,
-  ].join("\n\n");
-}
-
-/** Run a room to completion: sequential rounds, each bot replies once per
- * round, until a bot marks the task done or the safety ceiling (2 h) hits.
- * Room turns use isolated threads, so they must not be blocked by the bot's
- * main chat turn (the owner is commonly busy while an ask_bot call is open). */
-async function runCollab(
-  roomId: string,
-  opts?: { maxRounds?: number },
-): Promise<void> {
-  const started = Date.now();
-  // multibot: 2 h, nie 20 min — zadanie z prawdziwego świata (komputer,
-  // przeszukiwanie, długa rozmowa) nie mieściło się w dawnym suficie.
-  const SAFETY_MS = 2 * 60 * 60_000;
-  let idleRounds = 0;
-  // multibot: ile transkryptu każdy bot już dostał w prompcie — kolejne rundy
-  // wysyłają sam przyrost (sesja CLI pamięta swoje wcześniejsze tury).
-  const seen = new Map<string, number>();
-  // multibot: kto dostal juz PELNY brief pokoju (naglowek, sklad, zadanie,
-  // reguly, marker). Pokoj z ask_bot podawal tu `seen` wypelnione dla bota
-  // odpowiadajacego, wiec brano go za "juz byl w pokoju" i dostawal sam
-  // przyrost transkryptu — nie wiedzac ani o zadaniu, ani o regulach, ani o
-  // tym, ze rozmowa ma trwac wiele rund. Brief nalezy sie kazdemu raz.
-  const briefed = new Set<string>();
-  let rounds = 0;
-  for (;;) {
-    const room = rooms.get(roomId);
-    if (!room || room.status !== "running") break;
-    if (Date.now() - started >= SAFETY_MS) break;
-    if (opts?.maxRounds !== undefined && rounds >= opts.maxRounds) break;
-    rounds++;
-    let anyReply = false;
-    let finished = false;
-    for (const botId of room.bot_ids) {
-      const bot = store.bot(botId);
-      if (!bot) continue;
-      // świeży zrzut TUŻ przed turą — snapshot z początku rundy nie widzi
-      // wkładek botów, które właśnie skończyły w tej samej rundzie
-      const live = rooms.get(roomId);
-      if (!live || live.status !== "running") break;
-      // pierwsza tura bota W POKOJU dostaje CALY dotychczasowy transkrypt —
-      // dopiero kolejne jada samym przyrostem (sesja CLI pamieta swoje tury)
-      const first = !briefed.has(botId);
-      const since = first ? 0 : (seen.get(botId) ?? 0);
-      // multibot: prywatne doręczanie — wiadomość z @wzmianką widzi TYLKO
-      // adresat (i nie dostaje jej nawet w późniejszych rundach, bo wskaźnik
-      // `seen` przeszedł obok niej); bez wzmianki trafia do wszystkich.
-      // To też jest główna dźwignia czasu: bot nieadresowany nie budzi się na
-      // kolejną turę, więc pokój nie kręci pustych rund grzecznościowych.
-      const peers = live.bot_ids
-        .map((id) => store.bot(id))
-        .filter((b): b is NonNullable<ReturnType<typeof store.bot>> => b !== null && b.id !== botId);
-      const fresh = live.transcript
-        .slice(since)
-        .filter((m) => m.from !== botId)
-        .filter((m) => {
-          const targets = mentionedBots(m.text, peers);
-          return targets.length === 0 || targets.some((t) => t.id === botId);
-        })
-        .map((m) => `@${store.bot(m.from)?.name ?? m.from}: ${m.text}`)
-        .join("\n\n");
-      seen.set(botId, live.transcript.length);
-      briefed.add(botId);
-      const prompt = first ? collabPrompt(live, bot, fresh) : collabRoundPrompt(fresh);
-      // multibot: kawałki tury lecą do pokoju na bieżąco — bez tego transkrypt
-      // stał pusty przez całą turę (do 20 min) i pokój wyglądał na zacięty.
-      // Cała tura to JEDNA rosnąca wiadomość; ogon mogący być początkiem
-      // markera czeka w carry na następny spłuk, zamiast ginąć.
-      let liveMsgId: string | null = null;
-      let carry = "";
-      rooms.setActiveBot(roomId, botId);
-      broadcast({ kind: "room", room: rooms.get(roomId) });
-      const reply = await askBotAndWait(botId, prompt, 1, {
-        threadId: roomThreadId(roomId, botId),
-        transcript: live.transcript.map((m) => ({ role: "assistant" as const, text: m.text })),
-        // multibot 0.1.63: 60s max, target <15s - low reasoning dla pokoju 5 tur
-        timeoutMs: 60_000,
-        reasoning: "low",
-        onText: (t0) => {
-          const liveRoom = rooms.get(roomId);
-          if (!liveRoom || liveRoom.status !== "running") return;
-          let chunk = carry + t0;
-          carry = "";
-          const at = chunk.indexOf(ROOM_DONE_MARKER);
-          if (at >= 0) chunk = chunk.slice(0, at);
-          else {
-            for (let k = Math.min(chunk.length, ROOM_DONE_MARKER.length - 1); k > 0; k--) {
-              if (chunk.endsWith(ROOM_DONE_MARKER.slice(0, k))) {
-                carry = chunk.slice(-k);
-                chunk = chunk.slice(0, -k);
-                break;
-              }
-            }
-          }
-          if (!chunk.trim()) return;
-          if (liveMsgId) rooms.appendToMessage(roomId, liveMsgId, chunk);
-          else liveMsgId = rooms.append(roomId, botId, chunk.trimStart())?.id ?? null;
-          broadcast({ kind: "room", room: rooms.get(roomId) });
-        },
-      });
-      rooms.setActiveBot(roomId, null);
-      broadcast({ kind: "room", room: rooms.get(roomId) });
-      const current = rooms.get(roomId);
-      if (!current || current.status !== "running") {
-        finished = true;
-        break;
-      }
-      const markerAt = reply.indexOf(ROOM_DONE_MARKER);
-      const visible = markerAt >= 0 ? reply.slice(0, markerAt).trim() : reply;
-      if (visible && !liveMsgId) {
-        rooms.append(roomId, botId, visible);
-        broadcast({ kind: "room", room: rooms.get(roomId) });
-      }
-      if (visible) recordCollabMail(current, botId, visible);
-      anyReply = true;
-      // 0.1.62: jesli zadanie mowi "5 tur" nie koncz przed 5 wiadomosciami - zapobiega halucynacji "5 tur" gdy atlas skip
-      const needFive = current && /5\s*tur/i.test(current.task) && (current.transcript.length + (visible ? 1 : 0) < 5);
-      if (markerAt >= 0 && !needFive) {
-        // multibot: [TASK COMPLETE] z PIERWSZEJ rundy nie ucina pokoju w pol
-        // slowa. W pokoju z ask_bot wolajacy ma juz odpowiedz kolegi w rece,
-        // wiec jego pierwsza wkladka to niemal zawsze "gotowe" — a kolega nie
-        // widzial jeszcze ani zadania, ani regul pokoju. Domykamy dopiero po
-        // pelnej rundzie, zeby kazdy uczestnik mial swoja ture.
-        finished = true;
-        if (rounds > 1) break;
-      }
-    }
-    if (finished) break;
-    if (!anyReply) {
-      idleRounds++;
-      if (idleRounds >= ROOM_IDLE_ROUNDS_LIMIT) break; // wszyscy zajęci przez kwadrans
-      await new Promise((r) => setTimeout(r, IDLE_WAIT_MS));
-      continue;
-    }
-    idleRounds = 0;
-  }
-  const final = rooms.get(roomId);
-  if (final && final.status === "running") {
-    rooms.setStatus(roomId, final.transcript.length ? "done" : "failed");
-  }
-  const settled = rooms.get(roomId);
-  if (settled) broadcast({ kind: "room", room: settled });
 }
 
 /** Strip @mentions of the tagged bots out of the task text. */
@@ -603,15 +404,34 @@ function roomSummary(roomId: string): string {
     : "(the collaboration produced no result)";
 }
 
+/** Settle a room and report it back to the bot that opened it. Every way a
+ * conversation can end — [TASK COMPLETE], spent budget, spent clock — comes
+ * through here, so the owner always learns how it went exactly once. */
+function closeRoom(roomId: string, status: "done" | "failed", reason = ""): void {
+  const room = rooms.get(roomId);
+  if (!room || room.status !== "running") return;
+  rooms.setStatus(roomId, status);
+  for (const key of [...sentPeerText.keys()]) if (key.startsWith(`${roomId}|`)) sentPeerText.delete(key);
+  const settled = rooms.get(roomId);
+  if (settled) broadcast({ kind: "room", room: settled });
+  const owner = store.bot(room.ownerBotId);
+  if (!owner) return;
+  const report = store.appendMessage(owner.threadId, {
+    role: "bot",
+    kind: "text",
+    text: `Room "${room.name}" finished (${status})${reason ? ` — ${reason}` : ""}.\n\n${roomSummary(roomId)}`,
+  });
+  broadcast({ kind: "message", threadId: owner.threadId, message: report });
+}
+
 /** User @mentions another bot with a task → open a collaboration room. Returns
  * the room plus the cleaned task text, or null when there is nothing to
  * collaborate on (no tags, or a quick question).
  *
- * Nie uruchamia pokoju i nie wiesza pigułki. Pokój chodzi rundami przez wiele
- * tur i wolno mu żyć dwadzieścia minut — czekanie na niego w obsłudze
- * `POST /messages` trzymało odpowiedź HTTP tak długo, że czat wyglądał na
- * zawieszony. Uruchomienie należy do wywołującego, w tle, dokładnie jak przy
- * `collab.start`. */
+ * Nie doręcza pierwszej wiadomości i nie wiesza pigułki — rozmowa jest ciągiem
+ * tur i wolno jej trwać godzinami, więc czekanie na nią w obsłudze
+ * `POST /messages` trzymałoby odpowiedź HTTP tak długo, że czat wyglądałby na
+ * zawieszony. Doręczenie należy do wywołującego, w tle. */
 function maybeStartCollab(botId: string, text: string): { room: RoomRecord; task: string } | null {
   const bot = store.bot(botId);
   if (!bot) return null;
@@ -660,11 +480,9 @@ const pendingBotAttachments = new Map<string, ReturnType<AttachmentStore["add"]>
 // ląduje w wątku i w kolejce; koniec tury odpala drain — bot dostaje je wszystkie
 // naraz i odpowiada JEDNĄ odpowiedzią na wszystko.
 const queuedUserMessages = new QueuedUserMessages();
-// Durable asynchronous agent mail. The queue only covers a target already
-// occupied by another turn; mail itself is persisted before delivery starts.
+// Durable agent mailbox: every peer message is persisted here as well as in
+// the room, so an exchange stays readable long after its room settles.
 const botMail = new BotMailStore();
-const queuedBotMail = new BotMailQueue();
-const activeMailTurns = new Map<string, PendingBotMail[]>();
 
 function broadcastMail(threadId: string): void {
   const thread = botMail.get(threadId);
@@ -674,7 +492,6 @@ function broadcastMail(threadId: string): void {
 function removeBotMail(botId: string): void {
   const threads = botMail.forBot(botId);
   botMail.deleteBot(botId);
-  queuedBotMail.deleteBot(botId);
   for (const thread of threads) broadcast({ kind: "mail.deleted", threadId: thread.id, bot_ids: thread.bot_ids });
 }
 
@@ -684,107 +501,132 @@ function appendBotMail(input: Parameters<BotMailStore["append"]>[0]) {
   return message;
 }
 
-function settleMailTurn(threadId: string, status: "delivered" | "failed"): void {
-  const pending = activeMailTurns.get(threadId);
-  if (!pending) return;
-  activeMailTurns.delete(threadId);
-  for (const item of pending) {
-    const updated = botMail.setStatus(botMailThreadId(item.fromBotId, item.toBotId), item.messageId, status);
-    if (updated) broadcastMail(botMailThreadId(item.fromBotId, item.toBotId));
-  }
+// ── bot↔bot: a message is a turn ───────────────────────────────────────
+// One primitive carries every bot→bot exchange (ask_bot, send_bot_mail,
+// start_collab, group messages, a user's @mention, and the automatic reply a
+// finished turn sends back). It appends to the room ledger, then hands the
+// text to the recipient's MAIN thread through deliverToActiveTurnOrQueue —
+// steered into a live turn where the driver supports it, queued otherwise.
+// A busy peer is never a refusal.
+
+/** Peer message a bot is currently answering. `replied` flips as soon as the
+ * bot writes back by itself, so the turn.completed safety net does not send a
+ * second copy of the same answer. */
+const peerTurn = new Map<string, { fromBotId: string; roomId: string; replied: boolean }>();
+/** Last text each sender→recipient pair carried inside a room. Repeating it
+ * verbatim is a loop, not a contribution. Keyed per pair so a fan-out to a
+ * group (same text, several recipients) is not mistaken for one. */
+const sentPeerText = new Map<string, string>();
+
+type PeerDelivery = "steered" | "queued" | "refused";
+
+/** First thing a brand-new bot does: look at what it actually has. */
+const ONBOARDING_FIRST_TURN =
+  "Before anything else: check what is already connected. List your connectors, tools and whether you have a computer, then tell the user in two or three sentences what you can do right now, and ask only for the access you are actually missing.";
+/** Off inside vitest and wherever a harness needs bots that stay quiet. */
+const onboardingTurnEnabled = () => !process.env.VITEST && process.env.OMB_ONBOARDING_TURN !== "0";
+
+/** Envelope the recipient reads. Its own chat, its own name on the sender. */
+function peerEnvelope(from: BotRecord, text: string): string {
+  return `[Message from @${from.name} (bot id: ${from.id}), another bot in this MultiBot workspace. This is a real turn: answer them, ask them back, or reply with exactly [NO REPLY] if nothing needs saying.]\n\n${text}`;
 }
 
-function recordCollabMail(room: RoomRecord, fromBotId: string, text: string): void {
-  const recipients = room.bot_ids
-    .filter((id) => id !== fromBotId)
-    .map((id) => store.bot(id))
-    .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot));
-  const mentioned = mentionedBots(text, recipients);
-  const targets = mentioned.length ? mentioned : recipients;
-  for (const target of targets) {
-    appendBotMail({ from: fromBotId, to: target.id, text, status: "delivered" });
-  }
-}
-
-function startMailTurn(botId: string, pending: PendingBotMail[]): void {
-  const bot = store.bot(botId);
-  if (!bot || bot.busy) {
-    for (const item of pending) queuedBotMail.push(item);
-    return;
-  }
-  const delivered: PendingBotMail[] = [];
-  const prompts: string[] = [];
-  for (const item of pending) {
-    const sender = store.bot(item.fromBotId);
-    if (!sender) {
-      const failed = botMail.setStatus(botMailThreadId(item.fromBotId, item.toBotId), item.messageId, "failed");
-      if (failed) broadcastMail(botMailThreadId(item.fromBotId, item.toBotId));
-      continue;
-    }
-    const visible = `[Agent mail from @${sender.name}] ${item.text}`;
-    const userMessage = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: visible });
-    broadcast({ kind: "message", threadId: bot.threadId, message: userMessage });
-    const updated = botMail.setStatus(botMailThreadId(item.fromBotId, item.toBotId), item.messageId, "delivered");
-    if (updated) broadcastMail(botMailThreadId(item.fromBotId, item.toBotId));
-    delivered.push(item);
-    prompts.push(`${sender.name} (id: ${sender.id}): ${item.text}`);
-  }
-  if (!delivered.length) return;
-  activeMailTurns.set(bot.threadId, delivered);
-  const prompt = [
-    "[agent] Asynchronous mail arrived from another MultiBot agent.",
-    prompts.join("\n\n"),
-    "If useful, reply with send_bot_mail. Do not send acknowledgement-only mail.",
-  ].join("\n\n");
-  const depth = Math.max(...delivered.map((item) => item.depth + 1), 1);
-  startTurn(bot.id, prompt, { commsDepth: depth, userMessagePosted: true, origin: "bot", mailTurn: true }).catch(() => {
-    settleMailTurn(bot.threadId, "failed");
-  });
-}
-
-function drainQueuedBotMail(botId: string): void {
-  const bot = store.bot(botId);
-  if (!bot || bot.busy) return;
-  const pending = queuedBotMail.take(botId);
-  if (pending) startMailTurn(botId, pending);
-}
-
-function recoverQueuedBotMail(): void {
-  const targets = new Set<string>();
-  for (const thread of botMail.list()) {
-    for (const message of thread.messages) {
-      if (message.status !== "queued" || !store.bot(message.from) || !store.bot(message.to)) continue;
-      queuedBotMail.push({
-        messageId: message.id,
-        fromBotId: message.from,
-        toBotId: message.to,
-        text: message.text,
-        depth: message.depth ?? 0,
-      });
-      targets.add(message.to);
-    }
-  }
-  for (const botId of targets) drainQueuedBotMail(botId);
-}
-
-function sendBotMail(fromBotId: string, toBotId: string, text: string, depth = 0) {
+/**
+ * Deliver one bot→bot message. Returns how it landed plus, on a refusal,
+ * model-facing prose: every refusal tells the bot to stop and talk to the
+ * user instead of retrying into the same wall.
+ */
+async function deliverPeerMessage(
+  fromBotId: string,
+  toBotId: string,
+  text: string,
+  roomId?: string,
+): Promise<{ status: PeerDelivery; roomId: string | null; note: string }> {
+  const refuse = (note: string) => ({ status: "refused" as const, roomId: roomId ?? null, note });
   const from = store.bot(fromBotId);
   const target = store.bot(toBotId);
-  if (!from) return { status: 404, body: { error: "no such caller bot" } };
-  if (!target) return { status: 404, body: { error: "no such target bot" } };
-  if (!canBotContact(from, target)) return { status: 404, body: { error: "no such target bot" } };
-  if (fromBotId === toBotId) return { status: 400, body: { error: "a bot cannot message itself" } };
+  if (!from) return refuse("You are not a known bot here. Do not retry; tell the user.");
+  if (!target || !canBotContact(from, target)) {
+    return refuse("There is no such bot in your workspace. Do not retry; tell the user who you tried to reach.");
+  }
+  if (fromBotId === toBotId) return refuse("A bot cannot message itself. Do not retry; do the work or tell the user.");
   const message = text.trim();
-  if (!message || message.length > 8_000) return { status: 422, body: { error: "message required (max 8000)" } };
-  if (depth >= MAX_COMMS_DEPTH + 1) return { status: 403, body: { error: "mail chains are limited to one reply" } };
-  const queued = Boolean(target.busy);
-  const mail = appendBotMail({ from: fromBotId, to: toBotId, text: message, status: "queued" });
-  queuedBotMail.push({ messageId: mail.id, fromBotId, toBotId, text: message, depth: Math.max(0, depth) });
-  drainQueuedBotMail(toBotId);
-  return {
-    status: 202,
-    body: { accepted: true, queued, messageId: mail.id, threadId: botMailThreadId(fromBotId, toBotId), botName: target.name },
-  };
+  if (!message) return refuse("An empty message is not worth a turn. Do not retry; say something or say nothing.");
+  if (message.length > 8_000) return refuse("That message is over 8000 characters. Do not retry; send the short version.");
+  if (workspace.permissions(fromBotId).delegation === false) {
+    return refuse("Bot-to-bot messaging is switched off for you. Do not retry; tell the user it is disabled in your permissions.");
+  }
+  if (from.chiefOfStaff && (target.section?.trim() ?? "") !== (from.section?.trim() ?? "")) {
+    return refuse("As a chief of staff you may only message bots in your own section. Do not retry; tell the user.");
+  }
+
+  // Room ledger: an explicit room wins, then the conversation this bot is
+  // already in (so A→B→C stays ONE room and ONE budget), then any open room
+  // with this peer, and only then a new one.
+  const active = peerTurn.get(fromBotId);
+  const room =
+    (roomId ? rooms.get(roomId) : null) ??
+    (active ? rooms.get(active.roomId) : null) ??
+    rooms.runningWith([fromBotId, toBotId]) ??
+    (() => {
+      const opened = rooms.create({
+        task: message.slice(0, 200),
+        bot_ids: [fromBotId, toBotId],
+        ownerThread: from.threadId,
+        ownerBotId: fromBotId,
+      });
+      postRoomChip(fromBotId, opened);
+      return opened;
+    })();
+  if (room.status !== "running") {
+    return refuse("That conversation is already closed. Do not retry; report what you have to the user.");
+  }
+  rooms.addBot(room.id, fromBotId);
+  rooms.addBot(room.id, toBotId);
+
+  const max = collabMaxMessages();
+  if (budgetLeft(room, max) <= 0) {
+    closeRoom(room.id, "done", `message budget spent (${max})`);
+    return refuse(`Conversation budget spent (${max} messages) - wrap up and report to the user. Do not retry.`);
+  }
+  if (Date.now() - room.createdAt >= collabMaxMs()) {
+    closeRoom(room.id, "done", "time budget spent");
+    return refuse("This conversation ran out of time - wrap up and report to the user. Do not retry.");
+  }
+  const ledgerKey = `${room.id}|${fromBotId}|${toBotId}`;
+  if (sentPeerText.get(ledgerKey) === message) {
+    return refuse("You already sent that bot exactly this message. Do not retry; wait for its answer or tell the user.");
+  }
+  sentPeerText.set(ledgerKey, message);
+
+  // The same text fanned out to several bots is ONE line in the ledger.
+  if (!isDuplicateOfLast(room, fromBotId, message)) rooms.append(room.id, fromBotId, message);
+  broadcast({ kind: "room", room: rooms.get(room.id) });
+  appendBotMail({ from: fromBotId, to: toBotId, text: message, status: "delivered" });
+  if (active) active.replied = true;
+
+  const envelope = peerEnvelope(from, message);
+  const bubble = store.appendMessage(target.threadId, { role: "user", kind: "text", text: envelope });
+  broadcast({ kind: "message", threadId: target.threadId, message: bubble });
+  peerTurn.set(toBotId, { fromBotId, roomId: room.id, replied: false });
+  const status = await deliverToActiveTurnOrQueue(toBotId, envelope, "bot", { attachments: [], origin: "bot" });
+  return { status, roomId: room.id, note: "" };
+}
+
+/** A finished turn that was answering a peer routes its prose back — unless
+ * the bot chose silence ([NO REPLY]) or declared the whole task done. */
+async function routePeerReply(botId: string, peer: { fromBotId: string; roomId: string }, text: string): Promise<void> {
+  const room = rooms.get(peer.roomId);
+  const markerAt = text.indexOf(ROOM_DONE_MARKER);
+  const visible = (markerAt >= 0 ? text.slice(0, markerAt) : text).trim();
+  if (markerAt >= 0) {
+    if (visible && room && !isDuplicateOfLast(room, botId, visible)) rooms.append(peer.roomId, botId, visible);
+    closeRoom(peer.roomId, "done");
+    return;
+  }
+  // eliza: silence is a valid contribution — no thank-you turns.
+  if (!visible || /\[NO REPLY\]/i.test(text)) return;
+  await deliverPeerMessage(botId, peer.fromBotId, visible, peer.roomId);
 }
 
 /**
@@ -804,6 +646,8 @@ type QueuedTurnOptions = {
   attachments: ReturnType<AttachmentStore["resolveMany"]>;
   reasoning?: "low" | "medium" | "high" | "xhigh" | "max";
   actor?: WorkspaceActor | null;
+  /** Kto zaczął turę — peer message nie ma pushować "zaczyna pracę" do usera. */
+  origin?: TurnOrigin;
 };
 const queuedTurnOptions = new Map<string, QueuedTurnOptions>();
 
@@ -822,6 +666,8 @@ function queueUserTurn(botId: string, turnText: string, opts: QueuedTurnOptions)
     attachments: [...(previous?.attachments ?? []), ...opts.attachments],
     reasoning: opts.reasoning ?? previous?.reasoning,
     actor: previous?.actor ?? opts.actor,
+    // Sklejone okno z choćby jedną wiadomością człowieka jest turą człowieka.
+    origin: previous?.origin === "user" || opts.origin === undefined ? "user" : opts.origin,
   });
   const pending = turnDebounce.get(botId);
   if (pending) clearTimeout(pending);
@@ -908,6 +754,7 @@ function drainQueuedUserMessages(botId: string) {
     ...(opts?.attachments.length ? { attachments: opts.attachments } : {}),
     ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
     ...(opts?.actor ? { actor: opts.actor } : {}),
+    ...(opts?.origin ? { origin: opts.origin } : {}),
   }).catch(() => {
     // Tura nie ruszyła (bot zniknął, dostawca padł) — `busy` już zgasło wyżej,
     // ale UI wciąż widzi zapalone z chwili przyjęcia wiadomości.
@@ -1400,7 +1247,10 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     }
     case "runtime.error":
-      settleMailTurn(event.threadId, "failed");
+      // Tura padła: nikt nie odpisze koledze, więc znacznik peer gaśnie razem
+      // z nią — inaczej NASTĘPNA, niezwiązana tura wysłałaby swój tekst do
+      // nadawcy sprzed awarii.
+      peerTurn.delete(bot.id);
       pushMessage({ role: "bot", kind: "activity", tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false } });
       endTurnPush(bot.id, "failed", event.message.slice(0, 120));
       // watchdog: provider padl bez turn.completed -> zwolnij busy
@@ -1417,11 +1267,9 @@ bus.subscribe((event: RuntimeEvent) => {
         // zwalniają bota, opróżniają kolejki od zawsze — to jedyne tego nie
         // robiło.
         drainQueuedUserMessages(bot.id);
-        drainQueuedBotMail(bot.id);
       }
       break;
     case "turn.completed": {
-      settleMailTurn(event.threadId, "delivered");
       // the last live frame becomes a settled inline screen message —
       // the screenshot-in-chat moment
       const frame = stopScreenPoller(bot.id);
@@ -1429,6 +1277,17 @@ bus.subscribe((event: RuntimeEvent) => {
       store.patchBot(bot.id, { busy: false, unread: true });
       if (busyWatchdog.has(bot.id)) { clearTimeout(busyWatchdog.get(bot.id)!); busyWatchdog.delete(bot.id); }
       const lastReply = store.messagesFor(bot.threadId).filter((m) => m.role === "bot" && m.kind === "text" && m.text).at(-1)?.text ?? "";
+      // Safety net for the whole bot↔bot design: a bot that was answering a
+      // peer and did not call a peer tool itself still gets its prose routed
+      // back. Without it the most natural thing a model does — just write the
+      // answer — would end the conversation in silence.
+      const answering = peerTurn.get(bot.id);
+      peerTurn.delete(bot.id);
+      if (answering && !answering.replied) {
+        void routePeerReply(bot.id, answering, lastReply).catch((error) =>
+          console.warn(`[multibot] peer reply from ${bot.id} failed:`, error instanceof Error ? error.message : error),
+        );
+      }
       endTurnPush(bot.id, "finished", lastReply.slice(0, 120) || t("skończył pracę", "finished working"));
       clearTurnPolicy(bot.threadId);
       activeCommsDepth.delete(bot.id); // multibot (F9): tura skończona — licznik też
@@ -1448,7 +1307,6 @@ bus.subscribe((event: RuntimeEvent) => {
         broadcast({ kind: "bot.deleted", botId: bot.id, visibility: bot.visibility, ownerId: bot.ownerId, allowedUserIds: bot.allowedUserIds });
       }
       drainQueuedUserMessages(bot.id); // multibot 0.1.44: spam użytkownika z trakcie tury
-      drainQueuedBotMail(bot.id);
       break;
     }
   }
@@ -1611,7 +1469,7 @@ async function handleModelCommand(bot: ReturnType<Store["bot"]>, text: string): 
 // ── /goal: persistent multi-turn goal pursuit ───────────────────────────
 // A goal is not one reply: the harness runs the bot for several turns, each
 // turn advancing the same task with the full progress so far. The loop is a
-// smaller sibling of runCollab — same askBotAndWait, same isolated goal
+// sibling of the peer conversation — same askBotAndWait, same isolated goal
 // thread, same done-marker protocol — but with hard budgets and durable
 // progress so `--resume` can continue after a restart.
 
@@ -1623,7 +1481,7 @@ function goalPrompt(goal: GoalRecord, bot: { id: string; name: string }): string
     ? "This goal is computer-only: work through your computer (browser, terminal, files). Skip web search and CLI shortcuts — the user wants the machine used."
     : o.noComputer
       ? "This goal is computer-free: use web search, CLI and file tools only. Do not reach for the computer."
-      : `Escalate until you succeed: 1) web search / CLI / file tools, 2) your computer — browse, read files, run commands in its terminal, WITHOUT asking first (it is your machine), 3) other bots (${o.collab ? "start_collab, ask_bot" : "ask_bot"}) — they are there when a peer knows the domain better or the work splits cleanly, but pulling one in is your call, not a required step${o.agents > 0 ? `, 4) temporary subagents (create_agent, up to ${o.agents} in parallel)` : ""}. Stop only when every path that could plausibly work is exhausted, then state plainly what blocked you.`;
+      : `Escalate until you succeed: 1) web search / CLI / file tools, 2) your computer — browse, read files, run commands in its terminal, WITHOUT asking first (it is your machine), 3) other bots (${o.collab ? "start_collab, ask_bot" : "ask_bot"}) — bring one in whenever a peer knows the domain better or the work splits cleanly${o.agents > 0 ? `, 4) temporary subagents (create_agent, up to ${o.agents} in parallel)` : ""}. Stop only when every path that could plausibly work is exhausted, then state plainly what blocked you.`;
   const autonomy = o.auto
     ? "Autonomous mode: make decisions and continue without asking the user. Ask only for data you cannot obtain any other way."
     : o.ask
@@ -1858,7 +1716,7 @@ async function warmBot(botId: string): Promise<boolean> {
     integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
   }
   if (instance.adapter.capabilities.agentsMcp === true) {
-    integrations.agents = agentsIntegration(bot.id, 0);
+    integrations.agents = agentsIntegration(bot.id);
   }
   // Polityka tury MUSI stać przed spawnem: to z niej driver bierze
   // `permissionMode` i listę wyłączonych narzędzi, a jedno i drugie siedzi w
@@ -1940,8 +1798,6 @@ opts?: {
     userMessagePosted?: boolean;
     /** multibot: kto zaczął turę — decyduje o pushach start/koniec. */
     origin?: TurnOrigin;
-    /** Mail wake turns may send one explicit reply at depth 1. */
-    mailTurn?: boolean;
     /** nazwa rutyny do treści pushu „rutyna X wystartowała" */
     routineName?: string;
     /** Authenticated human who started this turn. */
@@ -1976,6 +1832,10 @@ opts?: {
   // liczba jednoczesnych tur (OMB_MAX_PARALLEL_TURNS) — nie kolejność. Tura
   // zagnieżdżona (izolowana albo delegowana, depth > 0) slotu nie bierze: jej
   // wołający właśnie jeden trzyma, więc czekałaby sama na siebie.
+  // ponytail: tura peera to teraz zwykła tura głównego wątku, więc BIERZE slot
+  // — rozmowa botów potrafi wygłodzić wiadomość człowieka przy małym
+  // OMB_MAX_PARALLEL_TURNS. Sufit świadomy: gdyby doskwierało, należy się
+  // osobna pula slotów dla tur o origin "bot", nie zdejmowanie bramki.
   const gated = !isolated && commsDepth === 0;
   const userMessage = isolated || opts?.userMessagePosted ? null : store.appendMessage(bot.threadId, {
     role: "user",
@@ -2091,16 +1951,12 @@ opts?: {
         console.warn(`[multibot] computer unavailable for ${bot.id}:`, e instanceof Error ? e.message : e);
       }
       // MultiBot management MCP: same local stdio shape as upstream
-      // MultiBot. Mount on every user turn, including a one-bot workspace;
-      // this proxy also carries memory, skills, routines, profile, device,
-      // files and terminal. Depth-limited peer turns get no child to prevent
-      // recursion.
-      if (
-        !isolated &&
-        (commsDepth < MAX_COMMS_DEPTH || (opts?.mailTurn === true && commsDepth === MAX_COMMS_DEPTH)) &&
-        instance.adapter.capabilities.agentsMcp === true
-      ) {
-        integrations.agents = agentsIntegration(bot.id, commsDepth);
+      // MultiBot. Mount on EVERY non-isolated turn, peer turns included —
+      // a bot answering another bot needs the same tools it always has, or
+      // it cannot ask back, pull in a third bot, or finish the job. The
+      // conversation is bounded by the room budget, not by a depth filter.
+      if (!isolated && instance.adapter.capabilities.agentsMcp === true) {
+        integrations.agents = agentsIntegration(bot.id);
       }
       // All non-Hermes providers receive the same provider-neutral web MCP.
       // Slafy exposes web_search/web_extract natively through Hermes instead;
@@ -2124,7 +1980,10 @@ opts?: {
       // get explicit peer delegation. Fetch replies before their turn and
       // attach them to the prompt; native MCP providers keep live tools.
       let taggedReplies = "";
-      if (!isolated && (!integrations.agents || instance.driverKind === "codex") && tagged.length && commsDepth < MAX_COMMS_DEPTH && canUseIntegration(bot.threadId, "delegation")) {
+      // Turą peera ta ścieżka NIE biegnie: koperta zawiera "@Nadawca", więc
+      // odbiorca odbiłby ją natychmiast z powrotem. Odpowiedź peera idzie
+      // przez deliverPeerMessage po zakończeniu tury.
+      if (!isolated && opts?.origin !== "bot" && (!integrations.agents || instance.driverKind === "codex") && tagged.length && canUseIntegration(bot.threadId, "delegation")) {
         const replies = await Promise.all(
           tagged.map(async (peer) => ({
             peer,
@@ -2190,9 +2049,9 @@ opts?: {
         endTurnPush(bot.id, "failed", message.slice(0, 120));
         clearTurnPolicy(bot.threadId);
         activeCommsDepth.delete(bot.id); // multibot (F9): tura padła — licznik też
+        peerTurn.delete(bot.id);
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
         drainQueuedUserMessages(bot.id);
-        drainQueuedBotMail(bot.id);
       }
     }
   })();
@@ -2613,7 +2472,7 @@ async function deleteBotRecord(bot: BotRecord): Promise<{ engineSynced: boolean 
 }
 
 // multibot: tworzenie grupy nie potrzebuje silnika slafy — rozmowa grupowa i
-// tak idzie przez harness (runGroupRound/askBotAndWait). Przy
+// tak idzie przez harness (deliverPeerMessage/askBotAndWait). Przy
 // MULTIBOT_ENGINE=off (telefon) id nadajemy lokalnie, zamiast oddawać 502 z
 // ensureEngine(). Z silnikiem włączonym ścieżka zostaje bez zmian.
 async function createGroupRecord(name: string, engineIds: string[]): Promise<{ status: number; body: unknown }> {
@@ -2954,6 +2813,20 @@ const server = createServer(async (req, res) => {
         const requireFull = () => {
           if (access !== "full") throw Object.assign(new Error("Full Access required for this action"), { status: 403 });
         };
+        // multibot: rutyny CUDZEGO bota. `bot_id` jest opcjonalne (brak = swoje),
+        // a cudzy bot musi być widoczny dla wołającego — i, gdy wołający jest
+        // szefem sztabu, siedzieć w jego sekcji. Te same dwie bramki, którymi
+        // chodzi `agent.update`, bo to ta sama władza nad cudzym botem.
+        const routineOwner = (): string => {
+          const wanted = String(body.bot_id ?? body.botId ?? "").trim();
+          if (!wanted || wanted === fromBotId) return fromBotId;
+          const target = store.bot(wanted);
+          if (!target || !canBotContact(caller, target)) throw Object.assign(new Error("no such target bot"), { status: 404 });
+          if (caller.chiefOfStaff && (target.section?.trim() ?? "") !== (caller.section?.trim() ?? "")) {
+            throw Object.assign(new Error("chief delegation is limited to its section"), { status: 403 });
+          }
+          return target.id;
+        };
         const bot = () => store.bot(fromBotId)!;
         switch (action) {
           case "profile.get": return json(res, 200, bot());
@@ -3069,9 +2942,15 @@ const server = createServer(async (req, res) => {
           case "memory.markdown.get": return json(res, 200, workspace.markdown(fromBotId));
           case "mail.inbox": return json(res, 200, { threads: botMail.forBot(fromBotId) });
           case "mail.send": {
-            if (workspace.permissions(fromBotId).delegation === false) return json(res, 403, { error: "bot-to-bot delegation is disabled for this bot" });
-            const result = sendBotMail(fromBotId, String(body.toBotId ?? ""), String(body.message ?? ""), Number(body.depth) || 0);
-            return json(res, result.status, result.body);
+            const sent = await deliverPeerMessage(fromBotId, String(body.toBotId ?? ""), String(body.message ?? ""));
+            if (sent.status === "refused") return json(res, 200, { error: sent.note });
+            return json(res, 202, {
+              accepted: true,
+              roomId: sent.roomId,
+              delivery: sent.status,
+              threadId: botMailThreadId(fromBotId, String(body.toBotId ?? "")),
+              botName: store.bot(String(body.toBotId ?? ""))?.name,
+            });
           }
           case "memory.add": { requireFull(); const fact = workspace.addFact(fromBotId, body); broadcast({ kind: "workspace", botId: fromBotId, resource: "memory" }); return json(res, 201, fact); }
           case "memory.markdown.set": { requireFull(); const markdown = workspace.putMarkdown(fromBotId, body.content); broadcast({ kind: "workspace", botId: fromBotId, resource: "memory" }); return json(res, 200, markdown); }
@@ -3083,29 +2962,27 @@ const server = createServer(async (req, res) => {
           case "skills.create": { requireFull(); const skill = workspace.addSkill(fromBotId, body); appendBotEvent(fromBotId, { type: "skill-created", value: skill.name }); broadcast({ kind: "workspace", botId: fromBotId, resource: "skills" }); return json(res, 201, skill); }
           case "skills.update": { requireFull(); const skill = workspace.patchSkill(fromBotId, String(body.name), body); broadcast({ kind: "workspace", botId: fromBotId, resource: "skills" }); return json(res, 200, skill ?? { error: "no such skill" }); }
           case "skills.delete": { requireFull(); const ok = workspace.deleteSkill(fromBotId, String(body.name)); broadcast({ kind: "workspace", botId: fromBotId, resource: "skills" }); return json(res, 200, { ok }); }
-          case "routines.list": return json(res, 200, harnessRoutines.list(fromBotId).map((routine) => routineView(fromBotId, routine)));
-          case "routines.create": { requireFull(); const routine = harnessRoutines.create(fromBotId, body); appendBotEvent(fromBotId, { type: "routine-created", value: routine.name }); broadcast({ kind: "workspace", botId: fromBotId, resource: "routines" }); return json(res, 201, routineView(fromBotId, routine)); }
+          case "routines.list": return json(res, 200, harnessRoutines.list(routineOwner()).map((routine) => routineView(routineOwner(), routine)));
+          case "routines.create": { requireFull(); const owner = routineOwner(); const routine = harnessRoutines.create(owner, body); appendBotEvent(owner, { type: "routine-created", value: routine.name }); broadcast({ kind: "workspace", botId: owner, resource: "routines" }); return json(res, 201, routineView(owner, routine)); }
           // multibot: bot umiał TYLKO założyć rutynę — nie umiał jej wyłączyć
           // ani przestawić, więc po zmianie planu na serwerze zostawały dwie
           // działające naraz. Ta sama ścieżka co PATCH /api/bots/:id/routines/:rid.
           case "routines.update": {
             requireFull();
+            const owner = routineOwner();
             const patch: Partial<Pick<HarnessRoutine, "name" | "prompt" | "schedule" | "enabled">> = {};
             for (const key of ["name", "prompt", "schedule", "enabled"] as const) {
               if (body[key] !== undefined) (patch as Record<string, unknown>)[key] = body[key];
             }
-            const routine = harnessRoutines.update(fromBotId, String(body.id), patch);
+            const routine = harnessRoutines.update(owner, String(body.id), patch);
             if (!routine) return json(res, 404, { error: "no such routine" });
-            broadcast({ kind: "workspace", botId: fromBotId, resource: "routines" });
-            return json(res, 200, routineView(fromBotId, routine));
+            broadcast({ kind: "workspace", botId: owner, resource: "routines" });
+            return json(res, 200, routineView(owner, routine));
           }
-          case "routines.run": { requireFull(); const routine = await harnessRoutines.runNow(fromBotId, String(body.id)); broadcast({ kind: "workspace", botId: fromBotId, resource: "routines" }); return json(res, 200, routine ? routineView(fromBotId, routine) : { error: "no such routine" }); }
-          case "routines.delete": { requireFull(); const ok = harnessRoutines.delete(fromBotId, String(body.id)); broadcast({ kind: "workspace", botId: fromBotId, resource: "routines" }); return json(res, 200, { ok }); }
+          case "routines.run": { requireFull(); const owner = routineOwner(); const routine = await harnessRoutines.runNow(owner, String(body.id)); broadcast({ kind: "workspace", botId: owner, resource: "routines" }); return json(res, 200, routine ? routineView(owner, routine) : { error: "no such routine" }); }
+          case "routines.delete": { requireFull(); const owner = routineOwner(); const ok = harnessRoutines.delete(owner, String(body.id)); broadcast({ kind: "workspace", botId: owner, resource: "routines" }); return json(res, 200, { ok }); }
           case "agent.create": {
             requireFull();
-            if ((activeCommsDepth.get(fromBotId) ?? 0) >= MAX_COMMS_DEPTH) {
-              return json(res, 403, { error: "subagents cannot create another subagent" });
-            }
             let profile: Partial<BotRecord>;
             try {
               profile = managedBotPatch(body, { temporary: true });
@@ -3196,70 +3073,54 @@ const server = createServer(async (req, res) => {
             const result = await createGroupRecord(String(body.name ?? "Group"), engineIds);
             return json(res, result.status, result.body);
           }
+          // multibot: grupa to jeden pokój i jeden budżet. Wiadomość idzie do
+          // botów wymienionych po @nazwie, a bez wzmianki do wszystkich —
+          // każdy dostaje ZWYKŁĄ turę na swoim wątku i odpowiada we własnym
+          // czasie, więc odpowiedź HTTP wraca od razu (202), nie po sumie tur.
           case "groups.send": {
             requireFull();
             const group = groupStore.get(String(body.groupId));
             if (!group || !group.bot_ids.every((botId) => canBotContact(caller, store.bot(botId)))) return json(res, 404, { error: "no such group" });
             const message = String(body.message ?? "").trim();
             if (!message) return json(res, 422, { error: "message required" });
-            groupStore.append(group.id, { from: "you", text: message });
-            // multibot: boty odpowiadają RÓWNOLEGLE — sekwencja trzymała
-            // odpowiedź HTTP przez sumę tur wszystkich botów (N × do 4 min),
-            // równoległość przez czas najwolniejszego. Każdy bot dostaje
-            // transkrypt z chwili wysyłki (bez odpowiedzi kolegów z tej samej
-            // rundy — jak ludzie odpisujący jednocześnie na ten sam czat);
-            // dopisanie po ustaleniu, w stałej kolejności grupy.
-            const transcript = (groupStore.get(group.id)?.messages ?? []).map((item) => ({
-              role: item.from === "you" ? ("user" as const) : ("assistant" as const),
-              text: item.text,
-            }));
+            groupStore.append(group.id, { from: fromBotId, text: message });
             const groupBots = group.bot_ids
               .map((engineId) => store.botByThread(threadIdOfEngineBot(engineId) ?? ""))
-              .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot));
-            const turns = await runGroupRound(groupBots, (bot) =>
-              askBotAndWait(bot.id, message, 0, {
-                threadId: groupThreadId(group.id, bot.id),
-                transcript,
-              }),
-            );
-            for (const turn of turns) groupStore.append(group.id, { from: turn.bot_id, text: turn.reply });
-            return json(res, 200, { turns, owner: turns[0]?.bot_id ?? null, messages: groupStore.get(group.id)?.messages ?? [] });
+              .filter((bot): bot is NonNullable<typeof bot> => Boolean(bot) && bot?.id !== fromBotId);
+            const mentioned = mentionedBots(message, groupBots);
+            const targets = mentioned.length ? mentioned : groupBots;
+            if (!targets.length) return json(res, 422, { error: "the group has nobody else to talk to" });
+            const room =
+              rooms.forGroup(group.id) ??
+              rooms.create({
+                task: message.slice(0, 200),
+                bot_ids: [fromBotId],
+                ownerThread: caller.threadId,
+                ownerBotId: fromBotId,
+                groupId: group.id,
+              });
+            const sent = [];
+            for (const target of targets) sent.push(await deliverPeerMessage(fromBotId, target.id, message, room.id));
+            const refused = sent.find((one) => one.status === "refused");
+            return json(res, 202, {
+              accepted: true,
+              roomId: room.id,
+              targets: targets.map((bot) => bot.id),
+              ...(refused ? { error: refused.note } : {}),
+            });
           }
           // multibot: bot opens a durable collaboration room with another bot
-          // to work on a task TOGETHER (read-only for the user). Runs async —
-          // the caller keeps its own turn; the room's final report is appended
-          // to the caller's chat when it settles.
+          // to work on a task TOGETHER (read-only for the user). The first
+          // message is delivered right away; the room's report lands in the
+          // caller's chat when the conversation settles.
           case "collab.start": {
-            if (workspace.permissions(fromBotId).delegation === false) {
-              return json(res, 403, { error: "bot-to-bot delegation is disabled for this bot" });
-            }
-            if ((activeCommsDepth.get(fromBotId) ?? 0) >= MAX_COMMS_DEPTH) {
-              return json(res, 403, { error: "subagents cannot start another collaboration" });
-            }
             const target = store.bot(String(body.bot_id ?? ""));
-            if (!target) return json(res, 404, { error: "no such target bot" });
-            if (!canBotContact(caller, target)) return json(res, 404, { error: "no such target bot" });
+            if (!target || !canBotContact(caller, target)) return json(res, 404, { error: "no such target bot" });
             const task = String(body.task ?? "").trim();
             if (!task) return json(res, 422, { error: "task required" });
-            if (target.busy) return json(res, 200, { busy: true });
-            const room = rooms.create({
-              task,
-              bot_ids: [fromBotId, target.id],
-              ownerThread: caller.threadId,
-              ownerBotId: fromBotId,
-            });
-            postRoomChip(fromBotId, room);
-            void runCollab(room.id).then(() => {
-              const final = rooms.get(room.id);
-              if (!final || final.status === "running") return;
-              const report = store.appendMessage(caller.threadId, {
-                role: "bot",
-                kind: "text",
-                text: `Room "${final.name}" finished (${final.status}).\n\n${roomSummary(final.id)}`,
-              });
-              broadcast({ kind: "message", threadId: caller.threadId, message: report });
-            });
-            return json(res, 201, { room: rooms.get(room.id) });
+            const started = await deliverPeerMessage(fromBotId, target.id, task);
+            if (started.status === "refused") return json(res, 200, { error: started.note });
+            return json(res, 201, { room: started.roomId ? rooms.get(started.roomId) : null });
           }
           case "file.read": {
             const file = resolve(String(body.path ?? ""));
@@ -3286,86 +3147,18 @@ const server = createServer(async (req, res) => {
           default: return json(res, 404, { error: `unknown agent action: ${action}` });
         }
       }
+      // multibot: ask_bot NIE czeka. Wiadomość do kolegi to jego prawdziwa
+      // tura, a odpowiedź wraca osobną turą do wołającego — wołający kończy
+      // swoją i nie trzyma otwartego HTTP przez cudzą pracę.
       if (method === "POST" && path === "/api/internal/ask-bot") {
         const body = await readBody(req);
         const fromBotId = String(body.fromBotId ?? "");
         const toBotId = String(body.toBotId ?? "");
         const message = String(body.message ?? "").trim();
-        // multibot (F9): głębokość bierzemy z WIĘKSZEJ z dwóch — deklaracji proxy
-        // i tury, która u wołającego trwa. Proxy bota silnika deklaruje 0 na
-        // zawsze (env zamrożony w profilu), więc bez mapy łańcuch nie miałby dna.
-        const depth = chainDepth(body.depth, activeCommsDepth.get(fromBotId));
         if (!toBotId || !message) return json(res, 400, { error: "toBotId and message required" });
-        if (toBotId === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
-        const from = store.bot(fromBotId);
-        if (!from) return json(res, 404, { error: "no such caller bot" });
-        if (workspace.permissions(fromBotId).delegation === false) {
-          return json(res, 403, { error: "bot-to-bot delegation is disabled for this bot" });
-        }
-        if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop" });
-        const target = store.bot(toBotId);
-        if (!target) return json(res, 404, { error: "no such bot" });
-        if (!canBotContact(from, target)) return json(res, 404, { error: "no such bot" });
-        if (from.chiefOfStaff && (target.section?.trim() ?? "") !== (from.section?.trim() ?? "")) return json(res, 403, { error: "chief delegation is limited to its section" });
-        if (target.busy) return json(res, 200, { busy: true });
-        // ask_bot is the synchronous compatibility path; persist it in the
-        // same mailbox as asynchronous send_bot_mail so no agent exchange is
-        // lost when its live room expires.
-        const mailRequest = appendBotMail({ from: fromBotId, to: toBotId, text: message, status: "delivered" });
-        // multibot: widoczność wymiany ask_bot. Wcześniej szara pigułka
-        // aktywności ukrywała odpowiedź bota na zawsze, choć jej tokeny były
-        // już opłacone — teraz każda wymiana dostaje pełny, klikalny pokój
-        // (dokładnie ten sam widok co przy start_collab), a transkrypt żyje
-        // Trwały transkrypt zostaje dostępny z pigułki w historii.
-        const room = rooms.create({
-          task: message,
-          bot_ids: [fromBotId, toBotId],
-          ownerThread: from.threadId,
-          ownerBotId: fromBotId,
-        });
-        rooms.append(room.id, fromBotId, message);
-        postRoomChip(fromBotId, room);
-        broadcast({ kind: "room", room: rooms.get(room.id) });
-        const prefixed = `[Message from @${from.name}, another bot in this MultiBot workspace. Reply to them.]\n\n${message}`;
-        // multibot: kawałki odpowiedzi lecą do pokoju w trakcie tury — bez
-        // tego pokój był pusty do 20 minut i wyglądał na zacięty. Cała tura
-        // to JEDNA rosnąca wiadomość, nie dymek na każdy spłuk bufora.
-        let liveMsgId: string | null = null;
-        rooms.setActiveBot(room.id, toBotId);
-        broadcast({ kind: "room", room: rooms.get(room.id) });
-        const reply = await askBotAndWait(toBotId, prefixed, depth, {
-          // multibot: tura odbiorcy idzie na izolowaną nitkę POKOJU (jak tura
-          // uczestnika w runCollab) — ani koperta, ani odpowiedź, ani pigułki
-          // aktywności nie trafiają na jego główny kanał czatu; cała wymiana
-          // jest widoczna wyłącznie tutaj, w transkrypcie pokoju (rooms.append
-          // + onText poniżej). Kontekst rozmowy odbiorcy zostaje: startTurn
-          // bez `transcript` bierze ostatnie wpisy z głównej nitki bota.
-          threadId: roomThreadId(room.id, toBotId),
-          // multibot: pytany bot może mieć komputer i pracować dłużej niż
-          // dawne 4 minuty — sufit tury pokoju, jak w runCollab.
-          timeoutMs: 20 * 60_000,
-          onText: (t) => {
-            if (liveMsgId) rooms.appendToMessage(room.id, liveMsgId, t);
-            else liveMsgId = rooms.append(room.id, toBotId, t.trimStart())?.id ?? null;
-            broadcast({ kind: "room", room: rooms.get(room.id) });
-          },
-        });
-        rooms.setActiveBot(room.id, null);
-        broadcast({ kind: "room", room: rooms.get(room.id) });
-        if (!liveMsgId) rooms.append(room.id, toBotId, reply);
-        appendBotMail({ from: toBotId, to: fromBotId, text: reply, status: "delivered", replyToId: mailRequest.id });
-        broadcast({ kind: "room", room: rooms.get(room.id) });
-        // multibot: rozmowa TRWA. Pokój ask_bot nie zamyka sie na jednej
-        // odpowiedzi — po pierwszej wymianie przejmuje go runCollab (te same
-        // rundy, ten sam marker [TASK COMPLETE], ten sam sufit), wiec A moze
-        // ocenic prace B, B poprawic, i tak dalej. Wolajacy widzi pierwsza
-        // odpowiedz synchronicznie jak dotad; reszta leci w tle, w pokoju.
-        void (async () => {
-          // The room uses isolated threads, so the caller's main turn does not
-          // block the next room round.
-          await runCollab(room.id, { maxRounds: collabMaxRounds() });
-        })();
-        return json(res, 200, { botName: target.name, text: reply });
+        const sent = await deliverPeerMessage(fromBotId, toBotId, message);
+        if (sent.status === "refused") return json(res, 200, { error: sent.note });
+        return json(res, 200, { delivered: true, roomId: sent.roomId, botName: store.bot(toBotId)?.name });
       }
       return json(res, 404, { error: "unknown internal endpoint" });
     }
@@ -3611,7 +3404,9 @@ const server = createServer(async (req, res) => {
       const owner = store.bot(botIds[0])!;
       const room = rooms.create({ task, bot_ids: botIds, ownerThread: owner.threadId, ownerBotId: botIds[0] });
       postRoomChip(botIds[0], room);
-      void runCollab(room.id);
+      // The first bot hands the task to the others; from there the room is
+      // just their conversation, one real turn per message.
+      for (const peerId of botIds.slice(1)) void deliverPeerMessage(botIds[0], peerId, task, room.id);
       return json(res, 201, room);
     }
     m = path.match(/^\/api\/rooms\/([\w-]+)$/);
@@ -3636,16 +3431,13 @@ const server = createServer(async (req, res) => {
           console.warn(`[multibot] engine prewarm failed for ${bot.id}:`, error instanceof Error ? error.message : error),
         );
       }
-      // multibot: w trybie „każdy bot to ciepły worker" nowy bot dostaje proces
-      // od razu, w tle — inaczej pierwsza wiadomość do świeżo utworzonego bota
-      // płaci pełny zimny start CLI (na telefonie kilkanaście sekund), czyli
-      // dokładnie w tym momencie, w którym użytkownik patrzy na pusty ekran.
-      // Przy limicie > 0 tego nie robimy: świeży bot wyeksmitowałby z LRU tego,
-      // z którym ktoś właśnie rozmawia, a rozgrzewkę i tak dostanie przy
-      // otwarciu (POST /api/bots/:id/warm).
-      if (warmWorkerLimit() <= 0) {
-        void warmBot(bot.id).catch((error) =>
-          console.warn(`[multibot] warmup failed for ${bot.id}:`, error instanceof Error ? error.message : error),
+      // multibot: nowy bot odzywa się PIERWSZY i mówi, co naprawdę potrafi
+      // TERAZ. Rozgrzewka CLI nic nie mówiła użytkownikowi (patrzył w pusty
+      // ekran), a bot dowiadywał się o swoich brakach dopiero, gdy pierwsze
+      // zadanie się o nie rozbiło. Tura rozgrzewa proces przy okazji.
+      if (onboardingTurnEnabled()) {
+        void startTurn(bot.id, ONBOARDING_FIRST_TURN, { userMessagePosted: true, origin: "bot" }).catch((error) =>
+          console.warn(`[multibot] onboarding turn failed for ${bot.id}:`, error instanceof Error ? error.message : error),
         );
       }
       return json(res, 201, { bot: { ...store.bot(bot.id)!, messages: store.messagesFor(bot.threadId) } });
@@ -3973,10 +3765,10 @@ const server = createServer(async (req, res) => {
         broadcast({ kind: "message", threadId: bot.threadId, message: botMessage });
         return json(res, 200, { ok: true, command: "model" });
       }
-      // multibot: user @mentions another bot with a task → the bots work on it
-      // together in a temporary read-only room. Pokój chodzi w tle, a tura
-      // autora rusza dopiero po jego zakończeniu, z podsumowaniem doklejonym do
-      // zadania — użytkownik w swojej bańce widzi to, co naprawdę napisał.
+      // multibot: user @mentions another bot with a task → the author hands it
+      // to the tagged peers as real turns and the answers come back the same
+      // way, in the room the user can open from the chat. Odpowiedź HTTP
+      // wraca od razu; rozmowa toczy się dalej sama.
       const collab = maybeStartCollab(m[1], taskText);
       if (collab) {
         const botId = m[1];
@@ -3990,30 +3782,9 @@ const server = createServer(async (req, res) => {
         });
         broadcast({ kind: "message", threadId: owner.threadId, message: userMessage });
         postRoomChip(botId, collab.room);
-        const peersNamed = collab.room.bot_ids
-          .filter((id) => id !== botId)
-          .map((id) => `@${store.bot(id)?.name ?? id}`)
-          .join(", ");
-        void runCollab(collab.room.id).then(() =>
-          startTurn(
-            botId,
-            `${collab.task}\n\n[Collaboration room with ${peersNamed} finished — the user can open the full room transcript from the chat; use this summary to answer them]\n${roomSummary(collab.room.id)}`,
-            { reasoning, attachments: turnAttachments, userMessagePosted: true, actor },
-          ).catch(() => {
-            // Tura autora nie ruszyła: bot zdążył zniknąć, dostawca padł, albo
-            // — najczęściej — użytkownik dopisał w międzyczasie zwykłą
-            // wiadomość i bot jest zajęty. Wynik pokoju i tak musi wrócić do
-            // czatu, inaczej znika po cichu razem z obietnicą odpowiedzi.
-            const final = rooms.get(collab.room.id);
-            if (!final) return;
-            const report = store.appendMessage(owner.threadId, {
-              role: "bot",
-              kind: "text",
-              text: `Room "${final.name}" finished (${final.status}).\n\n${roomSummary(final.id)}`,
-            });
-            broadcast({ kind: "message", threadId: owner.threadId, message: report });
-          }),
-        );
+        for (const peerId of collab.room.bot_ids.filter((id) => id !== botId)) {
+          void deliverPeerMessage(botId, peerId, collab.task, collab.room.id);
+        }
         return json(res, 202, { ok: true, room: collab.room.id });
       }
       // multibot: KAŻDA wiadomość idzie przez kolejkę — i ta wysłana w trakcie
@@ -4098,13 +3869,12 @@ const server = createServer(async (req, res) => {
       store.patchBot(bot.id, { busy: false });
       clearTurnPolicy(bot.threadId);
       activeCommsDepth.delete(bot.id);
-      settleMailTurn(bot.threadId, "failed");
+      peerTurn.delete(bot.id); // przerwana tura nie odpisuje koledze
       stopScreenPoller(bot.id);
       releaseTurnSlot(bot.id);
       broadcast({ kind: "bot", bot: store.bot(bot.id) });
       await instance?.adapter.interruptTurn(bot.threadId);
       drainQueuedUserMessages(bot.id);
-      drainQueuedBotMail(bot.id);
       return json(res, 200, { ok: true });
     }
 
@@ -5072,7 +4842,6 @@ server.listen(PORT, HOST, () => {
   // multibot (A2): rozgrzewka rusza PO podniesieniu HTTP i nie czeka na nic —
   // serwer odpowiada od pierwszej sekundy, a workery wstają w tle.
   void warmBots().catch((e) => console.warn("[multibot] warmup failed:", e));
-  recoverQueuedBotMail();
   // multibot: w trybie „każdy bot zawsze active" worker potrafi zniknąć bez
   // naszego udziału — Android przy braku pamięci ubija bezczynne procesy (LMK),
   // a wtedy bot cicho wraca do zimnego startu. Co minutę sprawdzamy więc, kto

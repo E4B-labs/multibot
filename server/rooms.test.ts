@@ -1,10 +1,10 @@
-// Ephemeral collaboration rooms, end to end: boots the real harness server
-// with the grokAgent driver pointed at the fake ACP CLI in "room" mode (each
-// turn replies with a contribution ending in the [TASK COMPLETE] marker).
-// Exercises: POST /api/rooms → runCollab settles to "done" → transcript holds
-// the marker-stripped contribution → the originator's chat got the clickable
-// "X texted Y" chip; plus the explicit user-@mention trigger opens a room and
-// folds the summary into the originator's turn.
+// Collaboration rooms, end to end: boots the real harness server with the
+// grokAgent driver pointed at the fake ACP CLI in "room" mode (the first turn
+// contributes plain work, the second ends with [TASK COMPLETE]).
+// Exercises: POST /api/rooms hands the task to the peer as a real turn → the
+// answers land in the room ledger → the marker settles it to "done" and the
+// originator's chat holds both the clickable "X texted Y" chip and the report;
+// plus the user-@mention trigger, which opens the same kind of room.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,6 +92,7 @@ beforeAll(async () => {
       HOME: home,
       USERPROFILE: home,
       OMB_PORT: String(PORT),
+        OMB_ONBOARDING_TURN: "0",
       MULTIBOT_COMPUTER: "off",
       ENGINE_URL: "http://127.0.0.1:1",
     },
@@ -138,7 +139,7 @@ describe("collaboration rooms", () => {
   });
 
   it(
-    "runs a room to done, strips the marker, and posts the chip on the originator's chat",
+    "hands the task over as a real turn, settles on the marker, and reports back to the originator",
     async () => {
       const selection = { instanceId: "grok", model: "fake-model" };
       const a = (await api("POST", "/api/bots")).body.bot;
@@ -151,46 +152,34 @@ describe("collaboration rooms", () => {
       const created = await api("POST", "/api/rooms", { task: "write a report together", bot_ids: [a.id, b.id] });
       expect(created.status).toBe(201);
       const roomId = created.body.id;
-      let sawActiveSpeaker = false;
 
-      // multibot: strumień do pokoju — wkładka pierwszej tury musi być widoczna
-      // ZANIM tura się domknie (fake celowo zwleka z końcem tury 1,2 s).
-      await waitFor(async () => {
-        const r = (await api("GET", `/api/rooms/${roomId}`)).body;
-        sawActiveSpeaker ||= r?.activeBotId === a.id;
-        return r?.status === "running" && (r?.transcript ?? []).some((m: any) => String(m.text).includes("room work from fake"));
-      }, 10_000, "streamed contribution while the turn is still running");
-      expect(sawActiveSpeaker).toBe(true);
-
-      // runCollab settles quickly — the fake replies with the done marker
-      await waitFor(async () => (await api("GET", `/api/rooms/${roomId}`)).body?.status === "done", 25_000, "room done");
+      await waitFor(async () => (await api("GET", `/api/rooms/${roomId}`)).body?.status === "done", 40_000, "room done");
 
       const room = (await api("GET", `/api/rooms/${roomId}`)).body;
-      expect(room.status).toBe("done");
-      expect(room.transcript.length).toBeGreaterThan(0);
-      // the marker is stripped from the visible transcript
-      expect(room.transcript[0].text).toBe("room work from fake");
-      expect(room.transcript[0].text).not.toContain("TASK COMPLETE");
-      // the first contributor is the originator (A)
-      expect(room.transcript[0].from).toBe(a.id);
-      // multibot: drugi bot dostał wkładkę pierwszego W PROMPCIE (drivery CLI
-      // nie czytają pola transcript) — atrapa potwierdza to prefiksem
-      expect(room.transcript.some((m: any) => m.from === b.id && m.text.startsWith("peer seen"))).toBe(true);
+      // the ledger opens with the originator's task, then the answers
+      expect(room.transcript[0]).toMatchObject({ from: a.id, text: "write a report together" });
+      expect(room.transcript.some((m: any) => m.from === b.id && m.text.includes("room work from fake"))).toBe(true);
+      // the done marker never shows up in the visible transcript
+      expect(JSON.stringify(room.transcript)).not.toContain("TASK COMPLETE");
+      // the peer read the task in its PROMPT: the fake only says "peer seen"
+      // when the incoming text reached it, and only a real turn carries it
+      expect(room.transcript.some((m: any) => m.text.startsWith("peer seen"))).toBe(true);
 
-      // the originator's 1:1 chat carries the clickable chip
+      // the originator's 1:1 chat carries the clickable chip and the report
       const aBot = await getBot(a.id);
       const chip = aBot.messages.find((m: any) => m.kind === "room" && m.room?.id === roomId);
       expect(chip).toBeTruthy();
       expect(chip.room.ownerBotId).toBe(a.id);
       expect(chip.room.bot_ids).toEqual(expect.arrayContaining([a.id, b.id]));
+      expect(aBot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.includes("finished (done)"))).toBe(true);
     },
-    40_000,
+    60_000,
   );
 
-  it("runCollab never nests rooms: a room with two full turns stays exactly one RoomRecord", async () => {
-    // pokój z pierwszego testu przeszedł pełną rundę dwóch wymian (licznik
-    // atrapy: pierwsza wkładka bez markera, druga domyka). Każda runda szła
-    // przez askBotAndWait — gdyby to on zakładał pokój, rekordów byłoby więcej.
+  it("a conversation never nests rooms: the whole exchange stays one RoomRecord", async () => {
+    // Kolejne wiadomości tej pary trafiają do ISTNIEJĄCEGO pokoju (reuse w
+    // deliverPeerMessage) — gdyby każda otwierała własny, budżet nie miałby
+    // czego liczyć i użytkownik dostawałby pigułkę za pigułką.
     const all = (await api("GET", "/api/rooms")).body.rooms;
     expect(all.filter((r: any) => r.bot_ids.includes(pairA) && r.bot_ids.includes(pairB))).toHaveLength(1);
   });
@@ -220,35 +209,9 @@ describe("collaboration rooms", () => {
     40_000,
   );
 
-  it(
-    "does not block an isolated room turn when its bot is busy in the main chat",
-    async () => {
-      const owner = (await api("POST", "/api/bots")).body.bot;
-      await api("PATCH", `/api/bots/${owner.id}`, { name: "Busy Owner", modelSelection: { instanceId: "grokBusy", model: "fake-model" } });
-      const peer = (await api("POST", "/api/bots")).body.bot;
-      await api("PATCH", `/api/bots/${peer.id}`, { name: "Room Peer", modelSelection: { instanceId: "grokRoom2", model: "fake-model" } });
-
-      await api("POST", `/api/bots/${owner.id}/messages`, { text: "keep working" });
-      await waitFor(async () => Boolean((await getBot(owner.id))?.busy), 3_000, "owner main turn");
-
-      const created = await api("POST", "/api/rooms", { task: "continue while owner works", bot_ids: [owner.id, peer.id] });
-      expect(created.status).toBe(201);
-      const roomId = created.body.id;
-
-      // The owner is still busy in its main chat, but the isolated room turn
-      // must be scheduled immediately instead of waiting for that work to end.
-      await waitFor(
-        async () => (await api("GET", `/api/rooms/${roomId}`)).body?.activeBotId === owner.id,
-        3_000,
-        "isolated owner turn",
-      );
-      await waitFor(async () => (await api("GET", `/api/rooms/${roomId}`)).body?.status === "done", 20_000, "busy-owner room done");
-    },
-    30_000,
-  );
 
   it(
-    "opens a room when the user @mentions another bot, strips the tag, and folds the summary into the originator's turn",
+    "opens a room when the user @mentions another bot, strips the tag, and hands the task over as a turn",
     async () => {
       const selection = { instanceId: "grok", model: "fake-model" };
       const asker = (await api("POST", "/api/bots")).body.bot;
@@ -256,8 +219,8 @@ describe("collaboration rooms", () => {
       const helper = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${helper.id}`, { name: "Helper Room", modelSelection: selection });
 
-      // Odpowiedź HTTP nie czeka na pokój — pokój chodzi rundami i wolno mu
-      // żyć całe godziny, więc czekanie tutaj wieszało czat.
+      // Odpowiedź HTTP nie czeka na rozmowę — wolno jej trwać godzinami, więc
+      // czekanie tutaj wieszało czat.
       const startedAt = Date.now();
       const sent = await api("POST", `/api/bots/${asker.id}/messages`, { text: "zrób raport @Helper Room" });
       expect(sent.status).toBe(202);
@@ -274,20 +237,19 @@ describe("collaboration rooms", () => {
       expect(room.task).toBe("zrób raport");
       expect(room.task).not.toContain("@");
 
-      // the asker's turn saw the folded summary (its reply contains the room text)
+      // the tagged peer answers in the room, on its own turn
       await waitFor(async () => {
-        const bot = await getBot(asker.id);
-        return !bot.busy && bot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.includes("room work from fake"));
-      }, 25_000, "folded summary");
-      const askerBot = await getBot(asker.id);
-      const reply = askerBot.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
-      expect(reply.text).toContain("room work from fake");
+        const { body: live } = await api("GET", "/api/rooms");
+        const current = live.rooms.find((r: any) => r.id === room.id);
+        return (current?.transcript ?? []).some((m: any) => m.from === helper.id && m.text?.includes("room work from fake"));
+      }, 30_000, "the peer's answer in the room");
 
-      // Bańka użytkownika zostaje tym, co napisał — jedna, bez transkryptu
-      // pokoju, który ma własny klikalny widok.
+      // Bańka użytkownika zostaje tym, co napisał — pokój ma własny klikalny
+      // widok, więc transkrypt nie wchodzi do czatu.
+      const askerBot = await getBot(asker.id);
       const mine = askerBot.messages.filter((m: any) => m.role === "user" && m.kind === "text");
-      expect(mine).toHaveLength(1);
       expect(mine[0].text).toBe("zrób raport @Helper Room");
+      expect(mine.some((m: any) => m.text?.includes("room work from fake"))).toBe(false);
     },
     40_000,
   );

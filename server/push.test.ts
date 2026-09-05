@@ -155,6 +155,7 @@ describe("push na telefon (fake ACP fleet)", () => {
         HOME: home,
         USERPROFILE: home,
         OMB_PORT: String(port),
+        OMB_ONBOARDING_TURN: "0",
         MULTIBOT_COMPUTER: "off",
         MULTIBOT_EXPO_PUSH_URL: `http://127.0.0.1:${pushPort}/push`,
       },

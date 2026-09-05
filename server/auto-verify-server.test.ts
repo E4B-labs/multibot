@@ -102,6 +102,7 @@ describe("autoweryfikacja e2e (atrapa ACP prosząca o zgodę)", () => {
         HOME: home,
         USERPROFILE: home,
         OMB_PORT: String(PORT),
+        OMB_ONBOARDING_TURN: "0",
         MULTIBOT_COMPUTER: "off",
         FAKE_CODEX_MODE: "question",
       },

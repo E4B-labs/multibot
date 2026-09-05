@@ -1,6 +1,8 @@
-// Collaboration rooms for bot-to-bot tasks. The harness owns the turns
-// (runCollab in index.ts), exactly like it owns ask_bot — bots never talk to
-// each other directly. Rooms stay available across restarts for inspection.
+// Collaboration rooms for bot-to-bot tasks. A room is the LEDGER of one
+// conversation: every peer message the harness delivers (deliverPeerMessage in
+// index.ts) is appended here, and the room's size is what the message budget
+// counts. The turns themselves run on the recipients' own main threads.
+// Rooms stay available across restarts for inspection.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -30,6 +32,20 @@ export interface RoomRecord {
   ownerBotId: string;
   /** Bot whose turn is currently being generated; null while the room is idle. */
   activeBotId?: string | null;
+  /** Group chat this room mirrors — one room per group, so a group keeps a
+   * single ledger (and a single budget) instead of a room per message. */
+  groupId?: string;
+}
+
+/** How many more messages this room may carry before the budget is spent. */
+export function budgetLeft(room: RoomRecord, max: number): number {
+  return Math.max(0, max - room.transcript.length);
+}
+
+/** A bot repeating itself verbatim is a loop, not a contribution. */
+export function isDuplicateOfLast(room: RoomRecord, from: string, text: string): boolean {
+  const last = [...room.transcript].reverse().find((message) => message.from === from);
+  return Boolean(last && last.text.trim() === text.trim());
 }
 
 /** A bot ends its room contribution with this exact line once the task is
@@ -67,7 +83,7 @@ export class RoomStore {
     writeFileSync(this.filePath, JSON.stringify([...this.rooms.values()], null, 2));
   }
 
-  create(input: { task: string; bot_ids: string[]; ownerThread: string; ownerBotId: string }): RoomRecord {
+  create(input: { task: string; bot_ids: string[]; ownerThread: string; ownerBotId: string; groupId?: string }): RoomRecord {
     const now = Date.now();
     const room: RoomRecord = {
       id: newId(),
@@ -80,6 +96,7 @@ export class RoomStore {
       ownerThread: input.ownerThread,
       ownerBotId: input.ownerBotId,
       activeBotId: null,
+      ...(input.groupId ? { groupId: input.groupId } : {}),
     };
     this.rooms.set(room.id, room);
     this.persist();
@@ -95,6 +112,32 @@ export class RoomStore {
 
   list(): RoomRecord[] {
     return [...this.rooms.values()].map((r) => this.get(r.id)!);
+  }
+
+  /** The open room a group already talks in, so a group keeps one ledger. */
+  forGroup(groupId: string): RoomRecord | null {
+    const room = [...this.rooms.values()].find((r) => r.groupId === groupId && r.status === "running");
+    return room ? this.get(room.id) : null;
+  }
+
+  /** The open room these bots already share — reuse it instead of opening a
+   * second ledger for the same conversation. */
+  runningWith(botIds: string[]): RoomRecord | null {
+    const room = [...this.rooms.values()].find(
+      (r) => r.status === "running" && !r.groupId && botIds.every((id) => r.bot_ids.includes(id)),
+    );
+    return room ? this.get(room.id) : null;
+  }
+
+  /** A conversation may pull in a third bot; the room follows it. */
+  addBot(id: string, botId: string): RoomRecord | null {
+    const room = this.rooms.get(id);
+    if (!room) return null;
+    if (!room.bot_ids.includes(botId)) {
+      room.bot_ids.push(botId);
+      this.persist();
+    }
+    return this.get(id);
   }
 
   append(id: string, from: string, text: string): RoomMessage | null {

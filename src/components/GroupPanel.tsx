@@ -94,6 +94,15 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
       return next;
     });
 
+  // multibot: odpowiedzi NIE czekamy. Bot dostaje zwykłą turę i odpisuje we
+  // własnym czasie, a wymiana leci ramkami SSE `room` do wspólnego pokoju
+  // grupy — trzymanie tu `await` na sumę tur wieszało panel na minuty.
+  const roomEntries: Entry[] = (state.rooms.find((room) => room.groupId === group.id)?.transcript ?? []).map(
+    (message) => ({ from: message.from, text: message.text, at: message.at }),
+  );
+
+  const allEntries = [...entries, ...roomEntries].sort((a, b) => a.at - b.at);
+
   const runTasks = () => {
     const assignments = buildGroupTasks(group.bot_ids, tasks);
     if (!assignments.length || busy) return;
@@ -106,8 +115,6 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
       method: "POST",
       body: JSON.stringify({ tasks: assignments }),
     })
-      .then((out: { tasks: Array<{ bot_id: string; reply: string }> }) =>
-        push(out.tasks.map((task) => ({ from: task.bot_id, text: task.reply, at: Date.now() }))))
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false));
   };
@@ -151,7 +158,7 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 pb-3">
-        {entries.length === 0 ? (
+        {allEntries.length === 0 ? (
           <div className="mt-8 flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
             <Users size={22} />
             <div className="text-[13px] font-medium text-ink">{polish ? "Brak wiadomości w tej sesji" : "No messages this session"}</div>
@@ -163,7 +170,7 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            {entries.map((e, i) => {
+            {allEntries.map((e, i) => {
               const entryBot = e.from === "you" ? null : members.find(
                 (b) => b.id === e.from || b.threadId === (e.from.startsWith("mb-") ? e.from.slice(3) : e.from),
               ) ?? null;
@@ -193,7 +200,7 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
             {busy && (
               <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
                 <Loader2 size={12} className="animate-spin" />
-                {polish ? "Pytam pokój…" : "Asking the room…"}
+                {polish ? "Wysyłam do pokoju…" : "Sending to the room…"}
               </div>
             )}
           </div>

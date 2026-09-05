@@ -192,6 +192,19 @@ describe("agents-proxy MCP surface", () => {
     });
   });
 
+  // multibot: rutyny CUDZEGO bota. `bot_id` musi siedzieć W `properties` -
+  // obok nich schemat waliduje się tak samo, a model po prostu nigdy go nie
+  // wyśle, więc "bot manages bots" cicho kończy się na własnych rutynach.
+  it("offers an optional bot_id on every routine tool, inside the schema", async () => {
+    const list = await rpc("tools/list");
+    for (const name of ["create_routine", "list_routines", "update_routine", "delete_routine", "run_routine"]) {
+      const tool = list.result.tools.find((t: { name: string }) => t.name === name);
+      expect(tool.inputSchema.properties.bot_id, name).toMatchObject({ type: "string" });
+      expect(tool.inputSchema.bot_id, name).toBeUndefined();
+      expect(tool.inputSchema.required ?? []).not.toContain("bot_id");
+    }
+  });
+
   it("list_bots renders the roster and authenticates with the shared token", async () => {
     const res = await callTool("list_bots", {});
     const text = res.result.content[0].text;
@@ -233,17 +246,20 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("- Plain (id: bot-plain, model: fake-model, busy)");
   });
 
-  it("ask_bot forwards sender + depth and returns the reply", async () => {
-    askResponse = { botName: "Helper", text: "hi from helper" };
+  // ask_bot no longer waits for anything: the message becomes a real turn in
+  // the other bot and its answer comes back as a separate turn of the caller's.
+  it("ask_bot forwards the sender and answers with the delivery receipt", async () => {
+    askResponse = { delivered: true, roomId: "room-7", botName: "Helper" };
     const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
-    expect(res.result.content[0].text).toContain("Helper replied:");
-    expect(res.result.content[0].text).toContain("hi from helper");
-    expect(lastAskBody).toMatchObject({ fromBotId: "bot-asker", toBotId: "bot-helper", message: "ping", depth: 0 });
+    expect(JSON.parse(res.result.content[0].text)).toEqual({ delivered: true, roomId: "room-7" });
+    expect(lastAskBody).toMatchObject({ fromBotId: "bot-asker", toBotId: "bot-helper", message: "ping" });
+    expect(lastAskBody).not.toHaveProperty("depth");
   });
 
   it("send_bot_mail returns an asynchronous acknowledgement", async () => {
     const res = await callTool("send_bot_mail", { bot_id: "bot-helper", message: "later" });
-    expect(res.result.content[0].text).toContain("Mail sent to bot-helper");
+    expect(res.result.content[0].text).toContain("Delivered to bot-helper");
+    expect(res.result.content[0].text).toContain("do not wait or resend");
     expect(lastActionBody).toMatchObject({
       fromBotId: "bot-asker",
       action: "mail.send",
@@ -258,18 +274,14 @@ describe("agents-proxy MCP surface", () => {
     expect(lastActionBody).toMatchObject({ fromBotId: "bot-asker", action: "mail.inbox" });
   });
 
-  it("renders a busy peer as a clean answer, not an error", async () => {
-    askResponse = { busy: true };
-    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
-    expect(res.result.content[0].text).toContain("busy");
-    expect(res.result.isError).toBeFalsy();
-  });
-
-  it("surfaces the harness's depth refusal as a tool error", async () => {
-    askResponse = { error: "message chains are limited to one hop" };
+  // Busy is not a refusal any more: the harness steers or queues, so the tool
+  // just reports the delivery. Only a real refusal comes back as an error, and
+  // it carries the harness's own "do not retry" prose to the model.
+  it("surfaces a harness refusal as a tool error, verbatim", async () => {
+    askResponse = { error: "Conversation budget spent (24 messages) - wrap up and report to the user. Do not retry." };
     const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
     expect(res.result.isError).toBe(true);
-    expect(res.result.content[0].text).toContain("one hop");
+    expect(res.result.content[0].text).toContain("Do not retry");
   });
 
   it("rejects unknown tools with -32602", async () => {

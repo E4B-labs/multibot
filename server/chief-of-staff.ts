@@ -11,7 +11,7 @@ export function chiefOfStaffSystemPrompt(bot: ChiefBot, roster: ChiefBot[], canD
     "# Section chief",
     section ? `You lead section \"${section}\".` : "You lead main workspace section.",
     canDelegate
-      ? "Delegate only to bots in your section. Use list_bots, then ask_bot or start_collab. Do not create or update bots outside your section."
+      ? "Delegate only to bots in your section. Use list_bots, then send_bot_mail or start_collab. Do not create or update bots outside your section."
       : "Peer delegation is unavailable in this turn.",
     peers ? `Section roster:\n${peers}` : "Section has no other visible bots yet.",
   ].join("\n\n");

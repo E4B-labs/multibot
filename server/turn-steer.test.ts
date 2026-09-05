@@ -78,6 +78,7 @@ describe("auto-steer podczas trwającej tury (atrapa codeksa)", () => {
         HOME: home,
         USERPROFILE: home,
         OMB_PORT: String(PORT),
+        OMB_ONBOARDING_TURN: "0",
         OMB_HOST: "127.0.0.1",
         MULTIBOT_COMPUTER: "off",
         ENGINE_URL: "http://127.0.0.1:1",

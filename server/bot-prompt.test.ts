@@ -88,9 +88,9 @@ describe("botSystemPrompt", () => {
     expect(prompt(ALL, { isolated: true })).toContain("shared group room");
   });
 
-  it("tagowanych peerów woła przez ask_bot, a bez agents bierze gotowe odpowiedzi", () => {
+  it("tagowanych peerów woła przez send_bot_mail, a bez agents bierze gotowe odpowiedzi", () => {
     const tagged = [{ id: "b2", name: "Ala" }];
-    expect(prompt(ALL, { tagged })).toContain("ask_bot bot_id b2");
+    expect(prompt(ALL, { tagged })).toContain("send_bot_mail bot_id b2");
     const noAgents = prompt({ localComputer: { command: "py" } }, { tagged, taggedReplies: "\nPeer Ala replied:\nok" });
     expect(noAgents).toContain("harness already fetched");
     expect(noAgents).toContain("Peer Ala replied");

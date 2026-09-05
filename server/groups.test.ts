@@ -52,6 +52,7 @@ describe("grupy botów bez silnika", () => {
         HOME: home,
         USERPROFILE: home,
         OMB_PORT: String(PORT),
+        OMB_ONBOARDING_TURN: "0",
         MULTIBOT_COMPUTER: "off",
         MULTIBOT_ENGINE: "off",
         FAKE_CLAUDE_MODE: "persistent",
