@@ -395,7 +395,7 @@ function postRoomChip(ownerBotId: string, room: RoomRecord) {
   const message = store.appendMessage(owner.threadId, {
     role: "bot",
     kind: "room",
-    room: { id: room.id, name: room.name, bot_ids: [...room.bot_ids], ownerBotId, status: room.status },
+    room: { id: room.id, name: room.name, bot_ids: [...room.bot_ids], ownerBotId, status: room.status, ...(room.groupId ? { groupId: room.groupId } : {}) },
   });
   broadcast({ kind: "message", threadId: owner.threadId, message });
 }

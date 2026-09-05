@@ -90,3 +90,24 @@ describe("czat nie przewija się w bok", () => {
     expect(ruleBody("::-webkit-scrollbar {")).toMatch(/height:\s*8px/);
   });
 });
+
+// multibot: czip pokoju w prywatnym watku czlonka grupy pokazywal "X napisal(a)
+// do Y, Z" — bez sensu, bo tura grupowa to JEDEN pokoj wspolny. Ma nazywac
+// grupe i prowadzic do czatu grupy, w obu jezykach.
+describe("czip pokoju grupowego", () => {
+  const chip = chat.slice(chat.indexOf("function RoomChip"), chat.indexOf("function userEventChip"));
+
+  it("dla pokoju grupy pisze o grupie zamiast \"napisal(a) do\"", () => {
+    expect(chip).toContain("const groupId = room.groupId;");
+    expect(chip).toContain('"Rozmowa w grupie"');
+    expect(chip).toContain('"Group chat:"');
+    expect(chip).toContain("{room.name}");
+  });
+
+  it("klikniecie otwiera grupe, nie pokoj", () => {
+    const branch = chip.slice(chip.indexOf("if (groupId) {"), chip.indexOf("const owner ="));
+    expect(branch).toContain("/api/groups/${encodeURIComponent(groupId)}");
+    expect(branch).toContain('type: "toggleGroup"');
+    expect(branch).not.toContain("toggleRoom");
+  });
+});

@@ -74,7 +74,7 @@ export interface Message {
   /** Small durable workspace event shown as a chat pill. */
   event?: { type: "renamed" | "skill-created" | "routine-created" | "reminder-created" | "goal-progress"; value: string };
   /** collaboration-room chip: a clickable "X texted Y" pill leading to the room */
-  room?: { id: string; name: string; bot_ids: string[]; ownerBotId: string; status: string };
+  room?: { id: string; name: string; bot_ids: string[]; ownerBotId: string; status: string; groupId?: string };
   /** screen messages: a frame of the bot's computer (base64 image) */
   png?: string;
   mime?: string;
