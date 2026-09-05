@@ -284,10 +284,13 @@ export function reasoningLevels(model: string) {
   return supportsMaxReasoning(model) ? REASONING_LEVELS : REASONING_LEVELS.filter((level) => level.id !== "max");
 }
 
-/** `onSend` przejmuje wysyłkę (czat grupowy: jedna wiadomosc do calej grupy,
- * nie do `bot`). Bez niego composer wysyla do `bot` jak dotad. `bot` zostaje
- * w obu trybach, bo to on karmi pasek maskotki, model picker i zalaczniki. */
-export function Composer({ bot, onSend }: { bot: Bot; onSend?: (text: string) => void }) {
+/** `onSend` przejmuje wysyłkę (czat grupowy: jedna wiadomość do całej grupy,
+ * nie do `bot`). Bez niego composer wysyła do `bot` jak dotąd. `bot` zostaje w
+ * obu trybach, bo to on karmi pasek maskotki i model picker. Zwrócone `false`
+ * znaczy „nie przyjęte" — tekst ZOSTAJE w polu, bo cicho skasowana wiadomość
+ * jest gorsza niż brak wysyłki. Załączników tu nie ma: grupa nie ma jednego
+ * właściciela pliku, więc spinacz w tym trybie znika zamiast gubić plik. */
+export function Composer({ bot, onSend }: { bot: Bot; onSend?: (text: string) => boolean }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [text, setText] = useState("");
@@ -753,8 +756,9 @@ export function Composer({ bot, onSend }: { bot: Bot; onSend?: (text: string) =>
         if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? `Upload failed (HTTP ${response.status})`);
         return String((await response.json()).id);
       }));
-      if (onSend) onSend(text.trim());
-      else dispatch({
+      if (onSend) {
+        if (!onSend(text.trim())) return;
+      } else dispatch({
         type: "send",
         botId: bot.id,
         text: text.trim(),
@@ -969,6 +973,9 @@ export function Composer({ bot, onSend }: { bot: Bot; onSend?: (text: string) =>
             />
           </div>
         )}
+        {/* Czat grupowy nie ma jednego wlasciciela pliku, a `onSend` niesie sam
+            tekst - lepiej nie pokazywac spinacza niz zzerac zalacznik. */}
+        {!onSend && (
         <button
           type="button"
           data-attach-toggle
@@ -982,6 +989,7 @@ export function Composer({ bot, onSend }: { bot: Bot; onSend?: (text: string) =>
         >
           <Plus size={20} />
         </button>
+        )}
         <textarea
           data-composer-input
           ref={inputRef}

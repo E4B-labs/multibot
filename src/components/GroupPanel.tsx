@@ -98,18 +98,22 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
     const node = scrollRef.current;
     return !node || node.scrollHeight - node.scrollTop - node.clientHeight < 48;
   };
+  const streamingNow = answering ? state.streaming[answering.threadId] : undefined;
   useEffect(() => {
     if (follow) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [entries.length, follow]);
+  }, [entries.length, follow, streamingNow]);
 
   const send = (text: string) => {
-    if (!text || busy) return;
+    // Pętla jest sekwencyjna i potrafi trwać minuty; `false` zostawia tekst w
+    // polu, zamiast go po cichu zjeść.
+    if (!text || busy) return false;
     setBusy(true);
     setError(null);
     setFollow(true);
     api(`/api/groups/${group.id}/chat`, { method: "POST", body: JSON.stringify({ message: text }) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false));
+    return true;
   };
 
   return (
@@ -194,7 +198,9 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
                 </div>
               );
             })}
-            {answering && state.streaming[answering.threadId] !== undefined && (
+            {/* Tylko w trakcie NASZEJ tury: `answering` bywa zajęty własnym
+                czatem 1:1, a jego strumień nie jest treścią grupy. */}
+            {busy && answering && state.streaming[answering.threadId] !== undefined && (
               <div className="flex w-full justify-start">
                 <div className="max-w-[90%] rounded-2xl bg-card px-2 py-[5px] text-[14px] leading-[1.45] text-ink">
                   <ChatMarkdown text={state.streaming[answering.threadId]} streaming compact />
