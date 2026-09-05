@@ -134,6 +134,9 @@ export interface ConfigStatus {
   opencode?: { configured: boolean };
   composio: { configured: boolean; apiKeyConfigured?: boolean };
   box: { configured: boolean };
+  /** harness text-to-speech key — SpeakButton speaks through the harness when it
+   *  is set, and through the engine's edge-tts when it is not */
+  voice?: { configured: boolean };
   /** strefa czasowa bota; pusty ciąg albo brak = wykryj z systemu */
   timeZone?: string;
   /** Autoweryfikacja: czy sprawdzać akcje i jakie reguły je przepuszczają */

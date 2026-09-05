@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { BOT_SHAPES, managedBotPatch, Store, sortMessages, type BotRecord } from "./store.ts";
+import { BOT_SHAPES, defaultSelectionTarget, managedBotPatch, Store, sortMessages, type BotRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -196,6 +196,43 @@ describe("Store", () => {
 
     expect(store.migrateOrphanedSelections([])).toBe(1);
     expect(store.bot(orphan.id)?.modelSelection).toEqual({ instanceId: "", model: "" });
+  });
+
+  // The `local` engine is hidden from the model picker, so a bot that lands
+  // there cannot be moved off it — and on hosts with no Hermes (the phone) it
+  // cannot answer at all. New bots go to a CLI driver instead.
+  describe("defaultSelectionTarget", () => {
+    const target = (instanceId: string, driverKind: string, state: "available" | "unavailable" = "available") =>
+      ({ instanceId, driverKind, models: { default: `${instanceId}-model` }, snapshot: { state } });
+
+    it("picks the CLI driver over the engine", () => {
+      const pick = defaultSelectionTarget([target("local", "slafy"), target("codex", "codex")]);
+      expect(pick?.instanceId).toBe("codex");
+    });
+
+    it("prefers claude, then codex", () => {
+      expect(defaultSelectionTarget([target("opencode", "opencode"), target("codex", "codex")])?.instanceId).toBe("codex");
+      expect(
+        defaultSelectionTarget([target("codex", "codex"), target("claude", "claudeAgent")])?.instanceId,
+      ).toBe("claude");
+    });
+
+    // "available" only means the driver loaded — opencode says so with no key
+    // configured, and would fail on the first turn.
+    it("keeps a key-based driver behind the engine", () => {
+      const pick = defaultSelectionTarget([target("opencode", "opencode"), target("local", "slafy")]);
+      expect(pick?.instanceId).toBe("local");
+    });
+
+    it("prefers a live CLI driver over a dead one", () => {
+      const pick = defaultSelectionTarget([target("claude", "claudeAgent", "unavailable"), target("codex", "codex")]);
+      expect(pick?.instanceId).toBe("codex");
+    });
+
+    it("falls back to the engine only when it is the whole fleet", () => {
+      expect(defaultSelectionTarget([target("local", "slafy")])?.instanceId).toBe("local");
+      expect(defaultSelectionTarget([])).toBeUndefined();
+    });
   });
 
   it("seedIfEmpty creates exactly one starter bot, once", () => {
