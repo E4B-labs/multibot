@@ -138,7 +138,7 @@ Pliki, na których dwie równoległe gałęzie najszybciej się zderzą:
 | Plik | Linie | Co to jest |
 | --- | --- | --- |
 | `server/index.ts` | 4735 | Cały routing HTTP harnessu w jednym pliku |
-| `src/components/CursorAvatar.tsx` | 1814 | Duży komponent UI |
+| `src/components/BlobAvatar.tsx` | 2709 | Duży komponent UI |
 | `src/components/Sidebar.tsx` | 1354 | Nawigacja |
 | `engine/server/app.py` | 1280 | Główny plik aplikacji FastAPI |
 | `src/state/store.tsx` | 1119 | Jeden reducer na cały stan aplikacji |

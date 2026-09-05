@@ -209,11 +209,16 @@ const COLORS: MausColor[] = [
  *  `managedBotPatch` (bot zmienia bota) i dla PATCH /api/bots/:id (UI). */
 export const BOT_COLORS: MausColor[] = [...COLORS, "black"];
 
-const MANAGED_MASCOT_SHAPES = new Set([
+/** Kazdy ksztalt maskotki, na ktory wolno ustawic bota. Jedno zrodlo prawdy dla
+ *  `managedBotPatch` (bot zmienia bota), PATCH /api/bots/:id (UI) i schematu
+ *  narzedzi w `server/drivers/agents-proxy.ts` (bot tworzy bota). Kolejnosc i
+ *  zawartosc musza sie zgadzac z MASCOT_SHAPES + LEGACY_SHAPES w
+ *  `src/lib/mascotShapes.ts` — pilnuje tego test w `server/store.test.ts`. */
+export const BOT_SHAPES: MascotShape[] = [
   "blob", "leaf", "cursor", "circle", "square", "pill", "triangle", "star", "diamond", "folder",
   // Legacy shapes stay editable for bots that already use them.
   "oval", "hexagon", "cloud", "drop",
-]);
+];
 
 /** Safe profile fields one bot may set on another. Infrastructure, ownership,
  * permissions, thread ids and persisted runtime state never cross this boundary. */
@@ -240,8 +245,8 @@ export function managedBotPatch(input: unknown, options: { temporary?: boolean }
     patch.color = value.color as MausColor;
   }
   if (value.mascotShape !== undefined) {
-    if (typeof value.mascotShape !== "string" || !MANAGED_MASCOT_SHAPES.has(value.mascotShape)) {
-      throw new Error(`mascotShape must be one of: ${[...MANAGED_MASCOT_SHAPES].join(", ")}`);
+    if (typeof value.mascotShape !== "string" || !BOT_SHAPES.includes(value.mascotShape)) {
+      throw new Error(`mascotShape must be one of: ${BOT_SHAPES.join(", ")}`);
     }
     patch.mascotShape = value.mascotShape;
   }
@@ -331,7 +336,12 @@ export class Store {
       this.bots = [];
     }
     // busy never survives a restart — no turn does either
-    for (const b of this.bots) b.busy = false;
+    for (const b of this.bots) {
+      b.busy = false;
+      // Ksztalt spoza listy (zapisany, zanim walidacja istniala) rysowal sie
+      // na czarno — na wczytaniu wraca do domyslnego bloba.
+      if (b.mascotShape !== undefined && !BOT_SHAPES.includes(b.mascotShape)) b.mascotShape = "blob";
+    }
   }
 
   private saveBots() {

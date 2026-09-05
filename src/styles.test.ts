@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 // multibot: styles.css niosło ~555 linii martwej animacji maskotki — pełny
 // silnik `maus-*` (bevel, orbity, wstążki, konfetti, dymki peer-chat) z czasów,
-// gdy maskotka była rysowana CSS-em. Dziś rysuje ją inline SVG w CursorAvatar,
+// gdy maskotka była rysowana CSS-em. Dziś rysuje ją inline SVG w BlobAvatar,
 // a peer-chat nie istnieje. Nikt tego nie zauważył, bo martwego CSS-a nic nie
 // pilnuje: nie ma go w typach, w testach, ani w buildzie.
 //

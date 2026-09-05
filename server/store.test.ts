@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { defaultSelectionTarget, managedBotPatch, Store, sortMessages, type BotRecord } from "./store.ts";
+import { BOT_SHAPES, defaultSelectionTarget, managedBotPatch, Store, sortMessages, type BotRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -81,6 +81,30 @@ describe("Store", () => {
     expect(() => managedBotPatch({ avatarUrl: "javascript:alert(1)" })).toThrow("avatarUrl must be");
     expect(() => managedBotPatch({ temporary: true })).toThrow("only be set while creating");
     expect(managedBotPatch({ temporary: true }, { temporary: true })).toEqual({ temporary: true });
+    // Bot proszacy o "wave"/"gear"/"shield" dostawal je zapisane, a klient
+    // rysowal wtedy czarnego kursora — odrzucamy, wymieniajac dozwolone.
+    expect(() => managedBotPatch({ mascotShape: "wave" })).toThrow("mascotShape must be one of");
+  });
+
+  // Rozjazd list to czarna maskotka: serwer zapisuje ksztalt, ktorego klient
+  // nie umie narysowac. Czytamy zrodlo klienta, bo import ciagnalby React.
+  it("keeps the server shape list identical to the client's", () => {
+    const source = readFileSync(new URL("../src/lib/mascotShapes.ts", import.meta.url), "utf8");
+    const names = (constant: string) => {
+      const body = new RegExp(`${constant} = \\[([^\\]]*)\\]`).exec(source);
+      if (!body) throw new Error(`${constant} not found in src/lib/mascotShapes.ts`);
+      return [...body[1].matchAll(/"([a-z]+)"/g)].map((match) => match[1]);
+    };
+
+    expect([...names("MASCOT_SHAPES"), ...names("LEGACY_SHAPES")]).toEqual(BOT_SHAPES);
+  });
+
+  it("falls unknown persisted shapes back to blob on load", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { mascotShape: "gear" });
+
+    expect(new Store(selection).bot(bot.id)?.mascotShape).toBe("blob");
   });
 
   it("persists bots and messages across a restart, resetting busy", () => {
