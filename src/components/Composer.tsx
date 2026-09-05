@@ -910,10 +910,8 @@ export function Composer({ bot }: { bot: Bot }) {
               color={bot.color}
               avatarUrl={bot.avatarUrl}
               shape={bot.mascotShape}
-              state={strip.state}
+              state={strip}
               size={40}
-              motion={strip.motion}
-              motionKey={strip.motion === "none" ? 0 : 1}
               animated
             />
           </div>

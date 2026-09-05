@@ -122,7 +122,6 @@ describe("pasek nad composerem", () => {
 
   it("stan awatara liczy stripMascotState, nie samo `bot.busy`", () => {
     expect(composer).toContain("stripMascotState(");
-    expect(composer).toContain("state={strip.state}");
-    expect(composer).toContain("motion={strip.motion}");
+    expect(composer).toContain("state={strip}");
   });
 });

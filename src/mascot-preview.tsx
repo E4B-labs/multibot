@@ -19,7 +19,7 @@ import {
   type MausMotion,
   type MausState,
 } from "@/lib/mascot";
-import { EXPRESSION_COUNT } from "@/components/CursorAvatar";
+import { EXPRESSION_COUNT } from "@/components/BlobAvatar";
 import "./styles.css";
 import "./mascot-preview.css";
 
