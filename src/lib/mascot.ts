@@ -1,12 +1,12 @@
-import { CURSOR_STATES, type CursorState } from "@/components/CursorAvatar";
+import { BLOB_STATES, type BlobState } from "@/components/BlobAvatar";
 import type { Bot } from "@/state/store";
 
-/** The mascot's behaviour vocabulary — CursorAvatar's 39 states, under the
+/** The mascot's behaviour vocabulary — BlobAvatar's 40 states, under the
  * app's historical names. */
-export type MausState = CursorState;
-export const MAUS_STATES = CURSOR_STATES;
+export type MausState = BlobState;
+export const MAUS_STATES = BLOB_STATES;
 
-/** CursorAvatar ships French group labels; the app shows these instead. The
+/** BlobAvatar ships French group labels; the app shows these instead. The
  * memberships mirror its STATE_GROUPS exactly. */
 export const STATE_GROUPS: Record<string, MausState[]> = {
   Lifecycle: ["sleeping", "waking", "idle", "listening", "thinking", "searching", "working"],
@@ -28,7 +28,7 @@ export const STATE_GROUPS: Record<string, MausState[]> = {
     "playful",
     "celebrate",
   ],
-  "Agent morphs": ["orbit", "radar", "progress"],
+  "Agent morphs": ["orbit", "radar", "progress", "thinking-dots"],
   "Product cycle": [
     "spawning",
     "humming",
@@ -92,14 +92,13 @@ export const MAUS_MOTIONS = [
   "surprise",
   "failure",
   "sending",
-  "thinking-dots",
 ] as const;
 
 export type MausMotion = "none" | (typeof MAUS_MOTIONS)[number];
 
 /**
  * Awatar bota poza paskiem nad composerem: ZAWSZE nieruchomy — neutralny stan
- * "idle", zero beatow, `animated:false` -> `paused` w CursorAvatar. Takze gdy
+ * "idle", zero beatow, `animated:false` -> `paused` w BlobAvatar. Takze gdy
  * bot pracuje.
  *
  * Jeden animowany bot na cala aplikacje, ten na pasku nad composerem; o jego
@@ -113,7 +112,7 @@ export function sidebarAvatarProps(
 }
 
 /**
- * The face used to be ten hand-drawn SVGs; it is now the engine's 39 states.
+ * The face used to be ten hand-drawn SVGs; it is now the engine's 40 states.
  * Bots saved under the old vocabulary still carry one of these ten names, so
  * they are translated on read rather than migrated in place — a bot's stored
  * face should survive a downgrade too.
@@ -143,14 +142,14 @@ export function normalizeState(value: string | null | undefined): MausState | nu
 /**
  * The states worth offering in the appearance picker.
  *
- * The engine carries 39, but many are transient beats the app drives itself
+ * The engine carries 40, but many are transient beats the app drives itself
  * (`sending`, `alerting`, `powering-down`) and make no sense as a bot's resting
  * face. More importantly, states share resting faces: `happy`, `excited` and
  * `playful` all rest on expression 2, and `curious`, `surprised` and `scared`
  * all rest on 3 — they differ in which faces they *drift* to, which a static
  * swatch cannot show. Offering them all gave 15 buttons showing 8 pictures.
  *
- * Across all 39 states there are only 11 distinct resting faces, so this is one
+ * Across all 40 states there are only 11 distinct resting faces, so this is one
  * state per face, chosen for the clearest name. Every swatch looks different.
  */
 export const PICKABLE_STATES: MausState[] = [
@@ -185,15 +184,17 @@ export type MascotBotProfile = {
   messages?: MascotMessage[];
 };
 
-/** Ile trwa „ładowanie modelu": tura ruszyła, ale nic jeszcze nie płynie. */
-export const MODEL_LOAD_MS = 3_000;
-/** Po tylu milisekundach nierozstrzygnięte narzędzie robi się „długim zadaniem". */
-export const QUIET_TOOL_MS = 8_000;
+/**
+ * Zimny start: tura ruszyła, a dostawca po tylu milisekundach nadal nie
+ * wypuścił ŻADNEGO zdarzenia (ani rozumowania, ani narzędzia, ani tekstu).
+ * Dopiero to jest „ładowanie modelu" i tylko to zapala pierścienie.
+ */
+export const MODEL_LOAD_MS = 10_000;
 /** Ile świętujemy koniec tury, zanim bot zejdzie z paska. */
 export const CELEBRATE_MS = 1_000;
 
 /** Faza tury złożona z eventów runtime — patrz `runtime` w store. */
-export type RuntimeKind = "start" | "reasoning" | "text" | "done";
+export type RuntimeKind = "start" | "reasoning" | "tool" | "text" | "done";
 export type RuntimePhase = { at: number; kind: RuntimeKind };
 
 /** Karta, na którą bot wciąż czeka — pytanie, wybór, sekret albo komputer. */
@@ -213,9 +214,13 @@ function pendingAsk(last: MascotMessage | undefined): boolean {
  * maskotki albo `null` — wtedy pasek jest pusty i nie ma czego animować.
  *
  * Kolejność wierszy jest tabelą priorytetów, pierwsze dopasowanie wygrywa:
- * pytanie > uwaga > rozumowanie > pisanie > ładowanie > sukces > nieprzeczytane.
- * `bot.busy` samo w sobie NIE jest wyzwalaczem — pracujący bot, o którym nic
- * jeszcze nie wiadomo, nie zajmuje paska.
+ * pytanie > uwaga > narzędzie > myślenie > pisanie > zimny start > sukces >
+ * nieprzeczytane. `bot.busy` samo w sobie NIE jest wyzwalaczem — pracujący bot,
+ * o którym nic jeszcze nie wiadomo, nie zajmuje paska.
+ *
+ * Myślenie NIE ma pierścieni: `loading` (jedyny stan z pierścieniami na pasku)
+ * zapala się wyłącznie przy zimnym starcie dostawcy, bo pierścienie znaczą
+ * „nic jeszcze nie działa", a nie „bot myśli".
  */
 export function stripMascotState(input: {
   bot: MascotBotProfile;
@@ -225,24 +230,32 @@ export function stripMascotState(input: {
   /** okno aplikacji jest na wierzchu — wtedy „nieprzeczytane" nic nie znaczy */
   focused?: boolean;
   now?: number;
-}): { state: MausState; motion: MausMotion } | null {
+}): MausState | null {
   const { bot, runtime = null, streaming = false, focused = false, now = Date.now() } = input;
   const last = bot.messages?.[bot.messages.length - 1];
   const attention = bot.needsAttention ?? null;
 
-  if (pendingAsk(last) || attention?.trimEnd().endsWith("?")) return { state: "confused", motion: "none" };
-  if (attention !== null) return { state: "alerting", motion: "none" };
-  if (runtime?.kind === "reasoning") return { state: "thinking", motion: "none" };
-  if (streaming || runtime?.kind === "text") return { state: "thinking", motion: "thinking-dots" };
-  // Zawieszone narzędzie liczymy tylko przy żywej turze: porzucona aktywność
-  // po ubitej turze inaczej trzymałaby „loading" na pasku w nieskończoność.
-  const quietTool =
-    bot.busy === true && last?.kind === "activity" && last.tool?.ok === undefined && now - (last.at ?? 0) > QUIET_TOOL_MS;
-  if ((runtime?.kind === "start" && now - runtime.at > MODEL_LOAD_MS) || quietTool) {
-    return { state: "loading", motion: "none" };
+  // 1-2: bot czeka na człowieka.
+  if (pendingAsk(last) || attention?.trimEnd().endsWith("?")) return "confused";
+  if (attention !== null) return "alerting";
+  // 3: narzędzie w locie — ale tylko przy żywej turze. Faza `runtime` nigdy się
+  // nie kasuje (store wyłącznie nadpisuje wpis kolejnym tickiem), a po turze
+  // ubitej w środku narzędzia „done" już nie przyjdzie; bez tej bramki pasek
+  // zostałby na „working" na zawsze. To samo dotyczy porzuconej aktywności.
+  const toolInFlight =
+    bot.busy !== false &&
+    (runtime?.kind === "tool" || (last?.kind === "activity" && last.tool?.ok === undefined));
+  if (toolInFlight) return "working";
+  // 4: rozumuje albo tura ruszyła i nic jeszcze z niej nie wyszło.
+  if (runtime?.kind === "reasoning" || (runtime?.kind === "start" && now - runtime.at < MODEL_LOAD_MS)) {
+    return "thinking";
   }
-  if (runtime?.kind === "done" && now - runtime.at < CELEBRATE_MS) return { state: "celebrate", motion: "none" };
-  if (bot.unread && !focused) return { state: "notifying", motion: "none" };
+  // 5: leci tekst — ciało rozpada się na trzy kropki (stan silnika, nie nakładka).
+  if (streaming || runtime?.kind === "text") return "thinking-dots";
+  // 6: dostawca milczy od MODEL_LOAD_MS — zimny start modelu albo procesu.
+  if (runtime?.kind === "start") return "loading";
+  if (runtime?.kind === "done" && now - runtime.at < CELEBRATE_MS) return "celebrate";
+  if (bot.unread && !focused) return "notifying";
   return null;
 }
 

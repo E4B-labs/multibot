@@ -20,6 +20,10 @@
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 import readline from "node:readline";
 
+// Jedna lista ksztaltow dla schematu narzedzi i dla walidacji na serwerze —
+// enum rozjechany z `managedBotPatch` znaczy, ze model prosi o ksztalt, ktory
+// serwer i tak odrzuci (albo, przed walidacja, ktorego klient nie umie narysowac).
+import { BOT_SHAPES } from "../store.ts";
 import { harnessRequest } from "./harness-request.ts";
 
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
@@ -27,7 +31,6 @@ const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
 
 const BOT_COLORS = ["green", "blue", "red", "orange", "purple", "cyan", "pink", "yellow", "teal", "coral"];
-const BOT_SHAPES = ["blob", "leaf", "cursor", "circle", "square", "pill", "triangle", "star", "diamond", "folder"];
 const BOT_PROFILE_PROPERTIES = {
   name: { type: "string", description: "Display name (1-120 characters)." },
   title: { type: "string", description: "Short role or specialty." },
@@ -108,7 +111,7 @@ const TOOLS = [
     },
   },
   { name: "get_my_profile", description: "Read your complete bot profile.", inputSchema: { type: "object", properties: {} } },
-  { name: "update_my_profile", description: "Update your name, role, description, icon, notifications, computer or model selection.", inputSchema: { type: "object", properties: { name: { type: "string" }, title: { type: "string" }, description: { type: "string" }, computer: { type: "string" }, color: { type: "string" }, mascotShape: { type: "string" }, notifications: { type: "boolean" }, modelSelection: { type: "object" } } } },
+  { name: "update_my_profile", description: "Update your name, role, description, icon, notifications, computer or model selection.", inputSchema: { type: "object", properties: { name: { type: "string" }, title: { type: "string" }, description: { type: "string" }, computer: { type: "string" }, color: { type: "string" }, mascotShape: { type: "string", enum: BOT_SHAPES }, notifications: { type: "boolean" }, modelSelection: { type: "object" } } } },
   { name: "ask_user", description: "Ask the human who owns this bot a question and wait for their answer. Use whenever you need a decision, a preference, missing information, or sign-off before doing something consequential — do not guess on things the owner would want to decide. Returns their answer as text.", inputSchema: { type: "object", properties: { question: { type: "string", description: "The question, with enough context to answer at a glance" }, choices: { type: "array", items: { type: "string" }, description: "Optional 2-5 suggested answers, shown as one-tap buttons" } }, required: ["question"] } },
   { name: "hand_over_computer", description: "Hand your computer to the human and wait for them. Use it the moment the screen needs a person and not you: a login, a 2FA code, a captcha, a payment confirmation. The user gets a card with a live view of your screen and can take control, finish and hand it back, or skip. Returns \"user finished\" (with their optional note) or \"user skipped\" — after \"user skipped\" solve it another way or stop and say what blocked you. Do not ask for passwords or codes in chat; this is the way.", inputSchema: { type: "object", properties: { reason: { type: "string", description: "What the human has to do, in one line, e.g. \"Sign in to LinkedIn, then hand it back\"" } }, required: ["reason"] } },
   { name: "request_credential", description: "Ask the owner for an API key or token through a private in-chat card. Never ask for credentials in plain text.", inputSchema: { type: "object", properties: { target: { type: "string", enum: ["xaiApiKey", "boxToken", "opencodeGoApiKey", "ttsKey", "openaiImageApiKey"] } }, required: ["target"] } },

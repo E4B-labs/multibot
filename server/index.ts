@@ -86,7 +86,7 @@ import { BotMailStore, botMailThreadId } from "./bot-mail.ts";
 import { GoalStore, GOAL_DONE_MARKER, goalThreadId, parseGoalCommand, type GoalRecord } from "./goals.ts";
 import { jobProgress, SetupJobs } from "./setup-jobs.ts";
 import { type TurnIntegrationsLike } from "./turn-tools.ts"; // multibot (A2): wyliczenie narzędzi tury w prompcie
-import { BOT_COLORS, managedBotPatch, mentionedBots, Store, type BotRecord, type ConnectorTarget, type Message, type OptionCardData } from "./store.ts";
+import { BOT_COLORS, BOT_SHAPES, managedBotPatch, mentionedBots, Store, type BotRecord, type ConnectorTarget, type Message, type OptionCardData } from "./store.ts";
 import { CREDENTIAL_TARGETS, credentialConfigPatch, isCredentialTargetId, type CredentialTargetId } from "./credential-request.ts";
 import { inspectorEvents, recordInspectorEvent, replayInspectorEvents } from "./inspector.ts";
 import { registerWindowsServerAutostart } from "./windows-autostart.ts";
@@ -2992,6 +2992,11 @@ const server = createServer(async (req, res) => {
             for (const key of ["name", "title", "description", "notifications", "color", "mascotExpression", "mascotShape", "modelSelection"] as const) {
               if (body[key] !== undefined) patch[key] = body[key];
             }
+            // Ta sama lista, co w `managedBotPatch` — inaczej bot ustawia sobie
+            // ksztalt spoza zestawu i wlasna maskotka rysuje sie na czarno.
+            if (patch.mascotShape !== undefined && !BOT_SHAPES.includes(patch.mascotShape as never)) {
+              return json(res, 422, { error: `unknown mascotShape: must be one of ${BOT_SHAPES.join(", ")}` });
+            }
             const previous = store.bot(fromBotId);
             // multibot: jawnie kopiujemy nazwę przed patchem — patchBot mutuje
             // rekord w miejscu, więc `previous.name` po patchu to już NOWA nazwa.
@@ -3659,6 +3664,11 @@ const server = createServer(async (req, res) => {
       // `managedBotPatch` (bot zmieniajacy bota).
       if (patch.color !== undefined && !BOT_COLORS.includes(patch.color as never)) {
         return json(res, 400, { error: `unknown color: must be one of ${BOT_COLORS.join(", ")}` });
+      }
+      // multibot: to samo dla ksztaltu — zapisany "wave" wracal do klienta,
+      // ktory nie ma takiej sylwetki i rysowal czarnego kursora.
+      if (patch.mascotShape !== undefined && !BOT_SHAPES.includes(patch.mascotShape as never)) {
+        return json(res, 400, { error: `unknown mascotShape: must be one of ${BOT_SHAPES.join(", ")}` });
       }
       // avatarUrl validation — allow data: URL or /api/bots/:id/avatar path, max 500KB string (covers 512x512 webp base64 ~100KB)
       if (patch.avatarUrl !== undefined) {
