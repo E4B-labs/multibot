@@ -15,7 +15,7 @@ import {
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { motionIsReduced } from "@/lib/motion";
-import { mascotShape, type MascotShape } from "@/lib/mascotShapes";
+import { mascotShape, resolveShape, type MascotShape } from "@/lib/mascotShapes";
 import { CursorAvatar, SHAPE, type CursorAvatarHandle, type CursorShape } from "./CursorAvatar";
 
 /**
@@ -301,7 +301,7 @@ function MausAvatarComponent(
           state={motionState ?? state}
           expression={expression}
           size={size}
-          shape={shape === "cursor" ? GRADIENT_SHAPE : mascotShape(shape)}
+          shape={resolveShape(shape) === "cursor" ? GRADIENT_SHAPE : mascotShape(shape)}
           gradient={gradientFor(color)}
           title={label ?? null}
           lookAround={forward ? 0 : 1}
