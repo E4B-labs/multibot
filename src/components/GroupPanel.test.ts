@@ -46,7 +46,11 @@ describe("GroupMembersPanel", () => {
 
 describe("wiersz grupy w Sidebarze", () => {
   it("ma małe, statyczne awatary i znaczek +N na drugim z nich", () => {
-    const row = sidebar.slice(sidebar.indexOf("groupAvatarSplit(members"), sidebar.indexOf("{createOpen && !collapsed"));
+    const start = sidebar.indexOf("groupAvatarSplit(members");
+    const end = sidebar.indexOf("function GroupCreateForm", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const row = sidebar.slice(start, end);
     expect(row).toContain("size={20}");
     expect(row).not.toContain("size={40}");
     expect(row).toContain("i === shown.length - 1 && overflow > 0");
