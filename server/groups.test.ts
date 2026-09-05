@@ -155,4 +155,38 @@ describe("grupy botów bez silnika", () => {
     },
     60_000,
   );
+
+  // multibot: grupa siedzi w sekcji sidebaru tak samo jak bot — sekcję wybiera
+  // formularz tworzenia, a przeciągnięcie wiersza na nagłówek zmienia ją tym
+  // samym PATCH-em co nazwa. Silnik o sekcjach nie wie: to pole harnessu.
+  it(
+    "tworzy grupę w sekcji i przenosi ją między sekcjami",
+    async () => {
+      const selection = { instanceId: "fake", model: "fake-model" };
+      const first = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${first.id}`, { modelSelection: selection });
+      const created = await api("POST", "/api/groups", {
+        name: "Ekipa",
+        bot_ids: [first.id],
+        section: "  GitHub  ",
+      });
+      expect(created.status).toBe(201);
+      const gid = created.body.id as string;
+      expect(created.body.section).toBe("GitHub");
+
+      const moved = await api("PATCH", `/api/groups/${gid}`, { section: "Workers" });
+      expect(moved.status).toBe(200);
+      expect(moved.body.group.section).toBe("Workers");
+      // zmiana nazwy nie może zgubić sekcji
+      expect((await api("PATCH", `/api/groups/${gid}`, { name: "Zespół" })).body.group.section).toBe("Workers");
+      expect((await api("GET", `/api/groups/${gid}`)).body.section).toBe("Workers");
+      // puste = poza sekcjami
+      expect((await api("PATCH", `/api/groups/${gid}`, { section: "" })).body.group.section).toBeUndefined();
+      // pusty PATCH dalej jest błędem
+      expect((await api("PATCH", `/api/groups/${gid}`, {})).status).toBe(400);
+
+      await api("DELETE", `/api/groups/${gid}`);
+    },
+    60_000,
+  );
 });

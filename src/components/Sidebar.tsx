@@ -234,6 +234,10 @@ function BotContextMenu({
   );
 }
 
+// multibot: własne typy przeciągania w sidebarze. Cel sprawdza je w `dragover`
+// — obcy tekst czy link nie ma prawa udawać wiersza ani sekcji.
+const SIDEBAR_DRAG_TYPES = ["text/mb-section", "text/mb-group-id", "text/mb-bot-id"] as const;
+
 // multibot: nagłówek sekcji na liście (port z OpenMausBot #296). Wysokość i
 // marginesy są STAŁE (`h-9`, zero paddingu pionowego) — wcześniej `pt-3 pb-1`
 // dawało inny odstęp nad pierwszą sekcją niż między kolejnymi, więc kilka
@@ -245,6 +249,7 @@ function SectionDivider({
   onToggle,
   onMenu,
   onDropBot,
+  onDropGroup,
   onDropSection,
   polish,
 }: {
@@ -253,6 +258,7 @@ function SectionDivider({
   onToggle: () => void;
   onMenu: (menu: { name: string; x: number; y: number }) => void;
   onDropBot: (botId: string, section: string) => void;
+  onDropGroup: (groupId: string, section: string) => void;
   onDropSection: (moved: string, target: string) => void;
   polish: boolean;
 }) {
@@ -266,13 +272,17 @@ function SectionDivider({
         onMenu({ name, x: e.clientX, y: e.clientY });
       }}
       // multibot: nagłówek jest i uchwytem (kolejność sekcji), i celem —
-      // upuszczony bot wpada do sekcji, upuszczona sekcja staje na tym miejscu.
+      // upuszczony bot albo grupa wpada do sekcji, upuszczona sekcja staje na
+      // tym miejscu. Przyjmujemy WYŁĄCZNIE własne typy: bez tego przeciągnięty
+      // z zewnątrz tekst albo link wyglądałby na poprawny cel, a upuszczenie
+      // poleciałoby PATCH-em na nieistniejące id.
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/mb-section", name);
         e.dataTransfer.effectAllowed = "move";
       }}
       onDragOver={(e) => {
+        if (!SIDEBAR_DRAG_TYPES.some((type) => e.dataTransfer.types.includes(type))) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         setDragOver(true);
@@ -288,7 +298,12 @@ function SectionDivider({
           if (moved !== name) onDropSection(moved, name);
           return;
         }
-        const botId = (e.dataTransfer.getData("text/mb-bot-id") || e.dataTransfer.getData("text/plain") || "").trim();
+        const groupId = e.dataTransfer.getData("text/mb-group-id").trim();
+        if (groupId) {
+          onDropGroup(groupId, name);
+          return;
+        }
+        const botId = e.dataTransfer.getData("text/mb-bot-id").trim();
         if (botId) onDropBot(botId, name);
       }}
       aria-expanded={!collapsed}
@@ -778,8 +793,9 @@ function GroupRow({
   const [dragOver, setDragOver] = useState(false);
 
   // multibot 0.1.46: upuszczenie bota na wiersz grupy dopisuje go do składu.
-  // Błąd zostaje po cichu — wiersz nie ma gdzie go pokazać, a skład na
-  // serwerze się wtedy nie zmienił.
+  // Nieudane dopisanie musi być widać — inaczej wygląda identycznie jak udane
+  // (wiersz nie ma gdzie pokazać komunikatu, więc idzie alertem jak przy
+  // usuwaniu grupy).
   const dropBot = async (botId: string) => {
     setDragOver(false);
     try {
@@ -788,9 +804,11 @@ function GroupRow({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ botId }),
       });
-      if (res.ok) onUpdated((await res.json()) as EngineGroup);
-    } catch {
-      /* silnik/serwer nie odpowiedział — skład zostaje jak był */
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+      onUpdated(body as EngineGroup);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -808,7 +826,17 @@ function GroupRow({
         e.preventDefault();
         onMenu({ group: g, x: e.clientX, y: e.clientY });
       }}
+      // multibot: wiersz grupy da się przeciągnąć na nagłówek sekcji — bez tego
+      // sekcja wybrana przy tworzeniu byłaby nie do zmiany.
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/mb-group-id", g.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragEnd={() => setDragOver(false)}
       onDragOver={(e) => {
+        // tylko bot dopisuje się do składu; przeciągana sekcja czy grupa nie
+        if (!e.dataTransfer.types.includes("text/mb-bot-id")) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         setDragOver(true);
@@ -816,7 +844,7 @@ function GroupRow({
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => {
         e.preventDefault();
-        const bid = (e.dataTransfer.getData("text/mb-bot-id") || e.dataTransfer.getData("text/plain") || "").trim();
+        const bid = e.dataTransfer.getData("text/mb-bot-id").trim();
         if (bid) void dropBot(bid);
         else setDragOver(false);
       }}
@@ -1160,13 +1188,33 @@ export function Sidebar() {
     void authFetch("/api/config", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sectionOrder: next }),
+      // multibot: zapis jest PODMIANĄ całej listy, więc doklejamy nazwy, których
+      // ta sesja nie rysuje (sekcja z samymi przypiętymi/ukrytymi botami, sekcja
+      // cudzych botów, sekcja grup zanim `/api/groups` odpowie). Bez tego każde
+      // przestawienie kasowałoby je ze wspólnej kolejności.
+      body: JSON.stringify({ sectionOrder: [...next, ...savedOrder.filter((name) => !next.includes(name))] }),
     })
-      .then((r) => r.json())
-      .then((config) => dispatch({ type: "configStatus", config }))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((config) => config && dispatch({ type: "configStatus", config }))
       .catch(() => {});
   };
   const moveSection = (name: string, index: number) => saveOrder(moveSectionTo(sectionNames, name, index));
+  // multibot: przeniesienie grupy do sekcji — harnessowy PATCH, silnik o
+  // sekcjach nie wie (server/index.ts, trasa `/api/groups/:id`).
+  const moveGroupToSection = async (groupId: string, section: string) => {
+    try {
+      const res = await authFetch(`/api/groups/${encodeURIComponent(groupId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ section }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? `${res.status} ${res.statusText}`);
+      if (body.group) setGroups((gs) => (gs ?? []).map((x) => (x.id === groupId ? (body.group as EngineGroup) : x)));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    }
+  };
   // multibot: przypięte nie siedzą już w liście — mają osobny header nad nią
   const flatBots = collapsed ? visibleBots : rows.unsectioned.bots;
 
@@ -1441,6 +1489,7 @@ export function Sidebar() {
                   onToggle={() => toggleSection(section.name)}
                   onMenu={setSectionMenu}
                   onDropBot={(botId, name) => dispatch({ type: "updateBot", botId, patch: { section: name } })}
+                  onDropGroup={(groupId, name) => void moveGroupToSection(groupId, name)}
                   onDropSection={(moved, target) => moveSection(moved, sectionNames.indexOf(target))}
                   polish={polish}
                 />

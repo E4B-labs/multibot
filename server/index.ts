@@ -3427,7 +3427,11 @@ const server = createServer(async (req, res) => {
         const remote = await fetch(`${await ensureEngine()}/api/groups`);
         if (remote.ok) {
           const groups = await remote.json() as Array<{ id: string; name: string; bot_ids: string[] }>;
-          for (const group of groups) groupStore.upsert(group);
+          // multibot: pola przepisujemy po jednym — silnik nie wie o sekcjach,
+          // a `section: null` w jego odpowiedzi skasowałby sekcję z cienia.
+          for (const group of groups) {
+            groupStore.upsert({ id: group.id, name: group.name, bot_ids: group.bot_ids ?? [] });
+          }
         }
       } catch {}
       return json(res, 200, groupStore.list().filter((group) => groupVisible(group, actor)));
@@ -3481,24 +3485,39 @@ const server = createServer(async (req, res) => {
     // zapis jest źródłem dla UI, silnik dostaje PATCH best-effort.
     if (m && method === "PATCH") {
       const body = await readBody(req);
-      const name = typeof body.name === "string" ? body.name.trim() : "";
-      if (!name) return json(res, 400, { error: "room name must be a non-empty string" });
+      const hasName = typeof body.name === "string";
+      // multibot: sekcja sidebaru jest wyłącznie harnessowa — silnik jej nie
+      // zna, więc przeniesienie grupy do innej sekcji nie rusza go wcale.
+      const hasSection = typeof body.section === "string";
+      const name = hasName ? (body.name as string).trim() : "";
+      if (hasName && !name) return json(res, 400, { error: "room name must be a non-empty string" });
       if (name.length > 100) return json(res, 400, { error: "room name must be at most 100 characters" });
+      if (!hasName && !hasSection) return json(res, 400, { error: "room name must be a non-empty string" });
       let engineSynced = true;
-      try {
-        const base = await ensureEngine();
-        const remote = await fetch(`${base}/api/groups/${encodeURIComponent(m[1])}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name }),
-        });
-        engineSynced = remote.ok || remote.status === 404;
-      } catch {
-        engineSynced = false; // silnik offline — nazwa i tak zostaje w harnessie
+      if (hasName) {
+        try {
+          const base = await ensureEngine();
+          const remote = await fetch(`${base}/api/groups/${encodeURIComponent(m[1])}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name }),
+          });
+          engineSynced = remote.ok || remote.status === 404;
+        } catch {
+          engineSynced = false; // silnik offline — nazwa i tak zostaje w harnessie
+        }
       }
-      const renamed = groupStore.rename(m[1], name);
-      if (!renamed && !engineSynced) return json(res, 404, { error: "no such group" });
-      return json(res, 200, { ok: true, group: renamed, engineSynced });
+      let group = hasName ? groupStore.rename(m[1], name) : groupStore.get(m[1]);
+      if (group && hasSection) {
+        group = groupStore.upsert({
+          id: group.id,
+          name: group.name,
+          bot_ids: group.bot_ids,
+          section: (body.section as string).trim().slice(0, 60),
+        });
+      }
+      if (!group && !engineSynced) return json(res, 404, { error: "no such group" });
+      return json(res, 200, { ok: true, group, engineSynced });
     }
     // multibot: mixed-provider group rooms. Engine stores membership/shadow
     // ids; harness owns actual turns so Claude/Codex/ACP bots answer through
