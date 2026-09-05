@@ -64,8 +64,6 @@ const MOTION_FACE: Partial<
   surprise: { state: "surprised", blink: true },
   failure: { state: "sad" },
   sending: { state: "sending" },
-  // The engine dissolves the body into the three dots itself — no overlay.
-  "thinking-dots": { state: "thinking-dots" },
 };
 
 /** How long a one-shot motion holds its state before the bot's own returns. */
@@ -183,9 +181,6 @@ function MausAvatarComponent(
     if (beat.spin) inner.current?.spin(beat.spin);
     if (!beat.state) return;
     setMotionState(beat.state);
-    // The dots are a sustained indicator, not a beat — they hold until the
-    // caller drops the motion.
-    if (motion === "thinking-dots") return;
     const timer = setTimeout(() => setMotionState(null), MOTION_FACE_MS);
     return () => {
       clearTimeout(timer);

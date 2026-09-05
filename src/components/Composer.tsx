@@ -264,7 +264,7 @@ export function Composer({ bot }: { bot: Bot }) {
   // multibot: pasek nad composerem — JEDYNY animowany bot w aplikacji. Stan
   // wybiera czysta `stripMascotState`; `null` znaczy „pasek pusty".
   const runtime = state.runtime[bot.threadId] ?? null;
-  // Wiersze zależne od czasu (loading po 3 s, celebrate gaśnie po 1 s) nie mają
+  // Wiersze zależne od czasu (loading po 10 s, celebrate gaśnie po 1 s) nie mają
   // własnego eventu, więc przy żywej turze przeliczamy je co pół sekundy.
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {

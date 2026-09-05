@@ -92,7 +92,6 @@ export const MAUS_MOTIONS = [
   "surprise",
   "failure",
   "sending",
-  "thinking-dots",
 ] as const;
 
 export type MausMotion = "none" | (typeof MAUS_MOTIONS)[number];
@@ -239,11 +238,13 @@ export function stripMascotState(input: {
   // 1-2: bot czeka na człowieka.
   if (pendingAsk(last) || attention?.trimEnd().endsWith("?")) return "confused";
   if (attention !== null) return "alerting";
-  // 3: narzędzie w locie. Nierozstrzygniętą aktywność liczymy tylko przy żywej
-  // turze — porzucona po ubitej turze inaczej trzymałaby pasek w nieskończoność.
+  // 3: narzędzie w locie — ale tylko przy żywej turze. Faza `runtime` nigdy się
+  // nie kasuje (store wyłącznie nadpisuje wpis kolejnym tickiem), a po turze
+  // ubitej w środku narzędzia „done" już nie przyjdzie; bez tej bramki pasek
+  // zostałby na „working" na zawsze. To samo dotyczy porzuconej aktywności.
   const toolInFlight =
-    runtime?.kind === "tool" ||
-    (bot.busy === true && last?.kind === "activity" && last.tool?.ok === undefined);
+    bot.busy !== false &&
+    (runtime?.kind === "tool" || (last?.kind === "activity" && last.tool?.ok === undefined));
   if (toolInFlight) return "working";
   // 4: rozumuje albo tura ruszyła i nic jeszcze z niej nie wyszło.
   if (runtime?.kind === "reasoning" || (runtime?.kind === "start" && now - runtime.at < MODEL_LOAD_MS)) {

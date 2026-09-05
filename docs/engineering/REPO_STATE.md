@@ -113,7 +113,7 @@ podstawowy przepływ pracy ich nie wymaga.
 ## 6. Dług techniczny
 
 - **Wielkie pliki jako punkty kolizji**: `server/index.ts` 4735 linii,
-  `src/components/CursorAvatar.tsx` 1814, `src/components/Sidebar.tsx` 1354,
+  `src/components/BlobAvatar.tsx` 2709, `src/components/Sidebar.tsx` 1354,
   `engine/server/app.py` 1280, `src/state/store.tsx` 1119. Dwie gałęzie w
   `server/index.ts` naraz to najbardziej prawdopodobny konflikt w tym repo.
 - **Cztery testy, których nikt nie uruchamia**: `vite.config.ts` włącza tylko

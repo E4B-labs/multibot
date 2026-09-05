@@ -64,8 +64,10 @@ describe("stripMascotState — tabela stanów paska", () => {
     expect(strip({ busy: true, messages: [activity(NOW)] })).toBe("working");
     // rozstrzygnięte narzędzie już nie leci
     expect(strip({ busy: true, messages: [activity(NOW, true)] })).toBeNull();
-    // porzucona aktywność po ubitej turze nie może trzymać paska na zawsze
+    // porzucona tura nie może trzymać paska na „working" na zawsze — ani przez
+    // wiadomość, ani przez fazę `runtime`, której nikt nie kasuje
     expect(strip({ busy: false, messages: [activity(NOW)] })).toBeNull();
+    expect(strip({ busy: false }, { runtime: { at: NOW, kind: "tool" } })).toBeNull();
   });
 
   it("4. rozumowanie → thinking, nigdy loading", () => {
