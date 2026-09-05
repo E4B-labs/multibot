@@ -9,7 +9,7 @@ Szablon opisu: [`../../.github/PULL_REQUEST_TEMPLATE.md`](../../.github/PULL_REQ
 
 1. **Co się zmieniło** — konkretnie, nie „poprawki".
 2. **Dlaczego** — problem albo prośba, którą to zamyka.
-3. **Dotknięte moduły** — `src/`, `server/`, `engine/`, `electron/`, `scripts/`, `docs/`.
+3. **Dotknięte moduły** — `src/`, `server/`, `electron/`, `scripts/`, `docs/`.
 4. **Poziom ryzyka** — niski / średni / wysoki, z jednym zdaniem uzasadnienia.
 5. **Uruchomione testy wraz z wyjściem** — wklejone liczby, nie deklaracja.
 6. **Skutki migracyjne** — czy zmienia się kształt zapisanych danych.

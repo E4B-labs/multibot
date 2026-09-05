@@ -41,14 +41,11 @@ Najważniejsze elementy produktu:
 - frontend React 19 + TypeScript + Vite;
 - desktop Electron;
 - uwierzytelniony Node.js harness w `server/`;
-- opcjonalny Python FastAPI engine w `engine/`;
-- runtime Hermes Agent przypięty do SHA
-  `17688f994e6c4c681f8dd3d160b210ffe49aa273`;
 - PWA do używania z telefonu i przeglądarki;
 - instalatory Windows, Linux/Docker i Android/Termux.
 
-Harness jest granicą sieciową. Python engine jest sidecarem uruchamianym na
-loopback i nie powinien być wystawiany bezpośrednio do Internetu.
+Harness jest granicą sieciową. Cały stan workspace przechodzi przez niego i to
+on decyduje, co jest wystawione na zewnątrz.
 
 ---
 
@@ -102,10 +99,10 @@ Node.js harness :8799
   mail, routines, connectors, updates, SSE/WebSocket
             |
             +--> provider drivers / CLI / API models
-            |
-            +--> Python FastAPI engine :8700 (loopback only)
-                       memory, skills, browser, CUA, runtime tools
 ~~~
+
+MultiBot uruchamia dwa procesy: powłokę Electron i harness Node/TypeScript.
+Nie ma osobnego procesu runtime ani sidecara.
 
 ### 3.1. Frontend
 
@@ -132,27 +129,13 @@ Harness znajduje się w `server/`. Odpowiada za:
 - trwałe pokoje i grupy;
 - rutyny i webhooki;
 - profile, workspace i zaproszenia;
-- proxy do engine;
+- pamięć, skills, approvals, uprawnienia i usage;
 - logowanie profili na wspólnym serwerze;
-- provisioning runtime;
+- provisioning urządzenia i narzędzi CLI;
 - katalog providerów, CLI i konektorów;
 - eventy live dla kilku urządzeń.
 
-### 3.3. Python engine
-
-Engine znajduje się w `engine/`. Dostarcza:
-
-- pamięć profilową i odczyt faktów;
-- graf pamięci;
-- markdownową pamięć profilu;
-- skills i proces teach-a-task;
-- obsługę browsera i computer-use;
-- grupy oraz inter-agent tools;
-- uprawnienia i approval flow;
-- provider/runtime helpers;
-- endpointy FastAPI używane przez harness.
-
-### 3.4. Provider-neutral workspace
+### 3.3. Provider-neutral workspace
 
 Pamięć, skills, routines, autonomia, permissions, usage i komunikacja botów są
 przechowywane przez harness w sposób niezależny od providera. Dzięki temu
@@ -160,8 +143,8 @@ zmiana modelu z Claude na Codex, Gemini, Grok, Kimi, Qwen albo custom endpoint
 nie tworzy nowego bota i nie gubi jego workspace.
 
 Provider nadal zachowuje własny natywny runtime. Dla części providerów CLI
-MultiBot używa shadow profile engine, aby wspólne funkcje workspace były
-dostępne pod tym samym botem.
+MultiBot używa shadow profile po stronie harnessu, aby wspólne funkcje
+workspace były dostępne pod tym samym botem.
 
 ---
 
@@ -212,7 +195,7 @@ ekranu:
 - composer pozostaje przyklejony do dołu;
 - duże elementy dotykowe zastępują małe kontrolki desktopowe;
 - nagłówek ogranicza liczbę jednoczesnych akcji;
-- browser/computer może być oglądany zdalnie, gdy host działa na innym
+- pulpit/computer może być oglądany zdalnie, gdy host działa na innym
   urządzeniu.
 
 Instalacja PWA nie przenosi danych offline. Service worker cache’uje shell i
@@ -260,7 +243,6 @@ Ekran pokazuje mascot MultiBot, nazwę aplikacji i dwie karty:
 - hostname urządzenia;
 - platformę i architekturę;
 - RAM, jeśli system go udostępnia;
-- Python i jego wersję;
 - Docker i jego wersję;
 - producenta, model i wersję Androida, jeśli dotyczy;
 - informację o Termuxie;
@@ -608,8 +590,9 @@ Globalne `Ctrl+K` przeszukuje:
 Wiadomość może odpowiadać na inną przez flat reply. Cytat wskazuje wiadomość
 źródłową i pozwala do niej przeskoczyć.
 
-Odpowiedzi botów mają przycisk Speak/TTS, jeśli aktualny driver udostępnia
-obsługę mowy. Przycisk nie jest pokazywany przy wiadomościach użytkownika.
+Odpowiedzi botów mają przycisk Speak/TTS. Czytanie na głos obsługuje harness
+przez `/api/bots/:id/speak` i wymaga skonfigurowanego klucza głosu. Przycisk
+nie jest pokazywany przy wiadomościach użytkownika.
 
 ---
 
@@ -625,11 +608,11 @@ Katalog instancji rozpoznaje między innymi:
 - Gemini;
 - Kimi Code;
 - Qwen Code;
-- custom modele;
-- wewnętrzny engine/local driver.
+- custom modele.
 
-`slafy` jest wewnętrznym identyfikatorem drivera embedded engine, a nie nazwą,
-którą użytkownik powinien wybierać jako osobnego providera.
+Własne endpointy zgodne z OpenAI (Ollama, LM Studio, OpenRouter) obsługuje
+driver `openaiCompatible`, zbudowany na tym samym mechanizmie
+chat-completions co pozostałe providery API.
 
 ### 8.2. Model picker
 
@@ -668,7 +651,8 @@ Nie każdy driver ma identyczne możliwości. Przykładowo:
 - provider API/Codex może używać jawnego `@bot` delegation;
 - CLI może wymagać osobnego loginu;
 - custom model wymaga działającego endpointu;
-- local model wymaga działającego lokalnego service/engine.
+- lokalny model wymaga działającego serwera modeli, na przykład Ollama albo
+  LM Studio.
 
 MultiBot zachowuje wspólne memory/skills/routines niezależnie od tych różnic,
 ale konkretne narzędzie może być niedostępne dla danego drivera lub platformy.
@@ -873,13 +857,7 @@ Pamięć zespołu nie zastępuje pamięci bota. Pamięć bota służy do jego w�
 tożsamości, preferencji i historii; team memory służy do wspólnych ustaleń,
 projektu i faktów znanych całemu zespołowi.
 
-### 10.3. Pamięć engine
-
-Python engine może utrzymywać profilową bazę pamięci `memory_store.db` oraz
-shadow profile dla providerów CLI. Harness zapewnia zunifikowane endpointy,
-żeby frontend nie musiał znać konkretnego providera.
-
-### 10.4. Izolacja
+### 10.3. Izolacja
 
 Pamięć jest filtrowana po bot ID i workspace. Agent może czytać tylko zakres,
 który wynika z jego uprawnień. Zmiany pamięci są publikowane jako eventy live,
@@ -1005,13 +983,13 @@ nie musi pojawić się w wątku goal.
 
 ---
 
-## 13. Computer use i browser
+## 13. Computer use
 
 ### 13.1. ComputerPanel
 
 Panel komputera może pokazywać:
 
-- live preview pulpitu/browsera;
+- live preview pulpitu;
 - adres lub aktualną stronę;
 - input takeover;
 - nawigację;
@@ -1022,27 +1000,16 @@ Panel komputera może pokazywać:
 
 Dostęp otwiera się przez menu `⋮` → **Bot computer**.
 
-### 13.2. Profile browsera
-
-Dostępne są:
-
-- osobny browser/profile per bot;
-- jeden shared browser profile dla floty.
-
-Shared browser jest wspólnym zasobem i jego akcje są jawnie serializowane lub
-kolejkowane, żeby dwa boty nie sterowały jednocześnie tą samą sesją.
-
-### 13.3. Approval granicy komputera
+### 13.2. Approval granicy komputera
 
 Computer-use respektuje permission i approval mode bota. Akcje zewnętrzne,
 logowanie i wrażliwe interakcje mogą wymagać zgody albo przejęcia przez
 użytkownika.
 
-### 13.4. Android/Termux
+### 13.3. Android/Termux
 
-Na Androidzie nie ma desktopowego okna Playwright. Działa headless Chromium
-przez CDP, a PWA może pokazywać i sterować browserem zdalnie. Pełne okno
-Android desktop wymaga Termux:X11.
+Na Androidzie pełny pulpit wymaga Termux:X11. Bez niego panel komputera nie ma
+czego pokazać, natomiast czat, pamięć, skills i rutyny działają normalnie.
 
 ---
 
@@ -1058,7 +1025,6 @@ Panel Skills pozwala:
 - edytować opis i instrukcje;
 - włączać/wyłączać skill;
 - usuwać skill;
-- uruchomić teach-a-task;
 - używać skilla przez slash command.
 
 Skill ma:
@@ -1069,9 +1035,8 @@ Skill ma:
 - enabled flag;
 - plik `SKILL.md` w katalogu workspace.
 
-Teach-a-task może użyć browser-capable profilu do nauczenia procedury. Shared
-skills są dostępne przez shadow workspace dla różnych providerów tego samego
-bota.
+Shared skills są dostępne przez shadow workspace dla różnych providerów tego
+samego bota.
 
 Wiadomość z załączonym `skill.md` może zostać potraktowana jako materiał do
 skilla, a nie zwykły plik transcriptu.
@@ -1207,7 +1172,7 @@ Dostępne akcje:
 - zamknięcie panelu.
 
 Inspector służy do diagnozowania runtime, providerów i narzędzi. Nie jest
-pełnym debuggerem Python ani terminalem administratora.
+pełnym debuggerem ani terminalem administratora.
 
 ---
 
@@ -1366,24 +1331,13 @@ shella i setupu lokalnego. Dane workspace nie są publiczne.
 
 WebSocket nie może ustawić zwykłego Authorization w każdej przeglądarce, więc
 frontend używa subprotocol marker + token. Proxy wybiera marker i nie przekazuje
-sekretu jako protokołu do engine.
+sekretu dalej jako protokołu.
 
 NoVNC/websockify ma ograniczoną obsługę `?token=` wyłącznie na trasie VNC, bo
 mobile WebView może mieć rozdzielone cookie jar. Inne trasy nie używają tego
 mechanizmu.
 
-### 20.3. Engine
-
-Engine nasłuchuje wyłącznie na:
-
-- `127.0.0.1`;
-- `localhost`;
-- `::1`.
-
-`ENGINE_URL` wskazujący publiczny adres jest odrzucany. Zdalny klient zawsze
-wchodzi przez uwierzytelniony harness.
-
-### 20.4. Token rotation
+### 20.3. Token rotation
 
 Tokeny są losowe, porównywane bez ujawniania wartości i sprawdzane bez
 niebezpiecznego porównania zwykłych stringów. Rotacja zamyka istniejące
@@ -1411,7 +1365,7 @@ Najważniejsze magazyny harness:
 - `groups.json` — grupy i ich transcript;
 - `goals.json` — postęp i stan goals;
 - katalog attachments — pliki wiadomości;
-- katalogi profili botów — engine profile, skills i browser state.
+- katalogi profili botów — skills i stan profilu bota.
 
 Dane wrażliwe powinny mieć prywatne uprawnienia plikowe na systemach, które je
 wspierają. Windows korzysta z mechanizmu ACL systemu.
@@ -1469,7 +1423,6 @@ uruchomiono jako pełny asset release.
 - sprawdzić pending approval/question;
 - sprawdzić, czy target bot nie jest zajęty;
 - sprawdzić kolejkę agent mail;
-- sprawdzić, czy engine jest online;
 - przerwać turę zamiast uruchamiać kilka duplikatów.
 
 **Brak animacji**
@@ -1530,16 +1483,9 @@ release/MultiBot-<wersja>-x64-setup.exe.blockmap
 Instalator jest per-user, bez UAC i bez podpisu certyfikatem. Windows
 SmartScreen może pokazać ostrzeżenie.
 
-Paczka zawiera UI, harness i kod engine, ale nie zawiera gotowego Pythona.
-Po wybraniu serwera 24/7 provisioning dociąga runtime do user data aplikacji:
-
-- Python standalone 3.12.13;
-- requirements;
-- pinned Hermes Agent;
-- Chromium Playwright.
-
-Orientacyjnie potrzeba około `350 MB` pobierania, około `1,3 GB` miejsca i
-około `3 min` na dobrym łączu. Zadanie Windows uruchamia spakowaną aplikację
+Paczka zawiera UI i harness. Nie dociąga żadnego osobnego runtime'u — po
+wybraniu serwera 24/7 provisioning zajmuje się tylko konfiguracją instalacji
+i narzędziami CLI. Zadanie Windows uruchamia spakowaną aplikację
 z `--server-only` przy logowaniu użytkownika.
 
 ### 23.2. Linux/VPS
@@ -1558,9 +1504,8 @@ enable-linger`, aby usługa działała po wylogowaniu.
 docker compose -f docker-compose.selfhost.yml up -d --build
 ~~~
 
-Publikowany jest harness na `127.0.0.1:8799`. Engine działa na
-`127.0.0.1:8700` wewnątrz środowiska i nie powinien mieć osobnego publicznego
-portu.
+Publikowany jest harness na `127.0.0.1:8799`. Poza nim kontener nie powinien
+wystawiać żadnego publicznego portu.
 
 ### 23.4. Android/Termux
 
@@ -1569,8 +1514,7 @@ bash scripts/install-termux.sh
 ~~~
 
 Usługa używa `termux-services`, Termux:Boot i wake lock. Chat, memory,
-routines, skills i headless browser CDP działają. Brak desktopowego okna
-Playwright dla Androida.
+routines i skills działają.
 
 ### 23.5. Zdalny HTTPS
 
@@ -1587,15 +1531,13 @@ stały zespół potrzebuje stałego hostname.
 | Windows | tak | tak | tak | task per-user |
 | macOS | tak | tak | tak | desktop/server |
 | Linux/VPS | tak | tak | headless domyślnie | systemd/Docker |
-| Android/Termux | tak | tak | Chromium CDP | Termux services |
+| Android/Termux | tak | tak | wymaga Termux:X11 | Termux services |
 
 Ograniczenia bieżącej wersji:
 
-- engine pozostaje loopback;
 - HTTPS jest wymagany dla pełnego zdalnego PWA, mikrofonu i stabilnych sesji;
-- Termux nie ma desktopowego Playwright browsera;
-- grupa używa shared engine room transport;
-- CLI uczestnik grupy może być reprezentowany przez durable engine shadow;
+- CLI uczestnik grupy może być reprezentowany przez trwały shadow profil
+  harnessu;
 - natywne aplikacje sklepowe iOS/Android nie są częścią desktopowego release;
 - OAuth dla dowolnego MCP nie jest automatycznie dostępny bez konfiguracji
   danego connectora;
@@ -1676,7 +1618,7 @@ problem po stronie samego komponentu UI.
 ### 25.6. Skills i routines
 
 - `/api/bots/:id/skills`;
-- `/api/skills` i endpointy teach, zależnie od drivera;
+- `/api/skills`;
 - `/api/bots/:id/routines`;
 - `/api/routines/:id`;
 - `/webhooks/:id`;
@@ -1704,7 +1646,7 @@ problem po stronie samego komponentu UI.
 
 ### 25.9. Computer i debug
 
-- endpointy browser/computer proxy;
+- endpointy computer proxy;
 - endpointy noVNC/WebSocket;
 - `/api/bots/:id/inspector`;
 - `/api/bots/:id/inspector/replay`.
@@ -1717,7 +1659,6 @@ problem po stronie samego komponentu UI.
 
 ~~~sh
 pnpm install
-pnpm dev:engine
 pnpm dev:server
 pnpm dev
 ~~~
@@ -1725,8 +1666,7 @@ pnpm dev
 Porty developerskie:
 
 - Vite: `127.0.0.1:5199`;
-- harness: `127.0.0.1:8799`;
-- engine: `127.0.0.1:8700`.
+- harness: `127.0.0.1:8799`.
 
 ### 26.2. Sprawdzanie jakości
 
@@ -1777,7 +1717,6 @@ Nigdy nie commitować:
 - adresów LAN;
 - transcriptów rozmów;
 - uploadów;
-- `memory_store.db`;
 - wygenerowanych profili;
 - lokalnych logów z sekretami;
 - danych kolegów i członków workspace.
@@ -1789,7 +1728,6 @@ Zasady implementacyjne:
 - rotacja/wylogowanie zamyka sesje;
 - hasło serwera dopuszcza rejestrację nowych profili;
 - ACL sprawdzane na serwerze, nie tylko w React;
-- engine loopback-only;
 - SSRF/loopback restrictions dla proxy;
 - osobne cookie/session handling dla WebSocket;
 - walidacja długości i formatu wejścia;
@@ -1866,5 +1804,4 @@ Workspace jest poprawnie skonfigurowany, gdy:
 - room współpracy można otworzyć później;
 - update feed zwraca poprawny release bez doklejonego tekstu błędu;
 - `latest.yml`, EXE i blockmap mają tę samą wersję;
-- engine nie jest wystawiony publicznie;
 - żaden sekret nie trafił do repozytorium ani release notes.

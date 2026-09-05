@@ -16,22 +16,22 @@ MultiBot provides one self-hosted workspace for named agents, conversations, mod
 
 ## Positioning
 
-MultiBot unifies official vendor CLIs, custom/local models, and an embedded Hermes runtime behind one provider-neutral product identity and one local control plane. Provider implementations remain infrastructure details, not separate products in the interface.
+MultiBot unifies official vendor CLIs and custom/local model endpoints behind one provider-neutral product identity and one local control plane. Provider implementations remain infrastructure details, not separate products in the interface.
 
 ## Operating Context
 
 - React/PWA interface served by the authenticated Node harness.
 - Optional Electron desktop shell and remote phone access, normally through Tailscale HTTPS.
-- Claude Code, Codex, ACP CLIs, custom endpoints, and embedded local engine.
+- Claude Code, Codex, ACP CLIs, and custom OpenAI-compatible endpoints.
 - Long-running turns, scheduled routines, tool approvals, browser takeover, and bot-to-bot delegation.
 - Polish and English interface; mobile and desktop are both supported surfaces.
 
 ## Capabilities and Constraints
 
 - User data, credentials, histories, memories, routines, and attachments stay self-hosted.
-- Engine remains loopback-only; harness is the sole authenticated network boundary.
+- The harness is the sole authenticated network boundary; every other listener stays loopback-only.
 - Provider credentials stay in official CLI stores or local write-only configuration and must never appear in API responses or logs.
-- MultiBot is the only user-facing agent identity. Do not expose Hermes or Slafy branding.
+- MultiBot is the only user-facing agent identity. Do not expose provider branding.
 - Full Access remains bounded by OS, container, provider, and network permissions.
 - Secure-context browser rules for microphone, PWA, and camera access must not be weakened.
 
@@ -45,7 +45,7 @@ MultiBot unifies official vendor CLIs, custom/local models, and an embedded Herm
 ## Evidence on Hand
 
 - Product and architecture handoff supplied with the task.
-- Existing implementation and tests under `src/`, `server/`, and `engine/`.
+- Existing implementation and tests under `src/` and `server/`.
 - Existing dark-theme tokens in `src/styles.css` and current production components.
 - No testimonials, customer claims, pricing claims, or external benchmarks may be invented.
 

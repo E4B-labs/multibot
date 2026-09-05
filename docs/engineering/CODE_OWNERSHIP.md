@@ -10,10 +10,9 @@ rozstrzyga kolejność i że jej zdanie waży najwięcej w przeglądzie.
 
 | Obszar | Główne ścieżki | Bezpieczny obszar równoległy |
 |---|---|---|
-| Interfejs | `src/`, `public/`, `index.html` | `server/`, `engine/` |
-| Harness (serwer Node) | `server/` | `src/`, `engine/` |
-| Silnik (Python) | `engine/` | `src/`, większość `server/` |
-| Powłoka desktopowa | `electron/`, `electron-builder.yml` | `engine/`, większość `server/` |
+| Interfejs | `src/`, `public/`, `index.html` | `server/` |
+| Harness (serwer Node) | `server/` | `src/` |
+| Powłoka desktopowa | `electron/`, `electron-builder.yml` | `src/`, większość `server/` |
 | Instalatory i dokumentacja | `scripts/`, `docs/`, Markdown w katalogu głównym | dowolny obszar kodu |
 | Zarządzanie repo | `.github/`, `docs/engineering/`, `AGENTS.md` | dowolny obszar kodu |
 

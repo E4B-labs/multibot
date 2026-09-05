@@ -16,7 +16,7 @@ is implied.
 - Browser/computer-use sessions with approval boundaries
 - Scheduled and webhook-triggered routines
 - Code-enforced communication gate for inter-agent messages
-- React/PWA interface with a Node.js harness and optional Python engine
+- React/PWA interface with a Node.js harness
 
 ## Architecture
 
@@ -29,14 +29,12 @@ flowchart LR
   H --> TOOLS[Composio / MCP connectors]
   H --> CUA[Computer-use sessions]
   H --> SCHED[Scheduler and webhooks]
-  AUTH --> ENG[Python agent engine]
-  ENG --> MEM[Per-agent memory and skills]
+  H --> MEM[Per-agent memory and skills]
   H --> DATA[(Local config and transcripts)]
 ```
 
-The harness is the network boundary. The engine is intended to stay on
-loopback; local configuration and transcripts remain on the operator's
-machine.
+The harness is the network boundary; local configuration and transcripts
+remain on the operator's machine.
 
 ## Quick start
 
@@ -56,12 +54,7 @@ In another terminal, start the Vite UI:
 pnpm dev
 ```
 
-Open the URL printed by Vite. To run the optional Python engine, install its
-dependencies from `engine/` and start:
-
-```sh
-pnpm dev:engine
-```
+Open the URL printed by Vite.
 
 Useful checks:
 
@@ -75,7 +68,6 @@ pnpm build
 ## Configuration and environment
 
 - Root `.env.example`: optional Vite build-time values.
-- `engine/.env.example`: engine provider and runtime placeholders.
 - Runtime config: local user config file; see [`server/config.ts`](server/config.ts).
 
 Never commit `.env` files, API keys, access tokens, generated profiles, local

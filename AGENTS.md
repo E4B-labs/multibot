@@ -22,7 +22,7 @@ Ten plik jest krótki celowo. Szczegóły: [`docs/engineering/`](docs/engineerin
 5. `git fetch origin` — baza to aktualny `origin/main`.
 6. Zrozum zakres; jeśli jest niejasny, dopytaj przed edycją.
 7. Przeczytaj kod, który zmieniasz, zanim go zmienisz. Wypisz moduły, które
-   zmiana dotknie (`src/`, `server/`, `engine/`, `electron/`), i testy, które ją udowodnią.
+   zmiana dotknie (`src/`, `server/`, `electron/`), i testy, które ją udowodnią.
 8. Kolizje: `gh pr list --repo E4B-labs/multibot-desktop` i `git branch -r`. Jeśli
    ktoś już rusza te pliki — dogadaj się, nie duplikuj pracy.
 
@@ -76,13 +76,6 @@ pnpm lint            # git diff --check && tsc --noEmit
 pnpm typecheck       # tsc -b && tsc -p tsconfig.server.json
 pnpm test            # vitest run
 pnpm exec vite build # produkcyjny build UI
-```
-
-Zmiana w `engine/` dokłada pytest (venv wg [`engine/README.md`](engine/README.md)):
-
-```sh
-cd engine && .venv/bin/python -m pytest -q          # Linux/macOS
-cd engine && .venv/Scripts/python.exe -m pytest -q  # Windows
 ```
 
 Nietrywialna logika zostawia jeden uruchamialny test obok istniejących — bez
