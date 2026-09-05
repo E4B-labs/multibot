@@ -2265,6 +2265,8 @@ export const BlobAvatar = React.forwardRef<BlobAvatarHandle, BlobAvatarProps>(
       morph: 1,
       velocity: 0,
       blinkStart: null as number | null,
+      /** Signature of the frame last drawn while paused; null while running. */
+      pausedSig: null as string | null,
       spinStart: null as number | null,
       spinDuration: 900,
       /** Set by a sequence step so its transition feel outlives the effect that set it. */
@@ -2528,7 +2530,10 @@ export const BlobAvatar = React.forwardRef<BlobAvatarHandle, BlobAvatarProps>(
           paint: paintRef.current,
           uid,
           showEffects: p.effects !== false,
-          showGlyphs: p.glyphs !== false,
+          // A glyph cycles: it swaps in over the faded body for a beat, then leaves. A
+          // paused mascot is drawn at one arbitrary point on that cycle, so leaving it on
+          // would show a still `alerting` bot as a bare "!" instead of a face, at random.
+          showGlyphs: p.glyphs !== false && !p.paused,
         })
       }
 
@@ -2538,7 +2543,38 @@ export const BlobAvatar = React.forwardRef<BlobAvatarHandle, BlobAvatarProps>(
         const p = e.props
         const dt = Math.min((now - e.last) / 1000, 0.1)
         e.last = now
-        if (p.paused) return
+        /*
+          A paused avatar is still drawn — just not every frame.
+
+          The face carries no geometry in the markup: the eye and mouth `d` attributes are
+          written here, in `draw`. Returning before the first draw therefore leaves a bare
+          coloured body with no eyes and no mouth, which is what every static avatar (the
+          sidebar rows, the top strip, group rows, the members panel, the chat header,
+          settings) looked like. So paint once, then only when something the face depends
+          on has actually changed — a screenful of paused mascots still costs nothing.
+        */
+        if (p.paused) {
+          e.morph = 1
+          e.velocity = 0
+          // Pin the motion clock's origin so `draw` never restarts it: a paused body sits
+          // at the settled end of a one-shot entrance, not on its (invisible) first frame.
+          e.lastState = (p.sequenceMotion ?? p.state) as BlobState
+          const sig = [
+            p.state,
+            p.expression,
+            e.expression,
+            p.gaze?.x,
+            p.gaze?.y,
+            p.turn,
+            p.lookAround,
+            p.eyeScale,
+          ].join('|')
+          if (sig === e.pausedSig) return
+          e.pausedSig = sig
+          draw(e, now, 0)
+          return
+        }
+        e.pausedSig = null
 
         const f = e.springOverride ?? p.spring ?? 7
         e.velocity += (-2 * f * e.velocity - f * f * (e.morph - 1)) * dt
