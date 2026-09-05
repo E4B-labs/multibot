@@ -284,7 +284,10 @@ export function reasoningLevels(model: string) {
   return supportsMaxReasoning(model) ? REASONING_LEVELS : REASONING_LEVELS.filter((level) => level.id !== "max");
 }
 
-export function Composer({ bot }: { bot: Bot }) {
+/** `onSend` przejmuje wysyłkę (czat grupowy: jedna wiadomosc do calej grupy,
+ * nie do `bot`). Bez niego composer wysyla do `bot` jak dotad. `bot` zostaje
+ * w obu trybach, bo to on karmi pasek maskotki, model picker i zalaczniki. */
+export function Composer({ bot, onSend }: { bot: Bot; onSend?: (text: string) => void }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [text, setText] = useState("");
@@ -750,7 +753,8 @@ export function Composer({ bot }: { bot: Bot }) {
         if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? `Upload failed (HTTP ${response.status})`);
         return String((await response.json()).id);
       }));
-      dispatch({
+      if (onSend) onSend(text.trim());
+      else dispatch({
         type: "send",
         botId: bot.id,
         text: text.trim(),

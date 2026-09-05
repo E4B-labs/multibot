@@ -14,6 +14,9 @@
 //                   | relay (forward to the next bot named for THIS bot in
 //                     FAKE_ACP_RELAY_MAP, then end with [TASK COMPLETE] once
 //                     its hops run out — the peer-conversation ring e2e)
+//                   | script (reply chosen by what the prompt CONTAINS —
+//                     FAKE_ACP_SCRIPT = {default, rules:[{match,text}]}; the
+//                     group-chat e2e)
 //   FAKE_ACP_RELAY_MAP  path to a JSON file {botId: [nextBotId, ...]} plus the
 //                   per-bot turn counters the relay mode keeps beside it
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
@@ -214,6 +217,27 @@ function handle(msg: any) {
         // skończyła, bo turn.completed już nie przyjdzie.
         process.stderr.write("fake-acp: simulated provider failure mid-turn\n");
         process.exit(4);
+      }
+      if (mode === "script") {
+        // multibot: tryb dla czatu grupowego — odpowiedź wybierana po TRESCI
+        // promptu, nie po liczniku tur. Grupa dostarcza wiadomosci po kolei i
+        // jeden bot moze dostac dwie tury w jednej wymianie, wiec licznik
+        // (jak w trybie `room`) byl nieprzewidywalny; dopasowanie do tekstu
+        // jest deterministyczne. FAKE_ACP_SCRIPT = JSON
+        // {default, rules: [{match, text}]} — wygrywa pierwsza pasujaca regula.
+        const chunk = (text: string) =>
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text } } } });
+        let script: { default?: string; rules?: Array<{ match: string; text: string }> } = {};
+        try {
+          script = JSON.parse(process.env.FAKE_ACP_SCRIPT ?? "{}");
+        } catch {
+          script = {};
+        }
+        const prompt = JSON.stringify(msg.params?.prompt ?? "");
+        const hit = (script.rules ?? []).find((rule) => prompt.includes(rule.match));
+        chunk(hit?.text ?? script.default ?? "nothing to add");
+        complete();
+        return;
       }
       if (mode === "busy") {
         const chunk = (text: string) =>

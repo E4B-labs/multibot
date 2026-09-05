@@ -249,6 +249,9 @@ export function botSystemPrompt(
     taggedReplies?: string;
     roster?: BotLike[];
     currentUser?: { uid: string; name?: string; email?: string };
+    /** Ustawione TYLKO na turze grupowej — wtedy bot dostaje regułę „kto
+     * odpowiada", bo w grupie pisze do niego człowiek, nie kolega bot. */
+    group?: { name: string; members: Array<{ name: string; description?: string }> };
     /** Strefa IANA z konfiguracji aplikacji; pusta = strefa hosta. */
     timeZone?: string;
     /** Tylko dla testu — produkcja bierze zegar w chwili budowania promptu. */
@@ -414,10 +417,23 @@ export function botSystemPrompt(
       : "The harness already fetched the tagged peer replies and appended them below."
     : "";
 
+  // multibot: grupa to zwykły czat, tylko z kilkoma botami naraz. Bez tej
+  // reguły każdy członek odpowiada na wszystko i user dostaje N kopii tej
+  // samej odpowiedzi — a to była cała skarga na grupy.
+  const group = o.group
+    ? "# This turn is a group chat\n"
+      + `You are in group ${o.group.name} with ${
+        o.group.members.map((m) => (m.description?.trim() ? `${m.name} (${m.description.trim()})` : m.name)).join(", ")
+      }. The user writes to the whole group. Reply when: you are addressed, it is a greeting/general question, or the task matches your description. `
+      + "If another member's description fits better, write one line handing it over with @Name and stop. "
+      + "If a member already answered adequately and you were not addressed, reply exactly [NO REPLY]. "
+      + "One owner per task; do not repeat what others said."
+    : "";
+
   const environment = "# Environment\n"
     + currentTimeLine(o.now ?? new Date(), o.timeZone) + "\n"
     + environmentLine(agents);
 
-  return ([who, creationBlock, connectionsBlock(bot, integrations), have, computerPlaybook(integrations), how, environment, chief, knowledge, peers]
+  return ([who, creationBlock, connectionsBlock(bot, integrations), have, computerPlaybook(integrations), how, environment, chief, group, knowledge, peers]
     .filter(Boolean).join("\n\n") + taggedReplies).replace(/[—–]/g, "-");
 }
