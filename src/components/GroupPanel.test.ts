@@ -20,6 +20,7 @@ describe("GroupPanel", () => {
   it("jest czatem: lista wiadomości plus Composer", () => {
     expect(panel).toContain('import { Composer } from "./Composer"');
     expect(panel).toContain("<Composer bot={answering} onSend={send} />");
+    expect(panel).toContain("This group has no bots left.");
     expect(panel).toContain("/chat");
   });
 

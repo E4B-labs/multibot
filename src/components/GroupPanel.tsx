@@ -223,7 +223,16 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
         )}
       </div>
 
-      {answering && <Composer bot={answering} onSend={send} />}
+      {answering ? (
+        <Composer bot={answering} onSend={send} />
+      ) : (
+        // Grupa, ktorej wszystkie boty skasowano: bez bota nie ma czego karmic
+        // composerem (model, zalaczniki, pasek maskotki), wiec zamiast pustego
+        // dolu mowimy wprost, dlaczego nie da sie tu pisac.
+        <div className="px-5 py-4 text-[12.5px] text-ink-secondary">
+          {polish ? "Ta grupa nie ma juz zadnego bota." : "This group has no bots left."}
+        </div>
+      )}
     </main>
   );
 }
