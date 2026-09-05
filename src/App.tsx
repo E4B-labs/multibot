@@ -14,11 +14,11 @@ import { ComputerPanel } from "@/components/ComputerPanel";
 import { AppSettingsPanel } from "@/components/AppSettingsPanel";
 import { TeamMapPanel } from "@/components/TeamMapPanel";
 import { InspectorPanel } from "@/components/InspectorPanel";
-// multibot: F6 — panel rutyn silnika slafy
+// multibot: F6 — panel rutyn bota
 import { RoutinesPanel } from "@/components/RoutinesPanel";
-// multibot: F8 — panel skilli silnika slafy
+// multibot: F8 — panel skilli bota
 import { SkillsPanel } from "@/components/SkillsPanel";
-// multibot: F9-FE — pokój grupowy silnika slafy
+// multibot: F9-FE — pokój grupowy
 import { GroupPanel } from "@/components/GroupPanel";
 import { GroupMembersPanel } from "@/components/GroupMembersPanel";
 import { RoomPanel } from "@/components/RoomPanel";
@@ -264,8 +264,8 @@ function Shell() {
             {state.teamMapOpen && (
               <TeamMapPanel onClose={() => dispatch({ type: "toggleTeamMap", open: false })} />
             )}
-            {/* multibot: F9-FE — pokój grupowy; otwierany wyłącznie z sekcji Groups
-                (widocznej tylko przy botach slafy), klucz per grupę = świeży mount */}
+            {/* multibot: F9-FE — pokój grupowy; otwierany wyłącznie z sekcji Groups,
+                klucz per grupę = świeży mount */}
             {state.pluginsOpen && <PluginsPanel />}
           </>
         )}
@@ -294,9 +294,9 @@ export default function App() {
   // Pod Electronem token nie dowodzi niczego — spakowana apka wstawia własny
   // przez fragment adresu przy PIERWSZYM starcie. Zliczanie go jako
   // konfiguracji kasowało onboarding, zanim się pokazał, a razem z nim jedyne
-  // wejście do instalacji silnika (`POST /api/provision` woła wyłącznie
+  // wejście do konfiguracji serwera (`POST /api/provision` woła wyłącznie
   // Onboarding). Efekt: świeża instalacja desktopowa wchodziła od razu do
-  // aplikacji i pisała „Usługa offline", bo silnika nikt nigdy nie zainstalował.
+  // aplikacji, z pominięciem całego kreatora.
   // …ALE ten wyjątek dotyczy tylko Electrona z LOKALNYM serwerem. W trybie
   // zdalnym (C2) okno ładuje interfejs prosto z cudzego hosta, a token wjeżdża
   // fragmentem adresu — Electron jest wtedy tylko widzem i onboarding „postaw

@@ -23,7 +23,7 @@ import { ComputerHandoffCard } from "./ComputerHandoffCard";
 import { ConnectCard } from "./ConnectCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { Composer } from "./Composer";
-// multibot: TTS głośniczek przy wiadomościach bota (tylko driver slafy)
+// multibot: TTS głośniczek przy wiadomościach bota (tylko z kluczem TTS)
 import { SpeakButton } from "./SpeakButton";
 import { ModelPicker } from "./ModelPicker";
 import { ChatHeaderMenu } from "./ChatHeaderMenu";
@@ -210,7 +210,7 @@ function Bubble({
         {/* multibot: sterowanie hover zostaje w stopce dymka; czas sesji
             renderuje się osobno między wiadomościami. */}
         <div className={cn("mt-1 flex items-center gap-1.5 text-[10px] leading-none", user ? "justify-end" : "justify-start")}>
-          {/* multibot: TTS — see SpeakButton.tsx; renders null off-slafy */}
+          {/* multibot: TTS — see SpeakButton.tsx; renders null with no voice key */}
           {!user && <SpeakButton text={text} />}
         </div>
       </div>

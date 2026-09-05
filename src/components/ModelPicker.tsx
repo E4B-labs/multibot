@@ -16,11 +16,6 @@ function instanceModelLabel(instance: InstanceInfo | undefined, model: string): 
   return modelLabel(model, instance?.models.options.find((o) => o.id === model)?.label);
 }
 
-// The Python/Hermes sidecar is runtime infrastructure, not a user-facing
-// provider. Custom slafy instances remain visible because they are explicit
-// model endpoints configured by the user.
-const publicInstances = (instances: InstanceInfo[]) => instances.filter((instance) => instance.instanceId !== "local");
-
 /** `compact` = sama ikona dostawcy, bez nazwy modelu (Kacper 29.08). Tak stoi
  *  pigułka w nagłówku czatu, gdzie kolumna bywa wąska; w panelu ustawień bota
  *  zostaje wersja z podpisem, bo tam nazwa modelu jest treścią, nie ozdobą. */
@@ -35,14 +30,12 @@ export function ModelPicker({ bot, className, compact }: { bot: Bot; className?:
 
   const selection = bot.modelSelection;
   const active = state.instances.find((i) => i.instanceId === selection.instanceId);
-  const visibleInstances = publicInstances(state.instances);
+  const visibleInstances = state.instances;
   const railInstance =
     visibleInstances.find((i) => i.instanceId === (railId ?? selection.instanceId)) ?? visibleInstances[0];
-  const activeLabel = active?.instanceId === "local"
-    ? `Automatic · ${instanceModelLabel(active, selection.model)}`
-    : active
-      ? `${active.displayName} · ${instanceModelLabel(active, selection.model)}`
-      : instanceModelLabel(active, selection.model);
+  const activeLabel = active
+    ? `${active.displayName} · ${instanceModelLabel(active, selection.model)}`
+    : instanceModelLabel(active, selection.model);
   const opencodeKeyMissing = state.config?.opencode?.configured !== true;
 
   useEffect(() => {
@@ -136,10 +129,9 @@ export function ModelPicker({ bot, className, compact }: { bot: Bot; className?:
         aria-label={activeLabel || selection.model}
       >
         {/* W wersji zwartej znak dostawcy jest jedyną treścią przycisku, więc
-            rysujemy go ZAWSZE — także dla instancji „local", gdzie wersja
-            z podpisem go pomija. Bez tego zostałby sam daszek. */}
-        {(compact || (active && active.instanceId !== "local")) && (
-          <ProviderMark driverKind={active?.driverKind ?? "slafy"} size={14} />
+            rysujemy go ZAWSZE. Bez tego zostałby sam daszek. */}
+        {(compact || active) && (
+          <ProviderMark driverKind={active?.driverKind ?? "openaiCompatible"} size={14} />
         )}
         {!compact && <span className="max-w-[190px] truncate">{activeLabel}</span>}
         <ChevronDown size={14} className="text-ink-secondary" />

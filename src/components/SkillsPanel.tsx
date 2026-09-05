@@ -1,16 +1,13 @@
-// multibot: F8 — skille silnika slafy w prawym slocie (400px, jak Routines).
+// multibot: F8 — skille bota w prawym slocie (400px, jak Routines).
 // Provider-neutral skills. Harness stores them per bot and injects enabled
 // instructions into every provider turn.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
   ChevronDown,
   ChevronRight,
-  Circle,
-  GraduationCap,
   Loader2,
   Pencil,
-  Square,
   Trash2,
   Wand2,
   X,
@@ -18,12 +15,11 @@ import {
 import { useStore, type Bot } from "@/state/store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { cn } from "@/lib/cn";
-import { SkillRef } from "./SkillRef";
 import { authFetch } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
 
-// Lokalny helper jak w RoutinesPanel, plus `status` na błędzie: teach/start
-// odróżnia "brak przeglądarki" (404) od "silnik padł" po kodzie, nie po treści.
+// Lokalny helper jak w RoutinesPanel: `status` na błędzie pozwala odróżnić
+// brak trasy od realnej awarii po kodzie, nie po treści.
 async function api(path: string, init?: RequestInit): Promise<any> {
   const res = await authFetch(path, { headers: { "content-type": "application/json" }, ...init });
   const body = await res.json().catch(() => ({}));
@@ -36,7 +32,7 @@ async function api(path: string, init?: RequestInit): Promise<any> {
   return body;
 }
 
-/** Mirror of engine `skills._record()` (engine/server/skills.py). */
+/** Kształt wiersza z GET /api/bots/{id}/skills. */
 interface Skill {
   name: string;
   command?: string;
@@ -115,295 +111,6 @@ function SkillForm({
           {polish ? "Anuluj" : "Cancel"}
         </button>
       </div>
-    </div>
-  );
-}
-
-// Stany nagrywania: idle → recording → stopped (kroki czekają, usuwalne) →
-// synthesizing → done. `noBrowser` to podpowiedź po 404 z teach/start — komputer
-// jest gotowy, ale jego przeglądarka nie ma jeszcze otwartej karty.
-type TeachState =
-  | { phase: "idle"; noBrowser?: boolean }
-  | { phase: "starting" }
-  | { phase: "recording"; recordingId: string }
-  | { phase: "stopping"; recordingId: string }
-  | { phase: "stopped"; recordingId: string; steps: string[] }
-  | { phase: "synthesizing" }
-  | { phase: "done"; skillName: string };
-
-// H6: mieszka tu (blisko reszty zarządzania skillami), ale renderuje ją panel
-// Computer — nagrywanie dzieje się na ekranie bota, nie na liście skilli.
-// Dlatego bierze gotowość komputera i przejęcie/oddanie leasa (H5) jako propsy
-// zamiast duplikować tamtą logikę.
-export function TeachCard({
-  botId,
-  engineBotId,
-  onSkillCreated,
-  polish,
-  computerReady,
-  notReadyLabel,
-  onStartControl,
-  onStopControl,
-}: {
-  /** Bot harnessu — syntezę robi JEGO provider, nie Hermes silnika. */
-  botId: string;
-  engineBotId: string;
-  onSkillCreated: () => void;
-  polish: boolean;
-  computerReady: boolean;
-  notReadyLabel: string;
-  /** H5 lease z ComputerPanel — przejęte automatycznie przy starcie, oddane po stopie. */
-  onStartControl: () => void;
-  onStopControl: () => void;
-}) {
-  const [teach, setTeach] = useState<TeachState>({ phase: "idle" });
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const start = () => {
-    setTeach({ phase: "starting" });
-    setError(null);
-    onStartControl(); // H6.3 — użytkownik zaraz zacznie klikać, potrzebuje sterowania
-    api(`/api/engine/bots/${engineBotId}/teach/start`, { method: "POST" })
-      .then(({ recording_id }: { recording_id: string }) =>
-        setTeach({ phase: "recording", recordingId: recording_id }),
-      )
-      .catch((e: unknown) => {
-        if ((e as { status?: number }).status === 404) {
-          setTeach({ phase: "idle", noBrowser: true });
-        } else {
-          setTeach({ phase: "idle" });
-          setError(e instanceof Error ? e.message : String(e));
-        }
-      });
-  };
-
-  const stop = (recordingId: string) => {
-    setTeach({ phase: "stopping", recordingId });
-    setError(null);
-    onStopControl(); // demonstracja skończona — oddaj sterowanie z powrotem
-    api(`/api/engine/bots/${engineBotId}/teach/stop`, {
-      method: "POST",
-      body: JSON.stringify({ recording_id: recordingId }),
-    })
-      .then(({ steps }: { steps: string[] }) => setTeach({ phase: "stopped", recordingId, steps }))
-      .catch((e: unknown) => {
-        setTeach({ phase: "idle" });
-        setError(e instanceof Error ? e.message : String(e));
-      });
-  };
-
-  const removeStep = (index: number) =>
-    setTeach((t) => (t.phase === "stopped" ? { ...t, steps: t.steps.filter((_, i) => i !== index) } : t));
-
-  // Nagrywa silnik (CDP), ale skilla pisze bot swoim providerem — trasa
-  // harnessu, nie `/api/engine/.../teach/synthesize`, która wołała CLI Hermesa
-  // i na telefonie kończyła się „No inference provider configured". Botom
-  // prowadzonym przez silnik harness i tak przekaże żądanie dalej — stąd
-  // `recording_id` jedzie z nami.
-  const synthesize = (recordingId: string, steps: string[]) => {
-    setTeach({ phase: "synthesizing" });
-    setError(null);
-    api(`/api/bots/${botId}/teach/synthesize`, {
-      method: "POST",
-      body: JSON.stringify({
-        recording_id: recordingId,
-        steps,
-        ...(name.trim() ? { name: name.trim() } : {}),
-      }),
-    })
-      .then(({ skill_name }: { skill_name: string }) => {
-        setTeach({ phase: "done", skillName: skill_name });
-        setName("");
-        onSkillCreated();
-      })
-      .catch((e: unknown) => {
-        setTeach({ phase: "idle" });
-        setError(e instanceof Error ? e.message : String(e));
-      });
-  };
-
-  // K5: ikona przy „Przejmij sterowanie" i krzyżyk na pasku nagrywania startują
-  // i przerywają nagranie, mimo że stan trzymamy tu. Faza leci w drugą stronę
-  // jako zdarzenie, żeby czerwona ramka i pasek mogły się narysować na ekranie
-  // bota, a nie tylko w tej karcie.
-  const teachRef = useRef(teach);
-  teachRef.current = teach;
-  const startRef = useRef(start);
-  startRef.current = start;
-  const stopRef = useRef(stop);
-  stopRef.current = stop;
-  // Puste zależności, bo `start` i `stop` powstają na nowo w każdym renderze —
-  // z nimi na liście efekt przepinał nasłuch po każdym przerysowaniu karty.
-  useEffect(() => {
-    const onStart = () => {
-      if (teachRef.current.phase === "idle") startRef.current();
-    };
-    const onStop = () => {
-      const t = teachRef.current;
-      if (t.phase === "recording" || t.phase === "stopping") stopRef.current(t.recordingId);
-    };
-    window.addEventListener("mb:teach:start", onStart);
-    window.addEventListener("mb:teach:stop", onStop);
-    return () => {
-      window.removeEventListener("mb:teach:start", onStart);
-      window.removeEventListener("mb:teach:stop", onStop);
-    };
-  }, []);
-  useEffect(() => {
-    window.dispatchEvent(new CustomEvent("mb:teach:phase", { detail: teach }));
-  }, [teach]);
-
-  return (
-    <div className="mt-3 rounded-xl bg-card p-4">
-      <div className="flex items-center gap-2 text-[15px] font-medium text-ink">
-        <GraduationCap size={16} className="text-ink-secondary" />
-        {polish ? "Nagraj umiejętność" : "Record a skill"}
-      </div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">
-        {polish
-          ? "Pokaż botowi zadanie na jego komputerze — obejrzy Twoje kliknięcia i sam napisze sobie umiejętność."
-          : "Show the bot a task on its computer — it watches your clicks and writes itself a skill."}
-      </div>
-
-      {teach.phase === "idle" &&
-        (!computerReady ? (
-          <div className="mt-2 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12px] text-ink-secondary">
-            {notReadyLabel}
-          </div>
-        ) : (
-          <>
-            {teach.noBrowser && (
-              <div className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
-                {polish
-                  ? "Przeglądarka na komputerze bota nie ma jeszcze otwartej karty — otwórz stronę i spróbuj ponownie."
-                  : "The browser on the bot's computer has no open tab yet — open a page there, then start again."}
-              </div>
-            )}
-            <button
-              onClick={start}
-              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover"
-            >
-              <Circle size={13} className="text-danger" />
-              {polish ? "Rozpocznij nagrywanie" : "Start recording"}
-            </button>
-          </>
-        ))}
-
-      {teach.phase === "starting" && (
-        <div className="mt-3 flex items-center justify-center gap-2 py-1 text-[13px] text-ink-secondary">
-          <Loader2 size={14} className="animate-spin" />
-          {polish ? "Łączenie z komputerem…" : "Connecting to the computer…"}
-        </div>
-      )}
-
-      {(teach.phase === "recording" || teach.phase === "stopping") && (
-        <>
-          <div className="mt-3 flex items-center gap-2 text-[13px] text-ink">
-            <span className="size-2 animate-pulse rounded-full bg-danger" />
-            {polish
-              ? "Nagrywanie — pokaż zadanie na komputerze bota"
-              : "Recording — demonstrate the task on the bot's computer"}
-          </div>
-          <button
-            onClick={() => stop(teach.recordingId)}
-            disabled={teach.phase === "stopping"}
-            className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-          >
-            {teach.phase === "stopping" ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <Square size={12} className="fill-current" />
-            )}
-            {polish ? "Zatrzymaj nagrywanie" : "Stop recording"}
-          </button>
-        </>
-      )}
-
-      {teach.phase === "stopped" && (
-        <>
-          <div className="mb-1.5 mt-3 text-[13px] text-ink-secondary">
-            {polish ? "Co zobaczył bot" : "What the bot saw"}
-          </div>
-          {teach.steps.length === 0 ? (
-            <div className="rounded-lg bg-inset p-3 text-[12px] text-ink-secondary">
-              {polish ? "Brak zarejestrowanych kroków" : "No steps recorded"}
-            </div>
-          ) : (
-            <ul className="max-h-[160px] overflow-y-auto rounded-lg bg-inset p-1">
-              {teach.steps.map((step, i) => (
-                <li
-                  key={i}
-                  className="flex items-start justify-between gap-2 rounded-md px-2 py-1.5 text-[12px] leading-relaxed text-ink hover:bg-raised"
-                >
-                  <span className="min-w-0 flex-1 break-words">{step}</span>
-                  <button
-                    onClick={() => removeStep(i)}
-                    className="shrink-0 rounded p-0.5 text-ink-secondary hover:text-danger"
-                    title={polish ? "Usuń krok" : "Delete step"}
-                  >
-                    <X size={13} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <input
-            className={cn(inputCls, "mt-2")}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={
-              polish ? "Nazwa umiejętności (opcjonalnie — bot sam wybierze)" : "Skill name (optional — the bot picks one)"
-            }
-          />
-          <div className="mt-2 flex gap-2">
-            <button
-              onClick={() => synthesize(teach.recordingId, teach.steps)}
-              disabled={teach.steps.length === 0}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Wand2 size={13} />
-              {polish ? "Utwórz umiejętność" : "Create skill"}
-            </button>
-            <button
-              onClick={() => setTeach({ phase: "idle" })}
-              className="rounded-lg bg-raised px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
-            >
-              {polish ? "Odrzuć" : "Discard"}
-            </button>
-          </div>
-        </>
-      )}
-
-      {teach.phase === "synthesizing" && (
-        <div className="mt-3 flex items-center justify-center gap-2 py-1 text-[13px] text-ink-secondary">
-          <Loader2 size={14} className="animate-spin" />
-          {polish
-            ? "Bot pisze umiejętność — to może potrwać kilka minut…"
-            : "The bot is writing the skill — this can take a few minutes…"}
-        </div>
-      )}
-
-      {teach.phase === "done" && (
-        <>
-          <div className="mt-3 text-[13px] text-success">
-            {polish ? "Utworzono umiejętność: " : "Skill created: "}
-            <SkillRef name={teach.skillName} />
-          </div>
-          <button
-            onClick={() => setTeach({ phase: "idle" })}
-            className="mt-2 w-full rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover"
-          >
-            {polish ? "Nagraj kolejny" : "Record another"}
-          </button>
-        </>
-      )}
-
-      {error && (
-        <div className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
-          {error}
-        </div>
-      )}
     </div>
   );
 }
