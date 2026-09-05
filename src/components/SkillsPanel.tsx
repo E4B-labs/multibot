@@ -136,6 +136,7 @@ type TeachState =
 // Dlatego bierze gotowość komputera i przejęcie/oddanie leasa (H5) jako propsy
 // zamiast duplikować tamtą logikę.
 export function TeachCard({
+  botId,
   engineBotId,
   onSkillCreated,
   polish,
@@ -144,6 +145,8 @@ export function TeachCard({
   onStartControl,
   onStopControl,
 }: {
+  /** Bot harnessu — syntezę robi JEGO provider, nie Hermes silnika. */
+  botId: string;
   engineBotId: string;
   onSkillCreated: () => void;
   polish: boolean;
@@ -193,10 +196,15 @@ export function TeachCard({
   const removeStep = (index: number) =>
     setTeach((t) => (t.phase === "stopped" ? { ...t, steps: t.steps.filter((_, i) => i !== index) } : t));
 
+  // Nagrywa silnik (CDP), ale skilla pisze bot swoim providerem — trasa
+  // harnessu, nie `/api/engine/.../teach/synthesize`, która wołała CLI Hermesa
+  // i na telefonie kończyła się „No inference provider configured". Botom
+  // prowadzonym przez silnik harness i tak przekaże żądanie dalej — stąd
+  // `recording_id` jedzie z nami.
   const synthesize = (recordingId: string, steps: string[]) => {
     setTeach({ phase: "synthesizing" });
     setError(null);
-    api(`/api/engine/bots/${engineBotId}/teach/synthesize`, {
+    api(`/api/bots/${botId}/teach/synthesize`, {
       method: "POST",
       body: JSON.stringify({
         recording_id: recordingId,

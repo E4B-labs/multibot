@@ -472,6 +472,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
           )}
 
           <TeachCard
+            botId={bot.id}
             engineBotId={`mb-${bot.threadId}`}
             onSkillCreated={() => {}}
             polish={polish}

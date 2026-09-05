@@ -513,6 +513,49 @@ describe("profile import acceptance", () => {
   });
 });
 
+// Teach-a-task, połowa „silnikowa". Nagranie (CDP) zostaje w silniku zawsze;
+// syntezę harness kieruje tam, gdzie mieszka MÓZG bota. Dla bota na driverze
+// `slafy` to nadal Hermes — driver nie przekazuje `system`, więc skill zapisany
+// w `workspace` byłby dla niego niewidzialny. Druga połowa (bot na driverze
+// harnessu, gdzie leżał błąd „No inference provider configured") siedzi w
+// `server/comms.test.ts`, bo tam jest atrapa drivera CLI.
+describe("teach-a-task: bot silnika zostaje przy Hermesie", () => {
+  it("nagranie zostaje w silniku, a synteza idzie na jego trasę, nie w turę", async () => {
+    const before = engine.teachCalls.length;
+    const started = await api("POST", "/api/engine/bots/mb-t-pre/teach/start");
+    expect(started.status).toBe(201);
+
+    const stopped = await api("POST", "/api/engine/bots/mb-t-pre/teach/stop", {
+      recording_id: started.body.recording_id,
+    });
+    expect(stopped.status).toBe(200);
+    expect(stopped.body.steps.length).toBeGreaterThan(0);
+
+    // Atrapa oddaje na tej trasie 501 z produkcyjnym zdaniem — sprawdzamy, że
+    // harness przekazuje jej odpowiedź w całości, zamiast gubić ją na 500.
+    const made = await api("POST", "/api/bots/bot-pre/teach/synthesize", {
+      recording_id: started.body.recording_id,
+      steps: stopped.body.steps,
+    });
+    expect(made.status).toBe(501);
+    expect(made.body.detail).toContain("No inference provider configured");
+    expect(engine.teachCalls.slice(before)).toEqual([
+      "start mb-t-pre",
+      "stop mb-t-pre",
+      "synthesize mb-t-pre",
+    ]);
+    // Bot silnika nie dostał tury syntezy — to nie ta ścieżka.
+    expect(engine.chats.some((chat) => chat.message?.includes("demonstrated a task in your browser"))).toBe(false);
+  }, 20_000);
+
+  it("odrzuca puste nagranie, zanim ruszy jakakolwiek synteza", async () => {
+    const before = engine.teachCalls.length;
+    expect((await api("POST", "/api/bots/bot-pre/teach/synthesize", { steps: [] })).status).toBe(422);
+    expect((await api("POST", "/api/bots/bot-pre/teach/synthesize", { steps: ["   "] })).status).toBe(422);
+    expect(engine.teachCalls.slice(before)).toEqual([]);
+  });
+});
+
 // multibot: stan floty w każdej turze (29.08). Sprawdzane end-to-end przez
 // prawdziwy serwer, bo cała wartość tej zmiany polega na tym, że blok
 // naprawdę DOCIERA do silnika — driver slafy nie przekazuje pola `system`,

@@ -453,6 +453,49 @@ describe("comms e2e (fake ACP fleet)", () => {
     40_000,
   );
 
+  // Teach-a-task: skilla z nagrania pisze PROVIDER BOTA. Do 0.3.32 pisał go
+  // silnik przez CLI Hermesa, więc na telefonie każde „Record a skill" kończyło
+  // się „Provider authentication failed: No inference provider configured",
+  // mimo że bot miał sprawnego providera przez driver harnessu. Tu nie ma ani
+  // silnika, ani Hermesa — jest sam driver, i to wystarcza.
+  it(
+    "pisze skilla z nagrania providerem bota, bez silnika i bez Hermesa",
+    async () => {
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${bot.id}`, {
+        name: "Teach Target",
+        modelSelection: { instanceId: "grokMail", model: "fake-model" },
+      });
+
+      const made = await api("POST", `/api/bots/${bot.id}/teach/synthesize`, {
+        steps: ['navigated to https://shop.example/orders', 'clicked "New order"'],
+      });
+      expect(made.status).toBe(201);
+      expect(made.body.skill_name).toBe("shop-order");
+
+      const skills = (await api("GET", `/api/bots/${bot.id}/skills`)).body as Array<{ name: string; instructions: string }>;
+      // Atrapa odpowiada prozą PRZED blokiem i własnym płotkiem ``` w środku
+      // `instructions` — czyli tak, jak odpowiada prawdziwy model. Jeśli
+      // wycinanie JSON-a znowu zrobi się naiwne, `instructions` przyjdzie ucięte.
+      expect(skills.find((skill) => skill.name === "shop-order")?.instructions).toContain("After each run");
+
+      // Izolowana nitka: prompt syntezy nie zostaje w czacie bota.
+      const after = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === bot.id);
+      expect(after.messages.some((m: any) => m.text?.includes("demonstrated a task in your browser"))).toBe(false);
+      // ...ale pigułka „utworzono skill" — tak, dokładnie jak przy panelu.
+      expect(after.messages.some((m: any) => m.event?.type === "skill-created" && m.event.value === "shop-order")).toBe(true);
+      expect(after.busy).toBeFalsy(); // izolowana tura nie zapala „pracuje"
+
+      // Druga próba tej samej nazwy odpada PRZED turą, nie po czterech minutach.
+      const again = await api("POST", `/api/bots/${bot.id}/teach/synthesize`, {
+        steps: ["clicked x"],
+        name: "shop-order",
+      });
+      expect(again.status).toBe(409);
+    },
+    40_000,
+  );
+
 
   // Regresja: `ask_user` niósł wyłącznie broker uprawnień claude'a, który
   // montuje się tylko przy włączonych zgodach i tylko u tego jednego drivera.
