@@ -32,6 +32,10 @@ export interface RoomRecord {
   ownerBotId: string;
   /** Bot whose turn is currently being generated; null while the room is idle. */
   activeBotId?: string | null;
+  /** Recipient of the last message handed over whose turn has not started yet.
+   * It survives a restart, so a conversation cut off mid-flight is re-delivered
+   * instead of being written off as "the server restarted mid-conversation". */
+  pendingTo?: string | null;
   /** Group chat this room mirrors — one room per group, so a group keeps a
    * single ledger (and a single budget) instead of a room per message. */
   groupId?: string;
@@ -52,13 +56,79 @@ export function isDuplicateOfLast(room: RoomRecord, from: string, text: string):
  * resolved; the harness strips it from the visible transcript. */
 export const ROOM_DONE_MARKER = "[TASK COMPLETE]";
 
+/** Words only, lowercased — punctuation and casing are not content. */
+const normalize = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/** Same thing said twice, allowing for a reworded sentence. Jaccard over word
+ * sets: cheap, no dependency, and "Confirmed." vs "Potwierdzone." still differ
+ * (they are caught by the length rule instead). */
+function nearDuplicate(a: string, b: string | undefined): boolean {
+  if (!b) return false;
+  const left = normalize(a);
+  const right = normalize(b);
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const mine = new Set(left.split(" "));
+  const theirs = new Set(right.split(" "));
+  let shared = 0;
+  for (const word of mine) if (theirs.has(word)) shared += 1;
+  return shared / Math.max(mine.size, theirs.size) >= 0.8;
+}
+
+/** Longest a contentless reply may be and still count as a pleasantry. */
+const ACK_MAX_CHARS = 200;
+/** Words that carry no work in either language MultiBot is used in, plus the
+ * glue between them. A short message made only of these says nothing.
+ *
+ * Deliberately WITHOUT yes/no/tak/nie/done/gotowe/zrobione: those are answers.
+ * "Done." to "did you deploy it" is a result, and swallowing it would leave the
+ * asker waiting forever — the opposite of the bug this list exists to fix.
+ * ponytail: a word list, not a classifier — extend it when a new pleasantry
+ * shows up in a transcript. */
+const ACK_WORDS = new Set(
+  ("ok okay oki ack acked acknowledged confirm confirmed confirming agree agreed agreement noted understood"
+    + " thanks thank sure sounds good great perfect roger received"
+    + " potwierdzone potwierdzam potwierdzenie zgoda zgadza sie się jasne dobra dobrze dziekuje dziękuję dzieki dzięki"
+    + " rozumiem przyjete przyjęte super swietnie świetnie oczywiscie oczywiście"
+    + " i a the to it is that we and then now for of on w na z za ale juz już bardzo").split(" "),
+);
+const words = (text: string): string[] => normalize(text).split(" ").filter(Boolean);
+
+/**
+ * "Confirmed." / "Potwierdzone." — a reply that carries nothing new. Two bots
+ * politely agreeing with each other bounced eleven times and burned a whole
+ * 24-message budget in a live demo, so the harness refuses to spend a turn on
+ * one: it is recorded in the room and the exchange stops there.
+ *
+ * A reply is never an acknowledgement when it asks something (`?`), hands the
+ * work to someone (`@Name`) or declares the task finished — those carry the
+ * conversation. Past that it is one of two things: a short message made only
+ * of pleasantries, or a message that just says again what it or the other side
+ * already said.
+ */
+export function isAcknowledgement(room: RoomRecord, from: string, text: string): boolean {
+  const body = text.trim();
+  if (!body) return false;
+  if (body.includes("?") || body.includes(ROOM_DONE_MARKER)) return false;
+  if (/@[\p{L}\p{N}]/u.test(body)) return false;
+  const reversed = [...room.transcript].reverse();
+  const theirLast = reversed.find((m) => m.from !== from)?.text;
+  // Somebody asked something: whatever comes back is the answer, however short
+  // and however polite. Swallowing it would leave the asker waiting forever.
+  if (theirLast?.includes("?")) return false;
+  if (body.length < ACK_MAX_CHARS && words(body).every((word) => ACK_WORDS.has(word))) return true;
+  return nearDuplicate(body, reversed.find((m) => m.from === from)?.text) || nearDuplicate(body, theirLast);
+}
+
 const ROOMS_FILE = join(DATA_DIR, "rooms.json");
 
 export class RoomStore {
   private rooms = new Map<string, RoomRecord>();
   private readonly filePath: string;
-  /** Rooms whose turn died with the previous process. The harness reports them
-   * to their owners at boot; the store itself has no way to reach a chat. */
+  /** Rooms whose turn died with the previous process. They keep the "running"
+   * status so the harness can RESUME them at boot (re-deliver `pendingTo`);
+   * only the harness knows the budget and the clock, and only it can reach a
+   * chat to report the ones that are genuinely spent. */
   readonly recovered: string[] = [];
 
   constructor(filePath = ROOMS_FILE) {
@@ -72,8 +142,9 @@ export class RoomStore {
           ...room,
           bot_ids: [...room.bot_ids],
           transcript: room.transcript.map((message) => ({ ...message })),
-          // No worker resumes after a restart; preserve transcript, mark turn stopped.
-          status: room.status === "running" ? "failed" : room.status,
+          // The status is preserved: a live conversation stays live across a
+          // restart and the harness decides at boot whether to resume it.
+          activeBotId: null,
         });
         if (room.status === "running") this.recovered.push(room.id);
       }
@@ -169,6 +240,15 @@ export class RoomStore {
     const room = this.rooms.get(id);
     if (!room) return null;
     room.status = status;
+    this.persist();
+    return this.get(id);
+  }
+
+  /** Remember (or forget) who owes this room a turn, so a restart can resume. */
+  setPending(id: string, pendingTo: string | null): RoomRecord | null {
+    const room = this.rooms.get(id);
+    if (!room || (room.pendingTo ?? null) === pendingTo) return room ? this.get(id) : null;
+    room.pendingTo = pendingTo;
     this.persist();
     return this.get(id);
   }

@@ -313,7 +313,9 @@ function RoomChip({ message }: { message: Message }) {
           )}
           {owner ? botDisplayName(owner, polish ? "pl" : "en") : room.ownerBotId}
         </span>
-        <span>{polish ? "napisał(a) do" : "texted"}</span>
+        <span>
+          {room.event === "replied" ? (polish ? "odpisał(a)" : "replied") : (polish ? "napisał(a) do" : "texted")}
+        </span>
         {peers.map((peer) => (
           <span key={peer.id} className="flex items-center gap-1 font-medium text-ink">
             <MausAvatar color={peer.color} avatarUrl={peer.avatarUrl} shape={peer.mascotShape} state={stateForBot(peer)} size={18} animated={false} />

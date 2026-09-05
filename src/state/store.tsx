@@ -71,8 +71,8 @@ export interface Message {
   /** activity messages: tool name + outcome */
   tool?: { name: string; ok?: boolean };
   event?: { type: "renamed" | "skill-created" | "routine-created" | "reminder-created" | "goal-progress"; value: string };
-  /** collaboration-room chip: "X texted Y" → opens the read-only room */
-  room?: { id: string; name: string; bot_ids: string[]; ownerBotId: string; status: string; groupId?: string };
+  /** collaboration-room chip: "X texted Y" / "X replied" → opens the read-only room */
+  room?: { id: string; name: string; bot_ids: string[]; ownerBotId: string; status: string; event?: "texted" | "replied"; groupId?: string };
   /** screen messages: a frame of the bot's computer (base64) */
   png?: string;
   mime?: string;

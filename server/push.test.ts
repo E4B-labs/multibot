@@ -143,6 +143,11 @@ describe("push na telefon (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "request-connection" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          grokConnectApp: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "request-connection", FAKE_ACP_CONNECTOR: "discord" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
         },
       }),
     );
@@ -303,6 +308,23 @@ describe("push na telefon (fake ACP fleet)", () => {
     expect(card.card.subtitle).toBe("Muszę wysłać maila.");
     await until(() => kinds(botId).includes("finished"), 30_000);
     expect((await botState(botId))?.busy).not.toBe(true);
+  }, 60_000);
+
+  // multibot: bot prosił o `discord` i dostawał „did not recognize the
+  // connector name". Każdy slug toolkitu Composio (discord, slack, gmail…) ma
+  // prowadzić do karty Composio z nazwą aplikacji, a nie do odmowy.
+  it("request_connection: nazwa aplikacji (discord) daje kartę Composio", async () => {
+    const botId = await newBot("Discordowiec", "grokConnectApp");
+    expect((await api("POST", `/api/bots/${botId}/messages`, { text: "napisz na discordzie" })).status).toBe(202);
+    const deadline = Date.now() + 30_000;
+    let card: any;
+    while (!card && Date.now() < deadline) {
+      const bot = await botState(botId);
+      card = (bot?.messages ?? []).find((m: any) => m.card?.kind === "connect");
+      if (!card) await new Promise((r) => setTimeout(r, 200));
+    }
+    expect(card?.card).toMatchObject({ kind: "connect", connector: "composio" });
+    expect(card.card.title).toContain("Discord");
   }, 60_000);
 
   it("ticket `DeviceNotRegistered` kasuje urządzenie z configu", async () => {

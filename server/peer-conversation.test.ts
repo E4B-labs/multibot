@@ -12,7 +12,7 @@
 // the `agents` MCP server on a turn started by another bot — the exact thing
 // the old depth filter made impossible.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,47 +37,93 @@ interface Harness {
 
 /** Boot one real server against the fakes; every test file here needs two
  * (the budget one runs with a different env), so the wiring lives once. */
-async function boot(prefix: string, env: Record<string, string>, instances: Record<string, unknown>): Promise<{
+async function boot(
+  prefix: string,
+  env: Record<string, string>,
+  instances: Record<string, unknown>,
+  reuse?: { home: string },
+): Promise<{
   harness: Harness;
-  stop: () => Promise<void>;
+  /** `keepHome` leaves the data dir alone, so the next boot can reuse it. */
+  stop: (keepHome?: boolean) => Promise<void>;
 }> {
   chmodSync(FAKE_CLI, 0o755);
   chmodSync(FAKE_CODEX, 0o755);
-  const port = 18800 + Math.floor(Math.random() * 10_000);
-  const base = `http://127.0.0.1:${port}`;
   const token = `${prefix}-access-token`;
-  const home = mkdtempSync(join(tmpdir(), `omb-${prefix}-`));
+  const home = reuse?.home ?? mkdtempSync(join(tmpdir(), `omb-${prefix}-`));
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ auth: { token }, instances }));
+  if (!reuse) writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ auth: { token }, instances }));
 
+  // Windows reserves whole bands inside the ephemeral range (`netsh interface
+  // ipv4 show excludedportrange`), and a spawn that lands in one dies with
+  // EACCES before it can listen. That is a lottery, not a failure: draw again.
+  // This suite boots twice inside one test, so it draws twice as often.
   let stderr = "";
-  const child: ChildProcess = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
-    cwd: join(SERVER_DIR, ".."),
-    env: {
-      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: home,
-      USERPROFILE: home,
-      OMB_PORT: String(port),
-      OMB_HOST: "127.0.0.1",
-      MULTIBOT_COMPUTER: "off",
-      OMB_TURN_DEBOUNCE_MS: "150",
-      ...env,
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stderr!.on("data", (c) => (stderr += c));
+  let child!: ChildProcess;
+  let base = "";
+  for (let attempt = 0; ; attempt += 1) {
+    const port = 18800 + Math.floor(Math.random() * 10_000);
+    base = `http://127.0.0.1:${port}`;
+    // Per-attempt buffer: a late line from a dead child must not pollute the
+    // next attempt's EACCES check.
+    const log: string[] = [];
+    child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+      cwd: join(SERVER_DIR, ".."),
+      env: {
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        HOME: home,
+        USERPROFILE: home,
+        OMB_PORT: String(port),
+        OMB_HOST: "127.0.0.1",
+        MULTIBOT_COMPUTER: "off",
+        OMB_TURN_DEBOUNCE_MS: "150",
+        ...env,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stderr!.on("data", (c) => log.push(String(c)));
+    // A spawn-level failure emits 'error', which kills the vitest worker if
+    // nothing listens; fold it into the log and let the retry decide.
+    const closed = new Promise<void>((resolve) => {
+      child.on("error", (e) => (log.push(String(e)), resolve()));
+      child.on("close", () => resolve());
+    });
 
-  const deadline = Date.now() + 20_000;
-  for (;;) {
-    try {
-      if ((await fetch(`${base}/api/health`)).ok) break;
-    } catch {
-      /* not up yet */
+    const deadline = Date.now() + 20_000;
+    let up = false;
+    let dead = false;
+    for (;;) {
+      try {
+        if ((await fetch(`${base}/api/health`)).ok) {
+          up = true;
+          break;
+        }
+      } catch {
+        /* not up yet */
+      }
+      if (child.exitCode !== null || child.killed) {
+        dead = true;
+        break;
+      }
+      if (Date.now() > deadline) {
+        child.kill("SIGKILL"); // never leave a half-started server behind
+        stderr = log.join("");
+        throw new Error(`server never came up. stderr:\n${stderr}`);
+      }
+      await new Promise((r) => setTimeout(r, 150));
     }
-    if (Date.now() > deadline) throw new Error(`server never came up. stderr:\n${stderr}`);
-    if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
-    await new Promise((r) => setTimeout(r, 150));
+    if (up) {
+      stderr = log.join("");
+      child.stderr!.on("data", (c) => (stderr += c));
+      break;
+    }
+    // stdio flushes on close, so read the reason only once the child is gone.
+    if (dead) await closed;
+    stderr = log.join("");
+    if (!/EACCES|EADDRINUSE/.test(stderr) || attempt >= 6) {
+      throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
+    }
   }
 
   const api = async (method: string, path: string, body?: unknown) => {
@@ -146,7 +192,7 @@ async function boot(prefix: string, env: Record<string, string>, instances: Reco
     frames,
   };
 
-  const stop = async () => {
+  const stop = async (keepHome?: boolean) => {
     sse.abort();
     child.kill("SIGTERM");
     await new Promise<void>((resolve) => {
@@ -155,6 +201,7 @@ async function boot(prefix: string, env: Record<string, string>, instances: Reco
       setTimeout(() => (child.kill("SIGKILL"), resolve()), 5_000).unref?.();
     });
     if (process.platform === "win32") await new Promise((r) => setTimeout(r, 750));
+    if (keepHome) return;
     try {
       rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch (error) {
@@ -165,6 +212,18 @@ async function boot(prefix: string, env: Record<string, string>, instances: Reco
   };
   return { harness, stop };
 }
+
+/** Where the fake CLI dumps every prompt it received — set in beforeAll. */
+let promptDump = "";
+/** The dump only exists once some bot has taken a turn; "not there yet" means
+ * nothing reached a model, which is an answer, not a failure. */
+const prompts = (): string => {
+  try {
+    return readFileSync(promptDump, "utf8");
+  } catch {
+    return "";
+  }
+};
 
 const relayInstance = (home: string) => ({
   driver: "grokAgent",
@@ -178,12 +237,32 @@ describe("peer conversation: a message is a real turn", () => {
 
   beforeAll(async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-peer-map-"));
+    promptDump = join(home, "acp-prompts.ndjson");
     const booted = await boot(
       "peer",
-      { OMB_ONBOARDING_TURN: "0", FAKE_CODEX_MODE: "steer", OMB_RELAY_HOME: home },
+      {
+        OMB_ONBOARDING_TURN: "0",
+        FAKE_CODEX_MODE: "steer",
+        OMB_RELAY_HOME: home,
+        // What actually reached a model. A peer envelope is no longer a chat
+        // message, so this file is the only place it can be pinned.
+        FAKE_ACP_PROMPT_DUMP: join(home, "acp-prompts.ndjson"),
+      },
       {
         happy: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "happy" }, config: { cli: FAKE_CLI, fullAuto: true } },
         relay: relayInstance(home),
+        // Two bots that only ever say "Confirmed." - the live-demo loop.
+        acker: {
+          driver: "grokAgent",
+          environment: { FAKE_ACP_MODE: "script", FAKE_ACP_SCRIPT: JSON.stringify({ default: "Confirmed." }) },
+          config: { cli: FAKE_CLI, fullAuto: true },
+        },
+        // ...and one that always asks something back, which must still flow.
+        questioner: {
+          driver: "grokAgent",
+          environment: { FAKE_ACP_MODE: "script", FAKE_ACP_SCRIPT: JSON.stringify({ default: "Which build should I check?" }) },
+          config: { cli: FAKE_CLI, fullAuto: true },
+        },
         slow: {
           driver: "grokAgent",
           environment: { FAKE_ACP_MODE: "busy", FAKE_ACP_TURN_MS: "4000" },
@@ -265,9 +344,16 @@ describe("peer conversation: a message is a real turn", () => {
       expect(room.transcript.map((m: any) => m.text)).toContain("read this when you can");
       expect(JSON.stringify(room)).not.toContain("Do not retry");
 
-      // the envelope lands in the busy bot's OWN chat and its turn follows
-      await h.waitFor("the queued peer message to reach Slowpoke", 30_000, async () =>
-        Boolean((await h.bot(slow))?.messages?.some((m: any) => m.role === "user" && m.text?.includes(`[Message from @Nudge`))));
+      // The envelope goes to the MODEL, never to the chat: the busy bot's own
+      // thread must never show the raw "[Message from @Nudge …]" bubble.
+      // What the user sees is the sender's clickable "Nudge texted Slowpoke".
+      await h.waitFor("the chip to appear in the sender's chat", 30_000, async () =>
+        Boolean((await h.bot(sender))?.messages?.some(
+          (m: any) => m.kind === "room" && m.room?.event === "texted" && m.room?.bot_ids?.includes(slow),
+        )));
+      expect(
+        (await h.bot(slow)).messages?.some((m: any) => m.text?.includes("[Message from @Nudge")),
+      ).toBe(false);
     },
     60_000,
   );
@@ -295,8 +381,12 @@ describe("peer conversation: a message is a real turn", () => {
   it(
     "refuses a peer message the workspace does not allow",
     async () => {
+      // The envelope is no longer a chat bubble, so the honest proof that a
+      // refused message did NOT get through is the prompt dump: nothing from
+      // that sender ever reached a model, and the thread stayed bare too.
       const gotEnvelope = async (id: string, senderName: string) =>
-        Boolean((await h.bot(id)).messages?.some((m: any) => m.role === "user" && m.text?.includes(`[Message from @${senderName}`)));
+        prompts().includes(`[Message from @${senderName}`)
+        || Boolean((await h.bot(id)).messages?.some((m: any) => m.role === "user" || m.kind === "room"));
       const handOver = async (fromId: string, toId: string, task: string) => {
         const created = await h.api("POST", "/api/rooms", { task, bot_ids: [fromId, toId] });
         await new Promise((r) => setTimeout(r, 1_200));
@@ -366,6 +456,62 @@ describe("peer conversation: a message is a real turn", () => {
       expect(room.transcript.map((m: any) => m.from)).toEqual([asker]);
     },
     70_000,
+  );
+
+  // The live demo that started this: Atlas and Gatekeeper traded "confirmed" /
+  // "Potwierdzone" eleven times until the 24-message budget died. An answer
+  // that adds nothing is worth a line in the ledger, never another turn.
+  it(
+    "an acknowledgement is recorded but never delivered, and two of them settle the room",
+    async () => {
+      const lead = await h.newBot("Ack Lead", "acker");
+      const first = await h.newBot("Ack One", "acker");
+      const second = await h.newBot("Ack Two", "acker");
+
+      // Only the tail this test writes: the dump is shared by the whole suite.
+      const dumpBefore = prompts().length;
+      const created = await h.api("POST", "/api/rooms", { task: "status check before the release", bot_ids: [lead, first, second] });
+      expect(created.status).toBe(201);
+      const roomId = created.body.id as string;
+
+      await h.waitFor("the acks to settle the room", 40_000, async () => (await h.room(roomId)).status === "done");
+      const room = await h.room(roomId);
+      // the task plus one ack per peer - not a budget's worth of pleasantries
+      expect(room.transcript.length).toBeLessThanOrEqual(3);
+      expect(room.transcript.some((m: any) => m.text === "Confirmed.")).toBe(true);
+      // ...and no bot ever ran a turn on somebody's "Confirmed."
+      expect(prompts().slice(dumpBefore)).not.toContain("Confirmed.");
+      // the user's chat shows the exchange as chips, never as envelopes
+      const leadBot = await h.bot(lead);
+      expect(leadBot.messages.some((m: any) => m.text?.includes("[Message from @"))).toBe(false);
+      expect(leadBot.messages.some((m: any) => m.kind === "room" && m.room?.event === "texted")).toBe(true);
+      expect(leadBot.messages.some((m: any) => m.kind === "room" && m.room?.event === "replied")).toBe(true);
+    },
+    60_000,
+  );
+
+  // The brake must not eat real work: a question is content, so it is carried.
+  it(
+    "a question still travels as a real turn",
+    async () => {
+      const a = await h.newBot("Q A", "questioner");
+      const b = await h.newBot("Q B", "questioner");
+      const created = await h.api("POST", "/api/rooms", { task: "look at the release", bot_ids: [a, b] });
+      expect(created.status).toBe(201);
+
+      await h.waitFor("the question to come back and go out again", 40_000, async () =>
+        (await h.room(created.body.id)).transcript.filter((m: any) => m.text.includes("Which build")).length >= 2);
+      // it reached a model as the input of a turn, not just the ledger
+      expect(prompts()).toContain("Which build should I check?");
+      // It stops by itself after that: both bots keep sending the identical
+      // sentence, and the second one is refused by the duplicate guard - so
+      // this room cannot run on into the tests that follow.
+      await h.waitFor("the ping-pong to run out", 30_000, async () =>
+        (await h.room(created.body.id)).transcript.length >= 3);
+      await new Promise((r) => setTimeout(r, 2_000));
+      expect((await h.room(created.body.id)).transcript.length).toBeLessThanOrEqual(4);
+    },
+    60_000,
   );
 
   // Two bots writing to the same recipient inside one window: keying the
@@ -558,5 +704,63 @@ describe("peer conversation: a quiet room still settles", () => {
 
     },
     60_000,
+  );
+});
+
+// A room whose recipient never got its turn because the process died. Before
+// this, EVERY running room came back "failed - the server restarted
+// mid-conversation" and the work was simply lost.
+describe("peer conversation: a restart resumes instead of failing", () => {
+  it(
+    "re-delivers the undelivered message to its recipient after a restart",
+    async () => {
+      const instances = {
+        happy: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "happy" }, config: { cli: FAKE_CLI, fullAuto: true } },
+        slow: {
+          driver: "grokAgent",
+          environment: { FAKE_ACP_MODE: "busy", FAKE_ACP_TURN_MS: "60000" },
+          config: { cli: FAKE_CLI, fullAuto: true },
+        },
+      };
+      const first = await boot("resume", { OMB_ONBOARDING_TURN: "0" }, instances);
+      const h1 = first.harness;
+      let sender = "";
+      let busy = "";
+      let roomId = "";
+      try {
+        for (const seeded of await h1.bots()) await h1.api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
+        sender = await h1.newBot("Resume A", "happy");
+        busy = await h1.newBot("Resume B", "slow");
+
+        // B is stuck in a turn that will outlive the process, so the peer
+        // message queues: in the room, with no turn started for it yet.
+        expect((await h1.api("POST", `/api/bots/${busy}/messages`, { text: "pracuj" })).status).toBe(202);
+        await h1.waitFor("B to be busy", 20_000, async () => Boolean((await h1.bot(busy))?.busy));
+        const created = await h1.api("POST", "/api/rooms", { task: "finish the changelog", bot_ids: [sender, busy] });
+        expect(created.status).toBe(201);
+        roomId = created.body.id as string;
+        await h1.waitFor("the room to owe B a turn", 15_000, async () => (await h1.room(roomId)).pendingTo === busy);
+      } catch (error) {
+        await first.stop(); // failure path takes the server AND the data dir with it
+        throw error;
+      }
+      await first.stop(true);
+
+      // ...and the harness comes back on the same data dir.
+      const again = await boot("resume", { OMB_ONBOARDING_TURN: "0" }, instances, { home: h1.home });
+      const h2 = again.harness;
+      try {
+        // The message really goes out again: B picks up a turn for it, which is
+        // what clears the debt. Asserted BEFORE the status, so the check cannot
+        // race the boot-time resume into passing on a room nobody looked at.
+        await h2.waitFor("B to take the re-delivered turn", 60_000, async () => Boolean((await h2.bot(busy))?.busy));
+        await h2.waitFor("the room to stop owing that turn", 60_000, async () => !(await h2.room(roomId)).pendingTo);
+        expect((await h2.room(roomId)).status).toBe("running");
+        expect(JSON.stringify(await h2.bot(sender))).not.toContain("restarted mid-conversation");
+      } finally {
+        await again.stop();
+      }
+    },
+    240_000,
   );
 });
