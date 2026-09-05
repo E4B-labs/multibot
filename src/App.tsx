@@ -20,6 +20,7 @@ import { RoutinesPanel } from "@/components/RoutinesPanel";
 import { SkillsPanel } from "@/components/SkillsPanel";
 // multibot: F9-FE — pokój grupowy silnika slafy
 import { GroupPanel } from "@/components/GroupPanel";
+import { GroupMembersPanel } from "@/components/GroupMembersPanel";
 import { RoomPanel } from "@/components/RoomPanel";
 import { RoomsPanel } from "@/components/RoomsPanel";
 // multibot: własne min/max/zamknij — okno bez ramki systemowej (Windows,
@@ -250,6 +251,9 @@ function Shell() {
                 )}
               </main>
             )}
+            {/* multibot: wejscie w grupe od razu pokazuje sklad po prawej,
+                w tym samym slocie co ustawienia bota. */}
+            {state.groupOpen && !state.routinesOpen && <GroupMembersPanel group={state.groupOpen} />}
             {state.settingsOpen && bot && <SettingsPanel bot={bot} />}
             {state.inspectorOpen && bot && <InspectorPanel bot={bot} />}
             {state.computerOpen && bot && <ComputerPanel bot={bot} />}

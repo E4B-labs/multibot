@@ -851,28 +851,31 @@ function GroupRow({
       title={g.name || g.id}
       className={cn(
         "relative flex w-full items-center rounded-xl text-left",
-        collapsed ? "justify-center px-0 py-2" : "gap-3 px-3 py-2.5",
+        collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-3 py-2.5",
         dragOver ? "bg-raised ring-1 ring-accent" : state.groupOpen?.id === g.id ? "bg-raised" : "hover:bg-raised/50",
       )}
     >
       {members.length > 0 ? (
+        // multibot: wzorzec z Grok Bota - dwa male awatary jeden na drugim
+        // (drugi w prawo i w dol), a "+N" to znaczek NA tym drugim, nie osobny
+        // kafelek obok nazwy. Wiersz ma byc kompaktowy, jak wiersz bota.
         <span className="relative flex shrink-0 items-center">
           {shown.map((b, i) => (
-            <span key={b.id} className={cn("shrink-0", i > 0 && "-ml-3")}>
+            <span key={b.id} className={cn("relative shrink-0", i > 0 && "-ml-2 mt-2")}>
               <MausAvatar
                 color={b.color}
                 avatarUrl={b.avatarUrl}
                 shape={b.mascotShape}
-                size={40}
+                size={20}
                 {...groupMemberAvatarProps(b)}
               />
+              {i === shown.length - 1 && overflow > 0 && (
+                <span className="absolute -bottom-1 -right-1 flex size-3.5 items-center justify-center rounded-full bg-control text-[8px] font-semibold leading-none text-ink">
+                  +{overflow}
+                </span>
+              )}
             </span>
           ))}
-          {overflow > 0 && (
-            <span className="absolute -bottom-1 -right-1 flex min-w-4 items-center justify-center rounded-full bg-control px-1 text-[10px] font-semibold text-ink">
-              +{overflow}
-            </span>
-          )}
           {attention && (
             <span
               title={attention}
@@ -883,8 +886,8 @@ function GroupRow({
           )}
         </span>
       ) : (
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary">
-          <Users size={20} />
+        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary">
+          <Users size={14} />
         </span>
       )}
       {!collapsed && (

@@ -1,22 +1,21 @@
-// multibot: F9-FE — pokój grupowy jako pełny panel rozmowy, taki sam slot jak
-// zwykły agent. UI gada wyłącznie z przelotką harnessu
-// (`server/engine/proxy.ts`: `/api/engine/<rest>` → `/api/<rest>` silnika):
-//   POST /api/engine/groups/<gid>/tasks {tasks: [{bot_id, message}]} →
-//     {tasks: [{bot_id, message, reply}]} (engine/server/app.py + groups.py).
+// multibot: grupa to ZWYKŁY czat, tylko z kilkoma botami naraz — ten sam
+// układ co `ChatView` (lista wiadomości + `Composer`), te same bańki, ten sam
+// pasek maskotki. Nie ma tu zadań per bot ani przycisku uruchamiania: user
+// pisze jedno zdanie do wszystkich, a serwer decyduje, kto odpowiada
+// (`runGroupChat` w server/index.ts).
 //
-// ŹRÓDŁO HISTORII (decyzja): zadania idą zwykłym `gateway.chat` bez markera
-// grupy, więc odpowiedzi bota zapisują się także w jego czacie 1:1. Panel
-// trzyma wspólny zapis zadań i odpowiedzi w tej sesji aplikacji.
-// ponytail: transkrypt w module-level Map (życie = sesja apki, przeżywa
-// zamknięcie/otwarcie panelu); upgrade = transkrypt grupy po stronie silnika,
-// gdy pokój ma pamiętać po restarcie apki.
-import { useEffect, useState } from "react";
-import { Loader2, Monitor, Send, Users } from "lucide-react";
-import { useStore, formatTime, type EngineGroup } from "@/state/store";
+// ŹRÓDŁO HISTORII: pokój grupy (`room.groupId === group.id`). Serwer dopisuje
+// tam wiadomość usera jako `from: "user"` i każdą odpowiedź członka, a ramki
+// SSE `room` odświeżają panel w trakcie tury. `group.messages` zostaje jako
+// zapas dla grup sprzed tej zmiany, które pokoju jeszcze nie mają.
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, Loader2, Monitor, Users } from "lucide-react";
+import { useStore, formatTime, type Bot, type EngineGroup } from "@/state/store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { MausAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
-import { cn } from "@/lib/cn";
+import { formatPeerEnvelope } from "@/lib/peerEnvelope";
+import { Composer } from "./Composer";
 import { authFetch } from "@/lib/auth";
 import { useLanguage } from "@/lib/language";
 import { botDisplayName } from "@/lib/botNames";
@@ -33,95 +32,88 @@ async function api(path: string, init?: RequestInit): Promise<any> {
   return body;
 }
 
-/** `from`: "you" albo id bota silnika (`mb-<threadId>`). */
+/** `from`: "user"/"you" (człowiek) albo id bota. */
 interface Entry {
-  from: "you" | string;
+  id: string;
+  from: string;
   text: string;
   at: number;
 }
 
-export function buildGroupTasks(botIds: string[], values: Record<string, string>) {
-  return botIds.flatMap((bot_id) => {
-    const message = (values[bot_id] ?? "").trim();
-    return message ? [{ bot_id, message }] : [];
-  });
-}
-
-const transcripts = new Map<string, Entry[]>();
+const isUserEntry = (from: string) => from === "user" || from === "you";
 
 export function GroupPanel({ group }: { group: EngineGroup }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
-  const [entries, setEntries] = useState<Entry[]>(() => group.messages ?? transcripts.get(group.id) ?? []);
-  const [tasks, setTasks] = useState<Record<string, string>>({});
+  const [legacy, setLegacy] = useState<Entry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [follow, setFollow] = useState(true);
 
   useEffect(() => {
     let alive = true;
     api(`/api/groups/${group.id}`)
-      .then((saved: { messages?: Entry[] }) => alive && setEntries(saved.messages ?? []))
+      .then((saved: { messages?: Array<{ id?: string; from: string; text: string; at: number }> }) =>
+        alive && setLegacy((saved.messages ?? []).map((m, i) => ({ id: m.id ?? `legacy-${i}`, from: m.from, text: m.text, at: m.at }))))
       .catch(() => {});
     return () => { alive = false; };
   }, [group.id]);
 
-  // Ten sam wzorzec id co EngineUsage/RoutinesPanel: `mb-<threadId>` z
-  // decodeConfig w server/drivers/slafy.ts — odwracalny, więc nazwa bota apki
-  // wychodzi z samego id; obcy id zostaje jak jest.
-  const nameOf = (engineBotId: string) => {
-    if (engineBotId === "you") return polish ? "Ty" : "You";
-    const direct = state.bots.find((b) => b.id === engineBotId);
-    if (direct) return botDisplayName(direct, polish ? "pl" : "en");
-    const threadId = engineBotId.startsWith("mb-") ? engineBotId.slice(3) : engineBotId;
-    const byThread = state.bots.find((b) => b.threadId === threadId);
-    return byThread ? botDisplayName(byThread, polish ? "pl" : "en") : engineBotId;
-  };
-  const memberRows = group.bot_ids
-    .map((engineBotId) => {
-      const threadId = engineBotId.startsWith("mb-") ? engineBotId.slice(3) : engineBotId;
-      return {
-        engineBotId,
-        bot: state.bots.find((b) => b.threadId === threadId || b.id === engineBotId),
-      };
-    })
-    .filter((row): row is typeof row & { bot: (typeof state.bots)[number] } => Boolean(row.bot));
-  const members = memberRows.map((row) => row.bot);
-
-  const push = (added: Entry[]) =>
-    setEntries((cur) => {
-      const next = [...cur, ...added];
-      transcripts.set(group.id, next);
-      return next;
-    });
-
-  // multibot: odpowiedzi NIE czekamy. Bot dostaje zwykłą turę i odpisuje we
-  // własnym czasie, a wymiana leci ramkami SSE `room` do wspólnego pokoju
-  // grupy — trzymanie tu `await` na sumę tur wieszało panel na minuty.
-  // Rooms accumulate: a finished one keeps its groupId, so `find` would pin
-  // the panel to the oldest conversation forever. Newest open room wins.
-  const groupRoom = state.rooms
-    .filter((room) => room.groupId === group.id && room.status === "running")
-    .at(-1);
-  const roomEntries: Entry[] = (groupRoom?.transcript ?? []).map(
-    (message) => ({ from: message.from, text: message.text, at: message.at }),
+  const members: Bot[] = useMemo(
+    () => group.bot_ids
+      .map((engineBotId) => {
+        const threadId = engineBotId.startsWith("mb-") ? engineBotId.slice(3) : engineBotId;
+        return state.bots.find((b) => b.threadId === threadId || b.id === engineBotId);
+      })
+      .filter((bot): bot is Bot => Boolean(bot)),
+    [group.bot_ids, state.bots],
   );
 
-  const allEntries = [...entries, ...roomEntries].sort((a, b) => a.at - b.at);
+  const nameOf = (from: string) => {
+    if (isUserEntry(from)) return polish ? "Ty" : "You";
+    const threadId = from.startsWith("mb-") ? from.slice(3) : from;
+    const bot = state.bots.find((b) => b.id === from || b.threadId === threadId);
+    return bot ? botDisplayName(bot, polish ? "pl" : "en") : from;
+  };
+  const botOf = (from: string) => {
+    const threadId = from.startsWith("mb-") ? from.slice(3) : from;
+    return state.bots.find((b) => b.id === from || b.threadId === threadId) ?? null;
+  };
 
-  const runTasks = () => {
-    const assignments = buildGroupTasks(group.bot_ids, tasks);
-    if (!assignments.length || busy) return;
+  // Pokoje grupy narastają: budżet zamyka jeden i otwiera następny, więc
+  // historia to WSZYSTKIE pokoje tej grupy po czasie, nie tylko ten otwarty.
+  const roomEntries: Entry[] = state.rooms
+    .filter((room) => room.groupId === group.id)
+    .flatMap((room) => room.transcript.map((m) => ({ id: m.id, from: m.from, text: m.text, at: m.at })));
+  const entries = (roomEntries.length ? roomEntries : legacy).slice().sort((a, b) => a.at - b.at);
+
+  // Pasek maskotki pokazuje tego członka, który właśnie odpowiada — a gdy
+  // nikt nie pracuje, pierwszego z listy (composer musi mieć jakiegoś bota).
+  const answering = members.find((bot) => state.streaming[bot.threadId] !== undefined || state.runtime[bot.threadId] || bot.busy)
+    ?? members[0]
+    ?? null;
+
+  const atEnd = () => {
+    const node = scrollRef.current;
+    return !node || node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+  };
+  const streamingNow = answering ? state.streaming[answering.threadId] : undefined;
+  useEffect(() => {
+    if (follow) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [entries.length, follow, streamingNow]);
+
+  const send = (text: string) => {
+    // Pętla jest sekwencyjna i potrafi trwać minuty; `false` zostawia tekst w
+    // polu, zamiast go po cichu zjeść.
+    if (!text || busy) return false;
     setBusy(true);
     setError(null);
-    const at = Date.now();
-    push(assignments.map((task) => ({ from: "you", text: `${nameOf(task.bot_id)}: ${task.message}`, at })));
-    setTasks({});
-    api(`/api/groups/${group.id}/tasks`, {
-      method: "POST",
-      body: JSON.stringify({ tasks: assignments }),
-    })
+    setFollow(true);
+    api(`/api/groups/${group.id}/chat`, { method: "POST", body: JSON.stringify({ message: text }) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false));
+    return true;
   };
 
   return (
@@ -143,7 +135,7 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
           <div className="min-w-0">
             <div className="truncate text-[15px] font-semibold text-ink">{group.name || (polish ? "Grupa" : "Group")}</div>
             <div className="truncate text-[11px] text-ink-secondary">
-              {members.length} {polish ? "botów" : "bots"} · {group.bot_ids.map(nameOf).join(" · ")}
+              {members.map((bot) => botDisplayName(bot, polish ? "pl" : "en")).join(", ")}
             </div>
           </div>
         </div>
@@ -162,97 +154,91 @@ export function GroupPanel({ group }: { group: EngineGroup }) {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-3">
-        {allEntries.length === 0 ? (
-          <div className="mt-8 flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
-            <Users size={22} />
-            <div className="text-[13px] font-medium text-ink">{polish ? "Brak wiadomości w tej sesji" : "No messages this session"}</div>
-            <span className="text-[12px]">
-              {polish
-                ? "Wpisz osobne zadanie przy każdym bocie. Puste pola zostaną pominięte."
-                : "Enter one task per bot. Empty fields are skipped."}
-            </span>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {allEntries.map((e, i) => {
-              const entryBot = e.from === "you" ? null : members.find(
-                (b) => b.id === e.from || b.threadId === (e.from.startsWith("mb-") ? e.from.slice(3) : e.from),
-              ) ?? null;
-              return e.from === "you" ? (
-                <div key={i} className="flex justify-end">
-                  <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-bubble-user px-3.5 py-2 text-[14px] leading-relaxed text-ink">
-                    {e.text}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto px-5 [overflow-anchor:none]"
+          onWheel={(e) => { if (e.deltaY < 0) setFollow(false); else if (atEnd()) setFollow(true); }}
+          onScroll={() => { if (!follow && atEnd()) setFollow(true); }}
+        >
+          <div className="flex w-full flex-col gap-1 pb-10">
+            {entries.length === 0 && (
+              <div className="mt-8 flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
+                <Users size={22} />
+                <div className="text-[13px] font-medium text-ink">{polish ? "Brak wiadomości" : "No messages yet"}</div>
+                <span className="text-[12px]">
+                  {polish
+                    ? "Napisz do całej grupy. Odpowie ten bot, do którego zadanie pasuje."
+                    : "Write to the whole group. Whichever bot the task fits answers."}
+                </span>
+              </div>
+            )}
+            {entries.map((entry) => {
+              const entryBot = isUserEntry(entry.from) ? null : botOf(entry.from);
+              return isUserEntry(entry.from) ? (
+                <div key={entry.id} className="flex w-full justify-end">
+                  <div className="max-w-[90%] whitespace-pre-wrap rounded-2xl bg-bubble-user px-2 py-[5px] text-[14px] leading-[1.45] text-ink">
+                    {entry.text}
                   </div>
                 </div>
               ) : (
-                <div key={i} className="flex justify-start gap-2.5">
+                <div key={entry.id} className="flex w-full justify-start gap-2.5">
                   {entryBot && (
                     <MausAvatar color={entryBot.color} avatarUrl={entryBot.avatarUrl} shape={entryBot.mascotShape} state={stateForBot(entryBot)} size={28} animated={false} />
                   )}
-                  <div className="min-w-0 max-w-[85%]">
-                    <div className="mb-1 flex flex-wrap items-baseline gap-2">
-                      <span className="text-[13px] font-semibold text-ink">{nameOf(e.from)}</span>
-                      <span className="text-[11px] text-ink-secondary">{formatTime(e.at)}</span>
+                  <div className="min-w-0 max-w-[90%]">
+                    <div className="mb-0.5 flex flex-wrap items-baseline gap-2">
+                      <span className="text-[13px] font-semibold text-ink">{nameOf(entry.from)}</span>
+                      <span className="text-[11px] text-ink-secondary">{formatTime(entry.at)}</span>
                     </div>
-                    <div className="rounded-2xl bg-card px-3.5 py-2 text-[14px] leading-relaxed text-ink">
-                      <ChatMarkdown text={e.text} />
+                    <div className="rounded-2xl bg-card px-2 py-[5px] text-[14px] leading-[1.45] text-ink">
+                      <ChatMarkdown text={formatPeerEnvelope(entry.text)} compact />
                     </div>
                   </div>
                 </div>
               );
             })}
-            {busy && (
-              <div className="flex items-center gap-2 text-[12px] text-ink-secondary">
-                <Loader2 size={12} className="animate-spin" />
-                {polish ? "Wysyłam do pokoju…" : "Sending to the room…"}
+            {/* Tylko w trakcie NASZEJ tury: `answering` bywa zajęty własnym
+                czatem 1:1, a jego strumień nie jest treścią grupy. */}
+            {busy && answering && state.streaming[answering.threadId] !== undefined && (
+              <div className="flex w-full justify-start">
+                <div className="max-w-[90%] rounded-2xl bg-card px-2 py-[5px] text-[14px] leading-[1.45] text-ink">
+                  <ChatMarkdown text={state.streaming[answering.threadId]} streaming compact />
+                  <span className="ml-0.5 inline-block h-[13px] w-[2px] animate-pulse bg-ink-secondary align-middle" />
+                </div>
               </div>
             )}
-          </div>
-        )}
-
-        {error && (
-          <div className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* Jedno zadanie na bota; wszystkie niepuste pola lecą równolegle. */}
-      <div className="border-t border-hairline/40 px-4 py-3">
-        <div className="mb-2 flex items-center justify-between text-[12px] text-ink-secondary">
-          <span>{polish ? "Zadania botów" : "Bot tasks"}</span>
-          <span>{buildGroupTasks(group.bot_ids, tasks).length}/{memberRows.length}</span>
-        </div>
-        <div className="flex max-h-64 flex-col gap-2 overflow-y-auto">
-          {memberRows.map(({ engineBotId, bot }) => (
-            <div key={engineBotId} className="flex items-start gap-2">
-              <MausAvatar color={bot.color} avatarUrl={bot.avatarUrl} shape={bot.mascotShape} state={stateForBot(bot)} size={24} animated={false} />
-              <div className="min-w-0 flex-1">
-                <div className="mb-1 text-[11px] font-medium text-ink-secondary">{botDisplayName(bot, polish ? "pl" : "en")}</div>
-                <textarea
-                  className="min-h-12 w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-                  placeholder={polish ? "Zadanie dla tego bota" : "Task for this bot"}
-                  value={tasks[engineBotId] ?? ""}
-                  onChange={(e) => setTasks((current) => ({ ...current, [engineBotId]: e.target.value }))}
-                  disabled={busy}
-                />
+            {busy && !answering?.busy && (
+              <div className="flex items-center gap-2 px-1 text-[12px] text-ink-secondary">
+                <Loader2 size={12} className="animate-spin" />
+                {polish ? "Wysyłam do grupy…" : "Sending to the group…"}
               </div>
-            </div>
-          ))}
+            )}
+            {error && (
+              <div className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>
+            )}
+          </div>
         </div>
-        <button
-          onClick={runTasks}
-          disabled={busy || buildGroupTasks(group.bot_ids, tasks).length === 0}
-          className={cn(
-            "mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50",
-          )}
-          title={polish ? "Uruchom zadania równolegle" : "Run tasks in parallel"}
-        >
-          {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-          {polish ? "Uruchom zadania" : "Run tasks"}
-        </button>
+        {!follow && (
+          <button
+            onClick={() => { setFollow(true); scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); }}
+            className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-hairline/40 bg-raised px-3 py-1.5 text-[12.5px] text-ink shadow-lg hover:bg-raised-hover"
+          >
+            <ArrowDown size={13} /> {polish ? "Przejdź do najnowszych" : "Jump to latest"}
+          </button>
+        )}
       </div>
+
+      {answering ? (
+        <Composer bot={answering} onSend={send} />
+      ) : (
+        // Grupa, ktorej wszystkie boty skasowano: bez bota nie ma czego karmic
+        // composerem (model, zalaczniki, pasek maskotki), wiec zamiast pustego
+        // dolu mowimy wprost, dlaczego nie da sie tu pisac.
+        <div className="px-5 py-4 text-[12.5px] text-ink-secondary">
+          {polish ? "Ta grupa nie ma juz zadnego bota." : "This group has no bots left."}
+        </div>
+      )}
     </main>
   );
 }

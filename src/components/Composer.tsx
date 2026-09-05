@@ -284,7 +284,13 @@ export function reasoningLevels(model: string) {
   return supportsMaxReasoning(model) ? REASONING_LEVELS : REASONING_LEVELS.filter((level) => level.id !== "max");
 }
 
-export function Composer({ bot }: { bot: Bot }) {
+/** `onSend` przejmuje wysyłkę (czat grupowy: jedna wiadomość do całej grupy,
+ * nie do `bot`). Bez niego composer wysyła do `bot` jak dotąd. `bot` zostaje w
+ * obu trybach, bo to on karmi pasek maskotki i model picker. Zwrócone `false`
+ * znaczy „nie przyjęte" — tekst ZOSTAJE w polu, bo cicho skasowana wiadomość
+ * jest gorsza niż brak wysyłki. Załączników tu nie ma: grupa nie ma jednego
+ * właściciela pliku, więc spinacz w tym trybie znika zamiast gubić plik. */
+export function Composer({ bot, onSend }: { bot: Bot; onSend?: (text: string) => boolean }) {
   const { state, dispatch } = useStore();
   const polish = useLanguage() === "pl";
   const [text, setText] = useState("");
@@ -750,7 +756,9 @@ export function Composer({ bot }: { bot: Bot }) {
         if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? `Upload failed (HTTP ${response.status})`);
         return String((await response.json()).id);
       }));
-      dispatch({
+      if (onSend) {
+        if (!onSend(text.trim())) return;
+      } else dispatch({
         type: "send",
         botId: bot.id,
         text: text.trim(),
@@ -965,6 +973,9 @@ export function Composer({ bot }: { bot: Bot }) {
             />
           </div>
         )}
+        {/* Czat grupowy nie ma jednego wlasciciela pliku, a `onSend` niesie sam
+            tekst - lepiej nie pokazywac spinacza niz zzerac zalacznik. */}
+        {!onSend && (
         <button
           type="button"
           data-attach-toggle
@@ -978,6 +989,7 @@ export function Composer({ bot }: { bot: Bot }) {
         >
           <Plus size={20} />
         </button>
+        )}
         <textarea
           data-composer-input
           ref={inputRef}

@@ -237,6 +237,7 @@ function armBusyWatchdog(botId: string): void {
       // przeżywał turę i NASTĘPNA, niezwiązana tura odsyłała swój tekst
       // wczorajszemu nadawcy, a kolejka stała bez drenażu.
       peerTurn.delete(botId);
+      groupTurn.get(botId)?.done(""); // wiszący dostawca nie trzyma czatu grupy
       turnAssistantText.delete(b.threadId);
       releaseTurnSlot(botId); // zawieszony dostawca nie trzyma slotu całej floty
       broadcast({ kind: "bot", bot: store.bot(botId) });
@@ -271,14 +272,10 @@ function agentsIntegration(botId: string) {
  * synchronous half of ask_bot. Subscribes to the bus, folds assistant_text
  * for that thread, resolves on turn.completed (or a turn ceiling — by default
  * the old 4 minutes, overridable per caller via `timeoutMs`). */
-function groupThreadId(groupId: string, botId: string): string {
-  return `group-${groupId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}-${botId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}`;
-}
-
 /** Isolated thread for a one-shot delegated peer turn ("[Delegation from @X]",
  * no room view): the envelope and everything the peer does in that turn stay
- * off the peer's main chat. Stable per caller→peer pair, like groupThreadId
- * is per group, so the peer keeps one session for delegated work. */
+ * off the peer's main chat. Stable per caller→peer pair, so the peer keeps
+ * one session for delegated work. */
 function delegationThreadId(callerBotId: string, peerBotId: string): string {
   return `delegation-${callerBotId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}-${peerBotId.replace(/[^a-z0-9_-]/gi, "").slice(0, 24)}`;
 }
@@ -444,7 +441,7 @@ function closeRoom(roomId: string, status: "done" | "failed", reason = ""): void
   for (const key of [...sentPeerText.keys()]) if (key.startsWith(`${roomId}|`)) sentPeerText.delete(key);
   const settled = rooms.get(roomId);
   if (settled) broadcast({ kind: "room", room: settled });
-  reportRoom(roomId, status, reason);
+  if (!room.groupId) reportRoom(roomId, status, reason);
 }
 
 /** The wall clock only ever fired when somebody tried to send. A conversation
@@ -453,7 +450,9 @@ function closeRoom(roomId: string, status: "done" | "failed", reason = ""): void
 function sweepExpiredRooms(): void {
   const cutoff = Date.now() - collabMaxMs();
   for (const room of rooms.list()) {
-    if (room.status !== "running" || room.createdAt > cutoff) continue;
+    // A group room is the user's chat, not a task: it does not expire, and it
+    // is nobody's "collaboration result" to report into a private thread.
+    if (room.status !== "running" || room.groupId || room.createdAt > cutoff) continue;
     startBudgetCooldown(room.id);
     closeRoom(room.id, "done", "time budget spent");
   }
@@ -554,6 +553,22 @@ interface PeerAnswer {
   deferred: boolean;
 }
 const peerTurn = new Map<string, PeerAnswer[]>();
+/** Turn a member is running FOR a group chat, keyed by that member's bot id.
+ * Separate from `peerTurn` because the sender is the user, not a colleague:
+ * nothing routes back automatically, the group loop only needs to know the
+ * turn ended (and with what text) before it hands the transcript to the next
+ * member — that is what lets a later member see an earlier one's answer. */
+interface GroupAnswer {
+  group: { id: string; name: string };
+  roomId: string;
+  members: Array<{ name: string; description?: string }>;
+  /** The envelope queued behind a turn that was already running. The turn that
+   * finishes next was not answering us, so its text is not the group answer —
+   * exactly the `PeerAnswer.deferred` rule, for the same reason. */
+  deferred: boolean;
+  done: (text: string) => void;
+}
+const groupTurn = new Map<string, GroupAnswer>();
 /** Last text each sender→recipient pair carried inside a room. Repeating it
  * verbatim is a loop, not a contribution. Keyed per pair so a fan-out to a
  * group (same text, several recipients) is not mistaken for one. */
@@ -738,7 +753,10 @@ async function routePeerReply(
   const visible = (done ? text.replace(DONE_MARKER_AT_END, "") : text).trim();
   if (done) {
     if (visible && room && !isDuplicateOfLast(room, botId, visible)) rooms.append(peer.roomId, botId, visible);
-    closeRoom(peer.roomId, "done");
+    // A group room is a standing chat, not a task: one member declaring the
+    // work finished must not close the room the user is still writing into.
+    if (room?.groupId) broadcast({ kind: "room", room: rooms.get(peer.roomId) });
+    else closeRoom(peer.roomId, "done");
     return;
   }
   // eliza: silence is a valid contribution — no thank-you turns.
@@ -747,6 +765,106 @@ async function routePeerReply(
   // through the back door of the safety net.
   if (!mayDelegate) return;
   await deliverPeerMessage(botId, peer.fromBotId, visible, peer.roomId);
+}
+
+// ── group chat: one room, the user writes to everyone, members pick who answers ──
+// A group is a normal chat that happens to have several bots in it. The user's
+// message goes to the members ONE AT A TIME on their own main threads, each
+// with the transcript so far, so a later member reads what an earlier one
+// already said and can stay quiet ([NO REPLY]) or hand the task over (@Name).
+
+/** Sender id used for the user's own lines in a group room ledger. */
+const ROOM_USER_SENDER = "user";
+/** How long one member may hold up the group before the next one is asked. */
+const GROUP_MEMBER_TURN_MS = 4 * 60_000;
+
+/** What a member reads: who is in the room, what was said, and that a human
+ * is on the other end. Names are user input, so they land inside the header
+ * with brackets and newlines stripped, exactly like `peerEnvelope`. */
+function groupEnvelope(groupName: string, roster: BotRecord[], room: RoomRecord): string {
+  const safe = (raw: string) => raw.replace(/[[\]\r\n]+/g, " ").trim().slice(0, 120);
+  const nameOf = (from: string) => (from === ROOM_USER_SENDER ? "User" : safe(store.bot(from)?.name ?? from));
+  const header = `[Group chat "${safe(groupName)}" with ${roster.map((b) => `@${safe(b.name)}`).join(", ")}. `
+    + "The user writes to the whole group. The conversation so far follows; answer it, hand it over with @Name, "
+    + "or reply with exactly [NO REPLY] if someone else already covered it.]";
+  return `${header}\n\n${room.transcript.map((m) => `${nameOf(m.from)}: ${m.text}`).join("\n\n")}`;
+}
+
+/** Run one member's group turn and resolve with the text it produced.
+ * Deliberately QUEUES instead of steering a live turn: the answer this returns
+ * is appended to the group room verbatim, so it has to come from a turn that
+ * read the group envelope and ran with the group prompt block - not from a
+ * private turn that happened to be running and had the envelope steered into
+ * it. Returns "" when the bot is already answering another group. */
+async function askGroupMember(target: BotRecord, answer: Omit<GroupAnswer, "done" | "deferred">, envelope: string): Promise<string> {
+  // One group turn per bot at a time. Two groups sharing a member would share
+  // the single slot, and the second would collect the first one's text.
+  if (groupTurn.has(target.id)) return "";
+  const bubble = store.appendMessage(target.threadId, { role: "user", kind: "text", text: envelope });
+  broadcast({ kind: "message", threadId: target.threadId, message: bubble });
+  return await new Promise<string>((resolve) => {
+    let settled = false;
+    const finish = (text: string) => {
+      if (settled) return;
+      settled = true;
+      if (groupTurn.get(target.id)?.done === finish) groupTurn.delete(target.id);
+      resolve(text);
+    };
+    // A turn already running has not read this envelope, so its completion is
+    // not our answer: the first `turn.completed` only clears the flag.
+    groupTurn.set(target.id, { ...answer, deferred: activeCommsDepth.has(target.id), done: finish });
+    // ponytail: a dead turn must not stall the whole group; per-member ceiling,
+    // per-group budget if that ever needs tuning.
+    setTimeout(() => finish(""), GROUP_MEMBER_TURN_MS).unref?.();
+    queueUserTurn(target.id, envelope, { attachments: [], origin: "bot" });
+  });
+}
+
+/**
+ * Deliver the user's group message to every member in a stable order and
+ * collect what each of them said. Returns one entry per member that spoke.
+ */
+async function runGroupChat(
+  group: { id: string; name: string },
+  room: RoomRecord,
+  roster: BotRecord[],
+  targets: BotRecord[],
+): Promise<Array<{ bot_id: string; reply: string }>> {
+  // Roster, not targets: an @mention narrows who is ASKED, never who the group
+  // contains - a member told only about the mentioned bots could not hand off.
+  const members = roster.map((bot) => ({ name: bot.name, description: bot.description }));
+  const spoke: Array<{ bot_id: string; reply: string }> = [];
+  /** Members a colleague already handed the task to: peer delivery owns their
+   * turn now, so the group loop must not ask them the same thing twice. */
+  const handedOver = new Set<string>();
+  const max = collabMaxMessages();
+  for (const [index, target] of targets.entries()) {
+    if (handedOver.has(target.id)) continue;
+    const current = rooms.get(room.id);
+    if (!current || current.status !== "running" || budgetLeft(current, max) <= 0) break;
+    // The trace the owner asked for: a clickable pill in the member's own chat
+    // saying it was pulled into this group, one per member per group turn.
+    postRoomChip(target.id, current);
+    const raw = await askGroupMember(target, { group, roomId: room.id, members }, groupEnvelope(group.name, roster, current));
+    const visible = raw.replace(DONE_MARKER_AT_END, "").trim();
+    if (!visible || visible === NO_REPLY_MARKER) continue;
+    const ledger = rooms.get(room.id);
+    if (ledger && !isDuplicateOfLast(ledger, target.id, visible)) rooms.append(room.id, target.id, visible);
+    broadcast({ kind: "room", room: rooms.get(room.id) });
+    spoke.push({ bot_id: target.id, reply: visible });
+    // "that is a job for @Researcher" — the handoff is a real peer message, so
+    // the addressee answers in its own time and reports back to the sender.
+    // Matched against the whole roster: handing BACK to someone who already
+    // spoke, or to a member the mention filtered out, has to work too.
+    const stillToAsk = targets.slice(index + 1);
+    for (const peer of mentionedBots(visible, roster.filter((bot) => bot.id !== target.id))) {
+      const delivery = await deliverPeerMessage(target.id, peer.id, visible, room.id);
+      // Only a delivery that actually landed takes the member out of the loop;
+      // a refusal must not swallow the handoff and leave nobody working.
+      if (delivery.status !== "refused" && stillToAsk.includes(peer)) handedOver.add(peer.id);
+    }
+  }
+  return spoke;
 }
 
 /**
@@ -856,6 +974,7 @@ function drainQueuedUserMessages(botId: string) {
     // bot usunięty w międzyczasie — kolejka gaśnie z nim
     queuedUserMessages.take(botId);
     queuedTurnOptions.delete(botId);
+    groupTurn.get(botId)?.done("");
     return;
   }
   // Tura już chodzi: nic nie zabieramy z kolejki, jej koniec zawoła nas znowu.
@@ -878,6 +997,7 @@ function drainQueuedUserMessages(botId: string) {
   }).catch(() => {
     // Tura nie ruszyła (bot zniknął, dostawca padł) — `busy` już zgasło wyżej,
     // ale UI wciąż widzi zapalone z chwili przyjęcia wiadomości.
+    groupTurn.get(botId)?.done("");
     broadcast({ kind: "bot", bot: store.bot(botId) });
   });
 }
@@ -1378,6 +1498,7 @@ bus.subscribe((event: RuntimeEvent) => {
       // z nią — inaczej NASTĘPNA, niezwiązana tura wysłałaby swój tekst do
       // nadawcy sprzed awarii.
       peerTurn.delete(bot.id);
+      groupTurn.get(bot.id)?.done("");
       turnAssistantText.delete(event.threadId);
       pushMessage({ role: "bot", kind: "activity", tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false } });
       endTurnPush(bot.id, "failed", event.message.slice(0, 120));
@@ -1415,6 +1536,12 @@ bus.subscribe((event: RuntimeEvent) => {
       // bot's previous, unrelated answer to a bot that never asked for it.
       const saidThisTurn = (turnAssistantText.get(event.threadId) ?? []).join("\n").trim();
       turnAssistantText.delete(event.threadId);
+      // A group turn has no peer to answer: the loop that asked is waiting.
+      // A turn that was ALREADY running when the envelope queued did not read
+      // it, so it only clears the flag; the turn the drain starts answers.
+      const groupWaiting = groupTurn.get(bot.id);
+      if (groupWaiting?.deferred) groupWaiting.deferred = false;
+      else groupWaiting?.done(saidThisTurn);
       const waiting = (peerTurn.get(bot.id) ?? []).filter((entry) => !entry.replied);
       // A message that queued behind THIS turn is read by the next one; it is
       // held over instead of being answered with text written before it landed.
@@ -2115,6 +2242,7 @@ opts?: {
       // an explicit delegation nudge — the agent still does the ask_bot call
       // itself, so the harness stays the single owner of turns/permissions
       const visibleRoster = store.bots.filter((candidate) => candidate.id === bot.id || canBotContact(bot, candidate));
+      const groupHere = groupTurn.get(bot.id);
       const tagged = mentionedBots(
         text,
         visibleRoster.filter((b) => b.id !== bot.id),
@@ -2170,7 +2298,9 @@ opts?: {
         model: turnModel,
         ...(!isolated ? { resumeCursor: bot.resumeCursors[bot.modelSelection.instanceId] } : {}),
         transcript,
-        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: visibleRoster, currentUser: promptUser, timeZone: cfg.timeZone }),
+        // multibot: `groupTurn` zyje tylko na czas tury grupowej, wiec blok
+        // "kto odpowiada" wchodzi do promptu dokladnie na tych turach.
+        system: botSystemPrompt(bot, { isolated, integrations, tagged, taggedReplies, workspace, roster: visibleRoster, currentUser: promptUser, timeZone: cfg.timeZone, ...(groupHere ? { group: { name: groupHere.group.name, members: groupHere.members } } : {}) }),
         integrations,
         ...(opts?.reasoning ? { reasoning: opts.reasoning } : {}),
         // multibot: „Fast mode" jest USTAWIENIEM bota (przeżywa restart), nie
@@ -2194,6 +2324,7 @@ opts?: {
         clearTurnPolicy(bot.threadId);
         activeCommsDepth.delete(bot.id); // multibot (F9): tura padła — licznik też
         peerTurn.delete(bot.id);
+        groupTurn.get(bot.id)?.done("");
         turnAssistantText.delete(turnThreadId);
         broadcast({ kind: "bot", bot: store.bot(bot.id) });
         drainQueuedUserMessages(bot.id);
@@ -3585,33 +3716,42 @@ const server = createServer(async (req, res) => {
         }
         const durable = groupStore.get(gid) ?? groupStore.upsert({ id: gid, name: String((group as { name?: unknown }).name ?? "Group"), bot_ids: (group.bot_ids ?? []).map(String) });
         if (!groupVisible(durable, actor)) return json(res, 404, { error: "no such group" });
+        const roster = (group.bot_ids ?? [])
+          .map((rawId) => store.botByThread(threadIdOfEngineBot(String(rawId)) ?? String(rawId)))
+          .filter((bot): bot is BotRecord => Boolean(bot))
+          // Stable order, chief of staff first: someone has to read the message
+          // before the others, and that is the job the chief already has.
+          .sort((a, b) => Number(Boolean(b.chiefOfStaff)) - Number(Boolean(a.chiefOfStaff)));
+        if (!roster.length) return json(res, 422, { error: "the group has no bots" });
         groupStore.append(gid, { from: "you", text: message });
-        const botEntries = (group.bot_ids ?? [])
-          .map((rawId) => {
-            const engineId = String(rawId);
-            const threadId = engineId.startsWith("mb-") ? engineId.slice(3) : engineId;
-            const bot = store.botByThread(threadId);
-            return bot ? { bot } : null;
-          })
-          .filter((x): x is { bot: NonNullable<ReturnType<typeof store.bot>> } => Boolean(x));
-        const snapshot = (groupStore.get(gid)?.messages ?? []).map((item) => ({
-          role: item.from === "you" ? ("user" as const) : ("assistant" as const),
-          text: item.text,
-        }));
-        // multibot: równolegle — sekwencyjnie 2× TTFT = >10s dla hej, równolegle = max TTFT <2s warm
-        const turns = await Promise.all(
-          botEntries.map(async ({ bot }) => {
-            const reply = await askBotAndWait(bot.id, message, 0, {
-              threadId: groupThreadId(gid, bot.id),
-              transcript: snapshot,
-            });
-            return { bot_id: bot.id, reply };
-          }),
-        );
-        for (const t of turns) if (durable) groupStore.append(gid, { from: t.bot_id, text: t.reply });
+        // @mention limits the message to those members; @everyone (or no
+        // mention at all) is the whole group. Order stays roster order so the
+        // chief of staff, or whoever the user put first, answers first.
+        const everyone = /(^|\s)@everyone\b/i.test(message);
+        const mentioned = everyone ? [] : mentionedBots(message, roster);
+        const targets = mentioned.length ? roster.filter((bot) => mentioned.includes(bot)) : roster;
+        // One room per group, so a group keeps a single ledger and a single
+        // budget. A spent budget rotates the room instead of killing the chat.
+        let room = rooms.forGroup(gid);
+        if (room && budgetLeft(room, collabMaxMessages()) <= 0) {
+          closeRoom(room.id, "done", `message budget spent (${collabMaxMessages()})`);
+          room = null;
+        }
+        room ??= rooms.create({
+          task: durable.name,
+          bot_ids: roster.map((bot) => bot.id),
+          ownerThread: roster[0].threadId,
+          ownerBotId: roster[0].id,
+          groupId: gid,
+        });
+        for (const bot of roster) rooms.addBot(room.id, bot.id);
+        rooms.append(room.id, ROOM_USER_SENDER, message);
+        broadcast({ kind: "room", room: rooms.get(room.id) });
+        const turns = await runGroupChat({ id: gid, name: durable.name }, room, roster, targets);
+        for (const t of turns) groupStore.append(gid, { from: t.bot_id, text: t.reply });
         const current = groupStore.get(gid);
         if (current) broadcast({ kind: "group", group: current });
-        return json(res, 200, { turns, owner: turns[0]?.bot_id ?? null, messages: current?.messages ?? [] });
+        return json(res, 200, { turns, owner: turns[0]?.bot_id ?? null, roomId: room.id, messages: current?.messages ?? [] });
       } catch (error) {
         return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
       }
@@ -4134,6 +4274,7 @@ const server = createServer(async (req, res) => {
       clearTurnPolicy(bot.threadId);
       activeCommsDepth.delete(bot.id);
       peerTurn.delete(bot.id); // przerwana tura nie odpisuje koledze
+      groupTurn.get(bot.id)?.done("");
       turnAssistantText.delete(bot.threadId);
       stopScreenPoller(bot.id);
       releaseTurnSlot(bot.id);

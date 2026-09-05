@@ -285,4 +285,20 @@ describe("botSystemPrompt", () => {
     expect(text).toContain("`update_routine`");
     expect(text).toContain("`delete_routine`");
   });
+
+  // multibot: blok grupowy dokleja sie WYLACZNIE na turze grupowej — bez niego
+  // kazdy czlonek odpowiada na wszystko i user dostaje N kopii tej samej
+  // odpowiedzi.
+  it("blok grupowy jest tylko na turze grupowej i niesie regule wyboru", () => {
+    expect(prompt(ALL)).not.toContain("# This turn is a group chat");
+    const text = prompt(ALL, {
+      group: { name: "Ekipa", members: [{ name: "Atlas", description: "koordynacja" }, { name: "Researcher", description: "research" }] },
+    });
+    expect(text).toContain("# This turn is a group chat");
+    expect(text).toContain("You are in group Ekipa with Atlas (koordynacja), Researcher (research).");
+    expect(text).toContain("The user writes to the whole group.");
+    expect(text).toContain("write one line handing it over with @Name and stop");
+    expect(text).toContain("reply exactly [NO REPLY]");
+    expect(text).toContain("One owner per task; do not repeat what others said.");
+  });
 });
