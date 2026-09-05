@@ -569,6 +569,31 @@ describe("comms e2e (fake ACP fleet)", () => {
     60_000,
   );
 
+  // multibot (0.3.32): `[NO REPLY]` to protokół bot↔bot, nie treść. Tura, która
+  // odpowiada samym sentinelem, nie zostawia w wątku ŻADNEJ bańki bota.
+  it(
+    "swallows a [NO REPLY] turn instead of posting it to the thread",
+    async () => {
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${bot.id}`, {
+        name: "Silent Codex",
+        modelSelection: { instanceId: "codex", model: "fake-model" },
+      });
+      const before = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === bot.id).messages.length;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "SAY_NO_REPLY" })).status).toBe(202);
+      for (const deadline = Date.now() + 25_000; ; ) {
+        const current = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === bot.id);
+        if (!current.busy && current.messages.length > before) {
+          expect(current.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text?.includes("[NO REPLY]"))).toEqual([]);
+          return;
+        }
+        if (Date.now() > deadline) throw new Error(`[NO REPLY] turn never settled. stderr: ${stderr.slice(-2000)}`);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    },
+    60_000,
+  );
+
   it(
     "falls back to tagged peer replies for Codex and honors delegation policy",
     async () => {

@@ -641,10 +641,26 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           const cursor = plan.resume;
           let startedModel: string | null = null;
           let didResume = false;
+          // multibot: sandbox + approvalPolicy MUSZĄ jechać także w `thread/resume`.
+          // Codex 0.153 nie odtwarza polityki piaskownicy wznawianego wątku z dysku
+          // — bez tego pola wątek wraca na domyślne `workspace-write`, a w piaskownicy
+          // 0.153 KAŻDE wywołanie narzędzia MCP wymaga aprobaty; przy
+          // `approvalPolicy: "never"` codex odmawia zamiast zapytać i tura dostaje
+          // `MCP tool call requires approval, but approval policy is never`.
+          // Pierwsza tura (thread/start) działała, każda następna (resume) nie —
+          // czyli create_reminder/notify_user/list_routines/send_bot_mail padały
+          // w produkcji. Zmierzone na telefonie (codex-cli 0.153.3): resume bez
+          // `sandbox` = błąd aprobaty, resume z `sandbox` = narzędzie wchodzi;
+          // sam `approvalPolicy` nie wystarcza.
+          const threadSettings = {
+            sandbox: fullAuto ? "danger-full-access" : policy?.permissions.file === false ? "read-only" : "workspace-write",
+            approvalPolicy: fullAuto ? "never" : "on-request",
+          } as const;
           if (cursor) {
             try {
               const resumed = await request("thread/resume", {
                 threadId: cursor,
+                ...threadSettings,
                 ...mcpConfig,
               });
               codexThreadId = resumed?.thread?.id ?? cursor;
@@ -657,8 +673,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             const started = await request("thread/start", {
               cwd: turn.cwd ?? homedir(),
               model: turn.model || null,
-              sandbox: fullAuto ? "danger-full-access" : policy?.permissions.file === false ? "read-only" : "workspace-write",
-              approvalPolicy: fullAuto ? "never" : "on-request",
+              ...threadSettings,
               ephemeral: false,
               ...mcpConfig,
               ...(turn.system ? { instructions: turn.system } : {}),

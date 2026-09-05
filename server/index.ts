@@ -1274,13 +1274,20 @@ bus.subscribe((event: RuntimeEvent) => {
         const replyModel = turnModelByThread.get(event.threadId);
         turnModelByThread.delete(event.threadId);
         turnAssistantText.set(event.threadId, [...(turnAssistantText.get(event.threadId) ?? []), event.text]);
-        pushMessage({
-          role: "bot",
-          kind: "text",
-          text: event.text,
-          ...(replyModel ? { model: replyModel } : {}),
-          ...(pending?.length ? { attachments: pending } : {}),
-        });
+        // multibot: `[NO REPLY]` to sygnał protokołu bot↔bot ("nie mam nic do
+        // dodania"), nie treść — do wątku nie trafia. Siatka bezpieczeństwa
+        // peerów czyta `turnAssistantText` POWYŻEJ, więc dostaje sentinel dalej
+        // i dalej zamienia go na milczenie (routePeerReply). Załączniki wygrywają:
+        // tura, która wysłała plik, zostaje widoczna mimo sentinela.
+        if (event.text.trim() !== NO_REPLY_MARKER || pending?.length) {
+          pushMessage({
+            role: "bot",
+            kind: "text",
+            text: event.text,
+            ...(replyModel ? { model: replyModel } : {}),
+            ...(pending?.length ? { attachments: pending } : {}),
+          });
+        }
       } else if (event.itemType === "tool" && event.itemId) {
         const messageId = toolMessageByItem.get(event.itemId);
         if (messageId) {

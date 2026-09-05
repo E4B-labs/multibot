@@ -12,12 +12,22 @@
 //                       udanym turn/steer — jak długa tura GPT-6 Astra)
 //                     | steer-refused (turn/steer wraca błędem
 //                       `activeTurnNotSteerable`, tura wisi dalej)
+//                     | resume-mcp (jak `resume`, ale odtwarza model aprobat
+//                       codeksa 0.153: wątek wznowiony BEZ `sandbox` wraca na
+//                       piaskownicę i każde wywołanie narzędzia MCP kończy się
+//                       `MCP tool call requires approval, but approval policy is
+//                       never`; z `sandbox: "danger-full-access"` przechodzi)
 //   FAKE_CODEX_DUMP   path to write {argv, env, calls, decision} as JSON
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
+/** resume-mcp: czy wznowienie przyniosło pełny dostęp (patrz nagłówek). */
+let resumedFullAccess = false;
+/** Tura, której prompt zawiera SAY_NO_REPLY, odpowiada samym sentinelem —
+ *  tak w e2e sprawdzamy, że `[NO REPLY]` nie ląduje w wątku jako wiadomość. */
+let replyText = "done from fake codex";
 const calls: Array<{ method: string; params: unknown }> = [];
 let decision: unknown = null;
 
@@ -40,7 +50,7 @@ const finishTurn = () => {
     notify("item/agentMessage/delta", { itemId: "m1", delta: "done from " });
     notify("item/agentMessage/delta", { itemId: "m1", delta: "fake codex" });
   }
-  notify("item/completed", { item: { id: "m1", type: "agentMessage", text: "done from fake codex" } });
+  notify("item/completed", { item: { id: "m1", type: "agentMessage", text: replyText } });
   // multibot: dwa raporty z NARASTAJĄCĄ sumą, jak prawdziwy Codex w trakcie
   // tury — driver ma z nich zrobić delty (4/2 i 3/1), nie sumę sum
   notify("thread/tokenUsage/updated", { tokenUsage: { total: { inputTokens: 4, outputTokens: 2 } } });
@@ -78,7 +88,10 @@ process.stdin.on("data", (chunk) => {
         out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
         break;
       case "thread/resume":
-        if (mode === "resume") {
+        if (mode === "resume-mcp") {
+          resumedFullAccess = msg.params?.sandbox === "danger-full-access";
+          out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });
+        } else if (mode === "resume") {
           out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -1, message: "no such thread" } });
@@ -88,6 +101,7 @@ process.stdin.on("data", (chunk) => {
         out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model" } });
         break;
       case "turn/start":
+        if (JSON.stringify(msg.params?.input ?? "").includes("SAY_NO_REPLY")) replyText = "[NO REPLY]";
         out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: "codex-turn-1" } } });
         notify("item/started", { item: { id: "i1", type: "commandExecution", command: "ls -la" } });
         if (mode === "approval") {
@@ -123,6 +137,16 @@ process.stdin.on("data", (chunk) => {
               requestedSchema: { type: "object", properties: {} },
             },
           });
+        } else if (mode === "resume-mcp") {
+          const result = resumedFullAccess
+            ? { content: [{ type: "text", text: "no routines" }], isError: false }
+            : { content: [{ type: "text", text: "MCP tool call requires approval, but approval policy is never" }], isError: true };
+          notify("item/completed", {
+            item: { id: "mcp1", type: "mcpToolCall", server: "agents", tool: "list_routines", status: resumedFullAccess ? "completed" : "failed", result },
+          });
+          notify("item/completed", { item: { id: "m1", type: "agentMessage", text: result.content[0].text } });
+          dump();
+          notify("turn/completed", { turn: { status: "completed" } });
         } else if (mode === "steer" || mode === "steer-refused") {
           // tura zostaje otwarta — kończy ją dopiero turn/steer (albo interrupt)
         } else {
