@@ -51,3 +51,33 @@ describe("awatar w nagłówku czatu", () => {
     expect(chat).toContain("animated={headerAvatar.animated}");
   });
 });
+
+// multibot: poziomy pasek przewijania w czacie i biały kwadracik w jego prawym
+// końcu. Dymek jest elementem flexa, więc `min-width:auto` nie pozwalał mu
+// zejść poniżej szerokości min-content — jeden długi token bez spacji rozpychał
+// wiersz poza listę. Narożnik paska Chrome domyślnie maluje na BIAŁO, gdy
+// jakikolwiek `::-webkit-scrollbar` jest ostylowany.
+const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+
+describe("czat nie przewija się w bok", () => {
+  it("oba dymki kurczą się i łamią długie tokeny", () => {
+    const bubbles = chat
+      .split(/\r?\n/)
+      .filter((line) => line.includes("rounded-2xl") && line.includes("py-[5px]") && line.includes("max-w-["));
+    expect(bubbles.length).toBeGreaterThanOrEqual(2);
+    for (const line of bubbles) {
+      expect(line, `dymek bez min-w-0: ${line.trim()}`).toContain("min-w-0");
+      expect(line, `dymek bez break-words: ${line.trim()}`).toContain("break-words");
+    }
+  });
+
+  it("lista wiadomości ma oddech pod ostatnim dymkiem", () => {
+    expect(chat).toContain('className="flex w-full min-w-0 flex-col gap-1 pb-16"');
+  });
+
+  it("narożnik paska jest przezroczysty, a pasek poziomy tak samo cienki", () => {
+    expect(css).toContain("::-webkit-scrollbar-corner");
+    expect(css.slice(css.indexOf("::-webkit-scrollbar-corner"))).toContain("background: transparent");
+    expect(css.slice(css.indexOf("::-webkit-scrollbar {"))).toMatch(/height:\s*8px/);
+  });
+});

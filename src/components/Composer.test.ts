@@ -4,7 +4,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { fastModeAvailable, reasoningLevels, slashVisible, withCommand, type SlashRow } from "./Composer";
+import {
+  composerPillShape,
+  fastModeAvailable,
+  reasoningLevels,
+  sidePanelOpen,
+  slashVisible,
+  withCommand,
+  type SlashRow,
+} from "./Composer";
 
 const row = (kind: SlashRow["kind"], label: string): SlashRow => ({
   id: `${kind}-${label}`,
@@ -124,5 +132,48 @@ describe("pasek nad composerem", () => {
     expect(composer).toContain("stripMascotState(");
     expect(composer).toContain("state={strip.state}");
     expect(composer).toContain("motion={strip.motion}");
+  });
+});
+
+// multibot: pigułki composera (rozumowanie, tryb szybki, dostęp) zwijają się do
+// samej ikony, kiedy z prawej stoi panel boczny i kolumna czatu jest wąska.
+const PANELS_CLOSED = {
+  settingsOpen: false,
+  inspectorOpen: false,
+  computerOpen: false,
+  routinesOpen: false,
+  skillsOpen: false,
+};
+
+describe("zwijanie pigułek composera", () => {
+  it("bez panelu pigułki zostają pełne", () => {
+    expect(sidePanelOpen(PANELS_CLOSED)).toBe(false);
+  });
+
+  it("KAŻDY panel boczny zwija pigułki, nie tylko ustawienia bota", () => {
+    for (const key of Object.keys(PANELS_CLOSED) as Array<keyof typeof PANELS_CLOSED>) {
+      expect(sidePanelOpen({ ...PANELS_CLOSED, [key]: true })).toBe(true);
+    }
+  });
+
+  it("zwinięta pigułka to kwadrat 32 px bez paddingu, pełna ma podpis i odstęp", () => {
+    expect(composerPillShape(true)).toBe("size-8 justify-center px-0");
+    expect(composerPillShape(false)).toBe("h-8 gap-1 px-2");
+  });
+
+  it("wszystkie trzy pigułki i rząd używają wspólnego warunku", () => {
+    expect(composer).toContain("const pillsCollapsed = sidePanelOpen(state);");
+    // rozumowanie + tryb szybki chowają podpis, dostęp dostaje prop
+    expect(composer.match(/!pillsCollapsed/g) ?? []).toHaveLength(2);
+    expect(composer).toContain("<ComposerAccessPill bot={bot} collapsed={pillsCollapsed} />");
+    expect(composer.match(/composerPillShape\((?:pillsCollapsed|collapsed)\)/g) ?? []).toHaveLength(3);
+    // podpis zwiniętej pigułki musi zostać w dymku i dla czytników
+    expect(composer).toContain('aria-label={polish ? "Poziom rozumowania" : "Reasoning effort"}');
+    expect(composer).toContain('aria-label={polish ? "Tryb szybki" : "Fast mode"}');
+  });
+
+  it("odstęp w rzędzie composera zszedł do 6 px", () => {
+    expect(composer).toContain("flex min-h-12 items-center gap-1.5 rounded-2xl");
+    expect(composer).not.toContain("flex min-h-12 items-center gap-2 rounded-2xl");
   });
 });

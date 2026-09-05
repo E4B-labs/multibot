@@ -153,12 +153,22 @@ body {
 
 ::-webkit-scrollbar {
   width: 8px;
+  /* Bez `height` pasek poziomy zostawał domyślny (15 px na Windowsie), więc
+     tam, gdzie się pojawiał, był prawie dwa razy grubszy od pionowego. */
+  height: 8px;
 }
 ::-webkit-scrollbar-thumb {
   background: #3d3d3d;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-track {
+  background: transparent;
+}
+/* multibot: biały kwadracik w prawym dolnym rogu czatu. Gdy stylujesz
+   `::-webkit-scrollbar`, Chrome przechodzi na własną ścieżkę rysowania paska
+   i narożnikowi (styk paska pionowego z poziomym) daje domyślne BIAŁE tło —
+   na ciemnym motywie widać go jak plamę. Musi być przezroczysty jak koryto. */
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
