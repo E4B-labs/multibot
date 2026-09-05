@@ -170,6 +170,29 @@ function handle(msg: any) {
       }
       const complete = () =>
         result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } });
+      // Synteza teach-a-task jest zwykłą turą tekstową, więc rozpoznajemy ją po
+      // prompcie (`teachSynthesisPrompt` w server/index.ts), nie po trybie — ma
+      // działać dla każdej atrapy, bo w produkcji działa dla każdego drivera.
+      // Odpowiedź celowo ma prozę PRZED blokiem i własny płotek ``` w środku
+      // `instructions`: dokładnie to, na czym łamie się naiwne wycinanie bloku.
+      if (JSON.stringify(msg.params?.prompt ?? "").includes("demonstrated a task in your browser")) {
+        const skill = JSON.stringify({
+          name: "shop-order",
+          description: "Place an order in the shop.",
+          instructions: "1. Open the orders page.\n\n```\nnotes\n```\n\n## Before the first run\n\n## After each run\n",
+        });
+        out({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { text: "Sure — here it is:\n\n```json\n" + skill + "\n```" },
+            },
+          },
+        });
+        return complete();
+      }
       if (mode === "hang") {
         // never resolve the prompt — lets tests exercise interrupt
         setInterval(() => {}, 1_000);

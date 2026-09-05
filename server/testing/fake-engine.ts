@@ -391,27 +391,6 @@ export async function startFakeEngine(mode: FakeEngineMode = "happy"): Promise<F
       }
       res.write(frame("working", { tool: { toolCallId: "call-1", name: "search", status: "running" } }));
 
-      // Synteza teach-a-task przychodzi tu jako ZWYKŁA tura — czyli provider
-      // bota, nie CLI Hermesa. Rozpoznajemy ją po prompcie z `index.ts`
-      // (`teachSynthesisPrompt`) i oddajemy skilla w umówionym kształcie.
-      if (String(body.message ?? "").includes("demonstrated a task in your browser")) {
-        const reply =
-          '```json\n' +
-          JSON.stringify({
-            name: "shop-order",
-            description: "Place an order in the shop.",
-            instructions: "1. Open the orders page.\n2. Start a new order.\n\n## Before the first run\n\n## After each run\n",
-          }) +
-          "\n```";
-        res.write(frame("delta", { text: reply }));
-        (state.history[botId] ??= []).push(
-          { role: "user", content: body.message },
-          { role: "assistant", content: reply },
-        );
-        res.write(frame("done", { reply, session_id: `slafy-${botId}`, finish_reason: "stop" }));
-        return res.end();
-      }
-
       if (state.mode === "approval") {
         // Silnik pyta i STOI — jak zaparkowany wątek tury (server/approvals.py).
         const requestId = state.approvalRequestId;

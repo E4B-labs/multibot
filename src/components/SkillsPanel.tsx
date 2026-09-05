@@ -198,13 +198,19 @@ export function TeachCard({
 
   // Nagrywa silnik (CDP), ale skilla pisze bot swoim providerem — trasa
   // harnessu, nie `/api/engine/.../teach/synthesize`, która wołała CLI Hermesa
-  // i na telefonie kończyła się „No inference provider configured".
-  const synthesize = (steps: string[]) => {
+  // i na telefonie kończyła się „No inference provider configured". Botom
+  // prowadzonym przez silnik harness i tak przekaże żądanie dalej — stąd
+  // `recording_id` jedzie z nami.
+  const synthesize = (recordingId: string, steps: string[]) => {
     setTeach({ phase: "synthesizing" });
     setError(null);
     api(`/api/bots/${botId}/teach/synthesize`, {
       method: "POST",
-      body: JSON.stringify({ steps, ...(name.trim() ? { name: name.trim() } : {}) }),
+      body: JSON.stringify({
+        recording_id: recordingId,
+        steps,
+        ...(name.trim() ? { name: name.trim() } : {}),
+      }),
     })
       .then(({ skill_name }: { skill_name: string }) => {
         setTeach({ phase: "done", skillName: skill_name });
@@ -352,7 +358,7 @@ export function TeachCard({
           />
           <div className="mt-2 flex gap-2">
             <button
-              onClick={() => synthesize(teach.steps)}
+              onClick={() => synthesize(teach.recordingId, teach.steps)}
               disabled={teach.steps.length === 0}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
             >

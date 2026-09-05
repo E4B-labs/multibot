@@ -2242,21 +2242,32 @@ The instructions must contain:
 2. A "Before the first run" section: ask the user multiple-choice (A/B/C) clarifying questions and wait for the answer instead of guessing the task's parameters.
 3. An "After each run" section: critique your own result and fix this skill straight away if a step failed or turned out to be unnecessary.`;
 
-/** First JSON object in a model reply, fenced or bare. `null` when the bot
- * answered in prose — the caller turns that into a 502 with the reply in it,
- * because a silent "nothing happened" is what made the old path unreadable. */
+/** Skill JSON out of a model reply. `null` when the bot answered in prose —
+ * the caller turns that into a 502 carrying the reply, because a silent
+ * "nothing happened" is what made the old path unreadable.
+ *
+ * Kandydatów jest kilka i bierzemy PIERWSZEGO, który się parsuje: bloki ``` w
+ * kolejności (odpowiedź lubi zacząć się od zdania albo od bloku z przykładem),
+ * a na końcu wycinek od pierwszego `{` do ostatniego `}`. Ten ostatni jest tu
+ * kluczowy, nie ozdobny: `instructions` to markdown, więc model potrafi wstawić
+ * w środek własny płotek ``` — leniwe dopasowanie ucina wtedy JSON w połowie,
+ * a wycinek klamrowy łapie całość. */
 function parseSkillDraft(reply: string): { name: string; description: string; instructions: string } | null {
-  const fenced = reply.match(/```(?:json)?\s*([\s\S]*?)```/);
-  const raw = fenced ? fenced[1] : reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1);
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const name = String(parsed?.name ?? "").trim();
-    const instructions = String(parsed?.instructions ?? "").trim();
-    if (!name || !instructions) return null;
-    return { name, description: String(parsed?.description ?? "").trim(), instructions };
-  } catch {
-    return null;
+  const candidates = [...reply.matchAll(/```[a-z]*[ \t]*\r?\n([\s\S]*?)```/gi)].map((hit) => hit[1]);
+  candidates.push(reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1));
+  for (const raw of candidates) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const name = String(parsed?.name ?? "").trim();
+      const instructions = String(parsed?.instructions ?? "").trim();
+      if (name && instructions) {
+        return { name, description: String(parsed?.description ?? "").trim(), instructions };
+      }
+    } catch {
+      /* następny kandydat */
+    }
   }
+  return null;
 }
 
 // ── config hot-reload ─────────────────────────────────────────────────
@@ -4210,18 +4221,53 @@ const server = createServer(async (req, res) => {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const body = await readBody(req);
-      const steps: string[] = Array.isArray(body?.steps)
-        ? body.steps.map((step: unknown) => String(step).trim()).filter(Boolean)
-        : [];
+      // Kroki idą w jeden prompt, a `readBody` puszcza megabajt — stąd sufit na
+      // liczbę i długość. Demonstracja to kilkadziesiąt kliknięć, nie powieść.
+      const steps: string[] = (Array.isArray(body?.steps) ? body.steps : [])
+        .slice(0, 200)
+        .map((step: unknown) => String(step).trim().slice(0, 500))
+        .filter(Boolean);
       if (!steps.length) return json(res, 422, { error: "steps must be a non-empty array" });
       const wanted = typeof body?.name === "string" && body.name.trim() ? body.name.trim() : null;
+      // Kolizję nazwy sprawdzamy PRZED turą: `addSkill` rzuca 409 dopiero po
+      // niej, więc użytkownik tracił kilka minut pracy modelu na literówkę.
+      if (wanted && workspace.skills(bot.id).some((skill) => skill.name.toLowerCase() === wanted.toLowerCase())) {
+        return json(res, 409, { error: "skill already exists" });
+      }
+      // Bot silnika (driver `slafy`) ma mózg po stronie Hermesa: `system` do
+      // silnika nie jedzie (patrz `startTurn`), więc skill z `workspace` nigdy
+      // by do niego nie dotarł. Dla niego zostaje STARA ścieżka — silnik zapisze
+      // SKILL.md, który agent naprawdę ładuje, i tam Hermes providera ma.
+      if (registry.get(bot.modelSelection.instanceId)?.driverKind === "slafy") {
+        const base = await ensureEngine();
+        const upstream = await fetch(
+          `${base}/api/bots/${encodeURIComponent(engineBotIdFor(bot.threadId))}/teach/synthesize`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ recording_id: String(body?.recording_id ?? ""), steps, ...(wanted ? { name: wanted } : {}) }),
+            signal: AbortSignal.timeout(300_000),
+          },
+        );
+        const out = await upstream.json().catch(() => ({}));
+        return json(res, upstream.status, out);
+      }
       // Izolowana nitka jak przy delegacji: prompt i odpowiedź nie zaśmiecają
       // czatu, a `transcript: []` trzyma tę turę z dala od historii wątku.
-      const reply = await askBotAndWait(bot.id, teachSynthesisPrompt(steps, wanted), 0, {
-        threadId: `teach-${bot.id}`,
-        transcript: [],
-        timeoutMs: 240_000,
-      });
+      // `activeCommsDepth` jak w `delegatedPeerTurn` — bez znacznika izolowana
+      // tura mogłaby zacząć łańcuch delegacji od zera.
+      activeCommsDepth.set(bot.id, 1);
+      let reply: string;
+      try {
+        reply = await askBotAndWait(bot.id, teachSynthesisPrompt(steps, wanted), 0, {
+          threadId: `teach-${bot.id}`,
+          transcript: [],
+          timeoutMs: 240_000,
+        });
+      } finally {
+        if ((activeCommsDepth.get(bot.id) ?? 0) <= 1) activeCommsDepth.delete(bot.id);
+        drainQueuedUserMessages(bot.id); // izolowana tura nie opróżnia kolejki sama
+      }
       const draft = parseSkillDraft(reply);
       if (!draft) {
         throw Object.assign(new Error(`the bot did not return a skill: ${reply.slice(0, 300)}`), { status: 502 });
